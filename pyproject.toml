@@ -1,0 +1,17 @@
+[project]
+name = "flp"
+version = "0.1.0"
+description = "Fluent LINQ for Python — flip your iterables"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.168.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
