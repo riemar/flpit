@@ -1,17 +1,35 @@
 [project]
 name = "flp"
-version = "0.1.0"
+version = "0.1.1.dev1"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "hypothesis>=6.168.0",
+    "pyrefly>=1.3.1",
+    "pyright>=1.1.414",
 ]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", "tests"]
+typeCheckingMode = "basic"

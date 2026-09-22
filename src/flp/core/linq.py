@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import builtins
+from collections import UserList
 from functools import wraps
 from itertools import islice
-
-from collections import UserList
 from typing import (
     Any,
     Callable,
@@ -30,9 +29,11 @@ TAccumulate = TypeVar("TAccumulate")
 
 _SENTINEL = object()
 
+
 class EmptySequenceError(ValueError):
     def __init__(self, message="Sequence contains no elements"):
         super().__init__(message)
+
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
     """Catches Python's native empty-sequence ValueError and re-raises LINQ-compliant error."""
@@ -46,10 +47,27 @@ def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
             raise
     return wrapper
 
+
+class _FactoryIterable(Iterable[TItem], Generic[TItem]):
+    """
+    Wraps a generator factory function into a clean Iterable[T].
+    Ensures __iter__ produces a brand-new iterator instance on every call
+    without type-checker warnings or runtime callable-check overhead.
+    """
+    __slots__ = ("_factory",)
+
+    def __init__(self, factory: Callable[[], Iterator[TItem]]) -> None:
+        self._factory = factory
+
+    def __iter__(self) -> Iterator[TItem]:
+        return self._factory()
+
+
 class FlpIt(Iterable[TItem], Generic[TItem]):
     """
     | Fluent Iterable
     Lazy evaluation wrapper around an iterable (matching .NET IEnumerable<T>). No internal caching.
+    Supports multiple passes over queries if the underlying collection is re-iterable.
     """
     __slots__ = ("_iterable",)
 
@@ -65,13 +83,14 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return self  # type: ignore[return-value]
 
     # --- Deferred Execution (Lazy Operations) ---
+
     def append(self, element: TItem) -> FlpIt[TItem]:
         """Appends an element to the end of the sequence (deferred)."""
         def _generator() -> Iterator[TItem]:
             yield from self
             yield element
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def prepend(self, element: TItem) -> FlpIt[TItem]:
         """Prepends an element to the beginning of the sequence (deferred)."""
@@ -79,36 +98,55 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             yield element
             yield from self
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
         """Filters elements based on a predicate."""
-        return FlpIt(item for item in self if predicate(item))
+        def _generator() -> Iterator[TItem]:
+            for item in self:
+                if predicate(item):
+                    yield item
+
+        return typing_cast(FlpIt[TItem], FlpIt(_FactoryIterable(_generator)))
 
     def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         """Projects each element into a new form."""
-        return FlpIt(selector(item) for item in self)
+        def _generator() -> Iterator[TResult]:
+            for item in self:
+                yield selector(item)
+
+        return FlpIt(_FactoryIterable(_generator))
 
     def select_many(
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
         """Flattens sequence projections."""
-
         def _generator() -> Iterator[TResult]:
             for item in self:
                 yield from selector(item)
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
-    def take(self, count: int) -> FlpIt[TItem]:
+    def take(self, count: int) -> "FlpIt[TItem]":
         """Returns a specified number of contiguous elements from the start."""
         if count <= 0:
             return FlpIt(())
-        return FlpIt(islice(self, count))
+
+        def _generator() -> Iterator[TItem]:
+            # 1. We must actively grab the live iterator instance from self
+            upstream_iterator = iter(self)
+            try:
+                yield from islice(upstream_iterator, count)
+            finally:
+                # 2. once islice finishes or gets aborted,
+                # we FORCE the upstream chain to collapse and trigger its cleanup!
+                if hasattr(upstream_iterator, "close"):
+                    upstream_iterator.close()
+
+        return FlpIt(_FactoryIterable(_generator))
 
     def cast(self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Casts elements to a specified type or raises TypeError if cast fails."""
-
         def _generator() -> Iterator[TResult]:
             for item in self:
                 if not isinstance(item, target_type):
@@ -117,21 +155,19 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                     )
                 yield item  # type: ignore[misc]
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def of_type(self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Filters the elements of an Iterable based on a specified type."""
-
         def _generator() -> Iterator[TResult]:
             for item in self:
                 if isinstance(item, target_type):
                     yield item  # type: ignore[misc]
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def distinct(self) -> FlpIt[TItem]:
         """Returns distinct elements from a sequence by using O(1) set lookups."""
-
         def _generator() -> Iterator[TItem]:
             seen: Set[TItem] = set()
             for item in self:
@@ -139,13 +175,12 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                     seen.add(item)
                     yield item
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def distinct_by(
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[TItem]:
-        """Returns distinct elements from a sequence according to a specified key selector function via O(1) set lookups."""
-
+        """Returns distinct elements from a sequence according to a key selector function."""
         def _generator() -> Iterator[TItem]:
             seen: Set[TKey] = set()
             for item in self:
@@ -154,15 +189,24 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                     seen.add(key)
                     yield item
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
+
+    @overload
+    def zip(
+            self,
+            second: Iterable[TOther],
+            result_selector: Callable[[TItem, TOther], TResult],
+    ) -> FlpIt[TResult]: ...
 
     def zip(
             self,
             second: Iterable[TOther],
-            result_selector: Optional[Callable[[TItem, TOther], TResult]] = None,
+            result_selector: Optional[Callable[[TItem, TOther], Any]] = None,
     ) -> FlpIt[Any]:
-        """Applies a specified function to the corresponding elements of two sequences, producing a sequence of the results."""
-
+        """Applies a specified function to corresponding elements of two sequences."""
         def _generator() -> Iterator[Any]:
             for first_item, second_item in zip(self, second):
                 if result_selector is not None:
@@ -170,7 +214,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                 else:
                     yield first_item, second_item
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
         """Splits the elements of a sequence into chunks of size at most size."""
@@ -187,7 +231,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             if current_chunk:
                 yield FlpList(current_chunk)
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def order_by(
             self, key_selector: Callable[[TItem], Any]
@@ -205,7 +249,6 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[Grouping[TKey, TItem]]:
         """Groups elements according to a specified key selector function."""
-
         def _generator() -> Iterator[Grouping[TKey, TItem]]:
             groups: dict[TKey, List[TItem]] = {}
             for item in self:
@@ -214,7 +257,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             for k, v in groups.items():
                 yield Grouping(k, v)
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     def join(
             self,
@@ -224,7 +267,6 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             result_selector: Callable[[TItem, TOther], TResult],
     ) -> FlpIt[TResult]:
         """Correlates elements of two sequences based on matching keys (Hash Join)."""
-
         def _generator() -> Iterator[TResult]:
             lookup: dict[TKey, List[TOther]] = {}
             for inner_item in inner:
@@ -237,7 +279,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                     for inner_item in lookup[key]:
                         yield result_selector(outer_item, inner_item)
 
-        return FlpIt(_generator())
+        return FlpIt(_FactoryIterable(_generator))
 
     # --- Immediate Execution (Materialization & Aggregation) ---
 
@@ -272,28 +314,28 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     def min(self) -> TItem:
         """Returns the minimum value in a sequence."""
         try:
-            return min(self)  # type: ignore[type-var]
+            return builtins.min(self)  # type: ignore[type-var]
         except ValueError:
             raise EmptySequenceError()
 
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
         """Returns the value in a sequence that has the minimum key value."""
         try:
-            return min(self, key=key_selector)
+            return builtins.min(self, key=key_selector)
         except ValueError:
             raise EmptySequenceError()
 
     def max(self) -> TItem:
         """Returns the maximum value in a sequence."""
         try:
-            return max(self)  # type: ignore[type-var]
+            return builtins.max(self)  # type: ignore[type-var]
         except ValueError:
             raise EmptySequenceError()
 
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
         """Returns the value in a sequence that has the maximum key value."""
         try:
-            return max(self, key=key_selector)
+            return builtins.max(self, key=key_selector)
         except ValueError:
             raise EmptySequenceError()
 
@@ -331,13 +373,13 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     ) -> Union[int, float]:
         """Calculates the sum of the sequence, optionally applying a selector."""
         if selector is not None:
-            return sum(selector(x) for x in self._iterable)
-        return sum(self._iterable)
+            return builtins.sum(selector(x) for x in self)
+        return builtins.sum(self)  # type: ignore[arg-type]
 
     def count(self, predicate: Optional[Callable[[TItem], bool]] = None) -> int:
         """Counts elements in the sequence matching an optional predicate."""
         query = self.where(predicate) if predicate else self
-        return sum(1 for _ in query)
+        return builtins.sum(1 for _ in query)
 
     def element_at(self, index: int) -> TItem:
         """Returns the element at a specified index in a sequence."""
@@ -417,7 +459,6 @@ class OrderedIt(FlpIt[TItem]):
         return new_ordered
 
     def __iter__(self) -> Iterator[TItem]:
-        # Deferred evaluation: sorting occurs only upon iteration using multi-pass stable sort
         items = list(self._source)
         for key_selector, descending in reversed(self._comparers):
             items.sort(key=key_selector, reverse=descending)
@@ -426,8 +467,7 @@ class OrderedIt(FlpIt[TItem]):
 
 class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
     """Represents a collection of elements sharing a common key (.NET IGrouping<TKey, TElement>)."""
-
-    __slots__ = ("_key",)
+    __slots__ = ("_key")
 
     def __init__(self, key: TKey, elements: Iterable[TItem]) -> None:
         self._key: TKey = key
@@ -513,10 +553,20 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     ) -> FlpIt[TItem]:
         return FlpIt(self.data).distinct_by(key_selector)
 
+    @overload
+    def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
+
+    @overload
     def zip(
             self,
             second: Iterable[TOther],
-            result_selector: Optional[Callable[[TItem, TOther], TResult]] = None,
+            result_selector: Callable[[TItem, TOther], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def zip(
+            self,
+            second: Iterable[TOther],
+            result_selector: Optional[Callable[[TItem, TOther], Any]] = None,
     ) -> FlpIt[Any]:
         return FlpIt(self.data).zip(second, result_selector)
 
@@ -584,33 +634,45 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
     ) -> Union[int, float]:
         """Calculates the sum of elements, optionally applying a selector."""
-        if selector is not None:
-            return builtins.sum(selector(x) for x in self.data)
-        return builtins.sum(self.data)
+        return FlpIt(self.data).sum(selector)
 
     def average(
             self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
     ) -> float:
         """Calculates the arithmetic mean, optionally applying a selector."""
-        if not self.data:
-            raise EmptySequenceError()
+        return FlpIt(self.data).average(selector)
 
-        if selector is not None:
-            return builtins.sum(selector(x) for x in self.data) / len(self.data)
-        return builtins.sum(self.data) / len(self.data)
+    # --- Overloads for the Type System ---
+    # 1. Native compatibility path (MUST be first): exact value match
+    @overload
+    def count(self, item: TItem) -> int: ...
 
+    # 2. LINQ style path: matching via predicate function
+    @overload
+    def count(self, item: Callable[[TItem], bool]) -> int: ...
+
+    # 3. LINQ style path: no arguments (counts everything)
+    @overload
+    def count(self) -> int: ...
+
+    # --- The Clean Implementation ---
+    # We name the parameter 'item' to perfectly match UserList, but default it to None
     def count(self, item: Any = _SENTINEL) -> int:
+        """Counts elements in the list matching an optional predicate or exact value."""
+        # Scenario C: No argument passed (.count()) -> Return total length
         if item is _SENTINEL:
             return len(self.data)
 
+        # Scenario A: A LINQ predicate function was passed
         if callable(item):
-            predicate = typing_cast(Callable[[TItem], bool], item)
-            return FlpIt(self.data).count(predicate)
+            return FlpIt(self.data).count(item)
 
-        return self.data.count(item)
+        # Scenario B: An exact raw value was passed (.count(4))
+        # Invokes the original parent implementation of UserList to remain 100% compliant
+        return super().count(item)
 
     def element_at(self, index: int) -> TItem:
-        if index < 0:
+        if index < 0 or index >= len(self.data):
             raise IndexError("Index out of range")
         return self.data[index]
 

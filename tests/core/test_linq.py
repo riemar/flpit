@@ -115,8 +115,6 @@ class TestAdd:
         assert list_with_nones.count(None) == 2
 
 
-
-
 def test_count_with_predicates_and_values():
     """Test count functionality with LINQ predicates vs exact value matching."""
     numbers: FlpList[int] = FlpList([1, 2, 3, 4, 5, 6])
@@ -162,7 +160,7 @@ def test_select():
 def test_select_with_custom_type():
 
     data = FlpList([MyCustomType(2, "things"), MyCustomType(3, "stuff")])
-    res = data.select(lambda  x: x.age).to_list()
+    res = data.select(lambda x: x.age).to_list()
 
     assert res == [2, 3]
 
@@ -486,3 +484,33 @@ def test_where_select_parity_with_python_native(data):
     flp_res = list(FlpIt(data).where(lambda x: x % 2 == 0).select(lambda x: x * 2))
     py_res = [x * 2 for x in data if x % 2 == 0]
     assert flp_res == py_res
+
+class TestSourdeExhaustion:
+    @property
+    def exhaustable(self):
+        yield 1
+        yield 2
+        yield 3
+
+    def test_range(self):
+        it = flp.it(self.exhaustable)
+
+        first = it.sum()
+        second = it.sum()
+
+        assert first == 6
+        assert second == 0
+
+    def test_range_native(self):
+        it = self.exhaustable
+
+        first = 0
+        second = 0
+
+        for x in it:
+            first += x
+        for x in it:
+            second += x
+
+        assert first == 6
+        assert second == 0

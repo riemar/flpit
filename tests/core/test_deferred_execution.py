@@ -1,6 +1,6 @@
-import pytest
-from typing import List
+from typing import List, TypeGuard
 # Replace with actual import path
+import flp
 from flp import FlpIt, FlpList
 
 class TestDeferredExecution:
@@ -89,3 +89,131 @@ class TestDeferredExecution:
         res = list(query)
         assert evaluated
         assert res == [1, 2, 3]
+
+
+    def test_mutation_before_materialization(self):
+        data = [1, 2, 3]
+        query = flp.it(data).where(lambda x: x > 1)
+
+        data.append(4)  # Mutating the original data source
+
+        # Strict LINQ behavior dictates this should evaluate the mutated list!
+        assert list(query) == [2, 3, 4]
+
+    def test_the_chained_mutation_trap(self):
+        data = [1, 2, 3]
+
+        # What happens if the chain switches from Lazy to Eager, then back to Lazy?
+        query = (
+            flp.it(data)
+            .where(lambda x: x > 1)      # Lazy (FlpIt)
+            .to_list()                   # Eager Materialization (FlpList) -> Copies data?
+            .where(lambda x: x < 4)      # Lazy again (FlpIt)
+        )
+
+        data.append(4)  # Mutating the root source after an eager step
+
+        # Because 'to_list()' materialized the data mid-chain,
+        # the new element '4' should NOT affect the final output!
+        assert list(query) == [2, 3]
+
+
+    def test_multiple_materialization_side_effects(self):
+        data = [1, 2, 3]
+        query = flp.it(data).where(lambda x: x > 1)
+
+        # First materialization
+        res1 = query.to_list()
+        assert list(res1) == [2, 3]
+
+        # Second materialization of the EXACT same query
+        res2 = query.to_list()
+        # If the internal state or generator isn't safely re-instantiated,
+        # this will return an empty list [].
+        assert list(res2) == [2, 3]
+
+    def test_infinite_generator_handling(self):
+        import itertools
+
+        # An infinite generator: 1, 2, 3, 4, 5... infinitely
+        infinite_counter = itertools.count(1)
+
+        # If flp.it() or .where() triggers early evaluation, the runtime hangs/freezes
+        query = flp.it(infinite_counter).where(lambda x: x % 2 == 0).take(3)
+
+        # It must only evaluate up to the 3rd matching element right here
+        assert list(query) == [2, 4, 6]
+
+    def test_generator_cleanup_on_early_termination(self):
+        cleanup_triggered = False
+
+        def tracking_generator():
+            nonlocal cleanup_triggered
+            try:
+                yield 1
+                yield 2
+                yield 3
+            finally:
+                # If the chain stops early, Python's GC forces this to run
+                cleanup_triggered = True
+
+        # Intentionally only materialize a subset of a lazy pipeline
+        query = flp.it(tracking_generator()).take(1)
+        result = list(query)
+
+        assert result == [1]
+        # CRITICAL: Verify your factory safely allows the underlying generator
+        # to close out and trigger its cleanup logic without swallowing exceptions
+        assert cleanup_triggered is True
+
+
+    def test_concurrent_evaluation_isolation(self):
+        import threading
+        shared_data = [1, 2, 3]
+        query = flp.it(shared_data).where(lambda x: x > 1)
+
+        results_thread_1 = []
+        results_thread_2 = []
+
+        t1 = threading.Thread(target=lambda: results_thread_1.extend(list(query)))
+        t2 = threading.Thread(target=lambda: results_thread_2.extend(list(query)))
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # If the internal factory shares a mutable iterator state,
+        # one thread will consume the elements, leaving the other thread empty!
+        assert results_thread_1 == [2, 3]
+        assert results_thread_2 == [2, 3]
+
+    def test_empty_sequence_terminal_guards(self):
+        empty_query = flp.it([]).where(lambda x: x > 1)
+
+        # Assure that your terminal guards raise clear, predictable errors
+        # or follow .NET defaults (like returning None/raising ValueError)
+        try:
+            empty_query.min()
+            assert False, "Should have raised an empty sequence exception"
+        except Exception as e:
+            # Assert your custom guard behavior handles the empty case safely
+            assert isinstance(e, ValueError) or "empty" in str(e).lower()
+
+
+
+
+
+    def test_type_narrowing_inference(self):
+        from typing import Optional
+        def is_not_none(x: Optional[str]) -> TypeGuard[str]:
+            return x is not None
+
+        data: list[Optional[str]] = ["target", None, "match"]
+        query = flp.it(data).where(is_not_none)
+
+        # Check your LSP insight inside this lambda!
+        # Does 'x' show up as 'str' or still 'str | None'?
+        final_query = query.select(lambda x: x.upper())
+
+        assert list(final_query) == ["TARGET", "MATCH"]
