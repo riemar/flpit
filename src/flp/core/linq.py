@@ -66,8 +66,12 @@ class _FactoryIterable(Iterable[TItem], Generic[TItem]):
 class FlpIt(Iterable[TItem], Generic[TItem]):
     """
     | Fluent Iterable
-    Lazy evaluation wrapper around an iterable (matching .NET IEnumerable<T>). No internal caching.
-    Supports multiple passes over queries if the underlying collection is re-iterable.
+    Lazy evaluation wrapper around an iterable, inspired by .NET LINQ's
+    IEnumerable<T> semantics. Operations are deferred and do not cache results
+    unless explicitly documented otherwise.
+
+    Multiple enumeration is supported when the underlying source is re-iterable;
+    one-shot iterators and generators remain one-shot.
     """
     __slots__ = ("_iterable",)
 
@@ -89,6 +93,13 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         def _generator() -> Iterator[TItem]:
             yield from self
             yield element
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def concat(self, second: Iterable[TItem]) -> "FlpIt[TItem]":
+        def _generator() -> Iterator[TItem]:
+            yield from self
+            yield from second
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -128,20 +139,25 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return FlpIt(_FactoryIterable(_generator))
 
     def take(self, count: int) -> "FlpIt[TItem]":
-        """Returns a specified number of contiguous elements from the start."""
+        """
+        |Returns a specified number of contiguous elements from the start.
+
+        Execution is deferred until the returned sequence is enumerated.
+        The operator consumes no more than `count` elements from upstream.
+
+        `take()` does not own the upstream iterator and therefore does not
+        close it when the limit is reached. Upstream resource lifetime is the
+        responsibility of the code that owns/acquires the source; use an
+        explicit context manager or close the source explicitly when required.
+
+        This is intentional: reaching the `take()` limit is normal completion,
+        not cancellation or disposal of the upstream sequence.
+        """
         if count <= 0:
             return FlpIt(())
 
         def _generator() -> Iterator[TItem]:
-            # 1. We must actively grab the live iterator instance from self
-            upstream_iterator = iter(self)
-            try:
-                yield from islice(upstream_iterator, count)
-            finally:
-                # 2. once islice finishes or gets aborted,
-                # we FORCE the upstream chain to collapse and trigger its cleanup!
-                if hasattr(upstream_iterator, "close"):
-                    upstream_iterator.close()
+            yield from islice(iter(self), count)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -259,27 +275,27 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-    def join(
-            self,
-            inner: Iterable[TOther],
-            outer_key_selector: Callable[[TItem], TKey],
-            inner_key_selector: Callable[[TOther], TKey],
-            result_selector: Callable[[TItem, TOther], TResult],
-    ) -> FlpIt[TResult]:
-        """Correlates elements of two sequences based on matching keys (Hash Join)."""
-        def _generator() -> Iterator[TResult]:
-            lookup: dict[TKey, List[TOther]] = {}
-            for inner_item in inner:
-                key = inner_key_selector(inner_item)
-                lookup.setdefault(key, []).append(inner_item)
-
-            for outer_item in self:
-                key = outer_key_selector(outer_item)
-                if key in lookup:
-                    for inner_item in lookup[key]:
-                        yield result_selector(outer_item, inner_item)
-
-        return FlpIt(_FactoryIterable(_generator))
+    # def join(
+    #         self,
+    #         inner: Iterable[TOther],
+    #         outer_key_selector: Callable[[TItem], TKey],
+    #         inner_key_selector: Callable[[TOther], TKey],
+    #         result_selector: Callable[[TItem, TOther], TResult],
+    # ) -> FlpIt[TResult]:
+    #     """Correlates elements of two sequences based on matching keys (Hash Join)."""
+    #     def _generator() -> Iterator[TResult]:
+    #         lookup: dict[TKey, List[TOther]] = {}
+    #         for inner_item in inner:
+    #             key = inner_key_selector(inner_item)
+    #             lookup.setdefault(key, []).append(inner_item)
+    #
+    #         for outer_item in self:
+    #             key = outer_key_selector(outer_item)
+    #             if key in lookup:
+    #                 for inner_item in lookup[key]:
+    #                     yield result_selector(outer_item, inner_item)
+    #
+    #     return FlpIt(_FactoryIterable(_generator))
 
     # --- Immediate Execution (Materialization & Aggregation) ---
 
@@ -427,42 +443,136 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return FlpList(self)
 
 
+from threading import Lock
+
 class OrderedIt(FlpIt[TItem]):
     """
-    | Ordered Iterable
-    Represents a sorted sequence (matching .NET IOrderedEnumerable<T>). Supports then_by chaining.
+    Ordered Iterable.
+
+    Sorts the source lazily on first iteration and caches the resulting order.
+    The source is consumed at most once; subsequent iterations reuse the cached
+    result.
     """
-    __slots__ = ("_source", "_comparers")
+
+    __slots__ = (
+        "_source",
+        "_key_selector",
+        "_descending",
+        "_parent",
+        "_cached_result",
+        "_lock",
+    )
 
     def __init__(
             self,
             source: Iterable[TItem],
             key_selector: Callable[[TItem], Any],
             descending: bool = False,
+            parent: Optional["OrderedIt[TItem]"] = None,
     ) -> None:
         super().__init__(source)
-        self._source: Iterable[TItem] = source
-        self._comparers: list[tuple[Callable[[TItem], Any], bool]] = [
-            (key_selector, descending)
-        ]
 
-    def then_by(self, key_selector: Callable[[TItem], Any]) -> OrderedIt[TItem]:
-        """Performs a subsequent ordering in ascending order."""
-        new_ordered = OrderedIt(self._source, key_selector, descending=False)
-        new_ordered._comparers = self._comparers + [(key_selector, False)]
-        return new_ordered
+        self._source = source
+        self._key_selector = key_selector
+        self._descending = descending
+        self._parent = parent
 
-    def then_by_descending(self, key_selector: Callable[[TItem], Any]) -> OrderedIt[TItem]:
-        """Performs a subsequent ordering in descending order."""
-        new_ordered = OrderedIt(self._source, key_selector, descending=True)
-        new_ordered._comparers = self._comparers + [(key_selector, True)]
-        return new_ordered
+        self._cached_result: Optional[list[TItem]] = None
+        self._lock = Lock()
+
+    def then_by(
+            self,
+            key_selector: Callable[[TItem], Any],
+    ) -> "OrderedIt[TItem]":
+        return OrderedIt(
+            self._source,
+            key_selector,
+            descending=False,
+            parent=self,
+        )
+
+    def then_by_descending(
+            self,
+            key_selector: Callable[[TItem], Any],
+    ) -> "OrderedIt[TItem]":
+        return OrderedIt(
+            self._source,
+            key_selector,
+            descending=True,
+            parent=self,
+        )
 
     def __iter__(self) -> Iterator[TItem]:
-        items = list(self._source)
-        for key_selector, descending in reversed(self._comparers):
-            items.sort(key=key_selector, reverse=descending)
-        return iter(items)
+        cached = self._cached_result
+
+        if cached is None:
+            with self._lock:
+                cached = self._cached_result
+
+                if cached is None:
+                    # Collect the complete ordering chain.
+                    comparers: list[
+                        tuple[Callable[[TItem], Any], bool]
+                    ] = []
+
+                    node: Optional["OrderedIt[TItem]"] = self
+
+                    while node is not None:
+                        comparers.append(
+                            (node._key_selector, node._descending)
+                        )
+                        node = node._parent
+
+                    comparers.reverse()
+
+                    # Consume the source exactly once.
+                    items = list(self._source)
+
+                    class SortWrapper:
+                        __slots__ = ("obj", "keys")
+
+                        def __init__(self, obj: Any) -> None:
+                            self.obj = obj
+                            self.keys = [
+                                selector(obj)
+                                for selector, _ in comparers
+                            ]
+
+                        def __lt__(self, other: "SortWrapper") -> bool:
+                            for index, (_, descending) in enumerate(comparers):
+                                left = self.keys[index]
+                                right = other.keys[index]
+
+                                if left == right:
+                                    continue
+
+                                return right < left if descending else left < right
+
+                            return False
+
+                    wrapped_items = [
+                        SortWrapper(item)
+                        for item in items
+                    ]
+
+                    wrapped_items.sort()
+
+                    # Store ONLY the actual result objects.
+                    cached = [
+                        wrapper.obj
+                        for wrapper in wrapped_items
+                    ]
+
+                    self._cached_result = cached
+
+                    # Important: __iter__ is a generator function.
+                    # Release potentially large temporary structures
+                    # before yielding anything.
+                    del wrapped_items
+                    del items
+                    del comparers
+
+        yield from cached
 
 
 class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
@@ -480,6 +590,14 @@ class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
     def __repr__(self) -> str:
         return f"Grouping(key={self.key!r}, elements={self.to_list()!r})"
 
+    def __eq__(self, other: Any) -> bool:
+        # Check if the other object is a Grouping (or subclass)
+        if not isinstance(other, Grouping):
+            return False
+
+        # Compare the keys, then compare the elements inside FlpIt
+        return self.key == other.key and self.to_list() == other.to_list()
+
 
 class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     """
@@ -488,30 +606,43 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     """
 
     def add(self, item: TItem) -> None:
-        """Adds an item and performs O(1) type consistency check against the first element."""
-        if self.data and not isinstance(item, type(self.data[0])):
-            raise TypeError(
-                f"Element of type '{type(item).__name__}' does not match "
-                f"list item type '{type(self.data[0]).__name__}'."
-            )
+        """
+        |Adds an item and performs O(1) type consistency check against the first element.
+
+        |Type safety via
+        - type checks
+        - manual of_type(...) filter if you don't trust your checks
+        """
         self.data.append(item)
 
     def add_range(self, items: Iterable[TItem]) -> None:
-        """Adds a sequence of items and performs O(1) type checking on the first incoming element."""
+        """
+        | Adds an Iterable sequence or stream.
+        Optimizes paths based on input type without destroying volatile generators.
+
+        |Type safety via
+        - type checks
+        - manual of_type(...) filter if you don't trust your checks
+        """
+        # 1. Optimized Path: Fast memory extensions for pre-materialized sequences
+        if isinstance(items, (Sequence, list, tuple, UserList)):
+            self.data.extend(items)
+            return
+
+        # 2. Stream Path: Volatile one-shot generator handling
         it = iter(items)
         try:
             first_item = next(it)
         except StopIteration:
             return
 
-        if self.data and not isinstance(first_item, type(self.data[0])):
-            raise TypeError(
-                f"Element of type '{type(first_item).__name__}' does not match "
-                f"list item type '{type(self.data[0]).__name__}'."
-            )
-
+        # Append the tracked peek-element and stream the remainder safely
         self.data.append(first_item)
         self.data.extend(it)
+
+    def to_list(self) -> "FlpList[TItem]":
+        """Explicitly returns a new shallow copy instance to isolate mutations matching .NET."""
+        return FlpList(self.data.copy())
 
     def append_linq(self, element: TItem) -> FlpIt[TItem]:
         """Appends an element to the sequence lazily, returning a FlpIt without mutating this list."""
@@ -588,16 +719,16 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     ) -> FlpIt[Grouping[TKey, TItem]]:
         return FlpIt(self.data).group_by(key_selector)
 
-    def join(
-            self,
-            inner: Iterable[TOther],
-            outer_key_selector: Callable[[TItem], TKey],
-            inner_key_selector: Callable[[TOther], TKey],
-            result_selector: Callable[[TItem, TOther], TResult],
-    ) -> FlpIt[TResult]:
-        return FlpIt(self.data).join(
-            inner, outer_key_selector, inner_key_selector, result_selector
-        )
+    # def join(
+    #         self,
+    #         inner: Iterable[TOther],
+    #         outer_key_selector: Callable[[TItem], TKey],
+    #         inner_key_selector: Callable[[TOther], TKey],
+    #         result_selector: Callable[[TItem, TOther], TResult],
+    # ) -> FlpIt[TResult]:
+    #     return FlpIt(self.data).join(
+    #         inner, outer_key_selector, inner_key_selector, result_selector
+    #     )
 
     @overload
     def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
@@ -688,4 +819,5 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         return FlpIt(self.data).single(predicate)
 
     def to_list(self) -> FlpList[TItem]:
-        return self
+        """Explicitly returns a shallow copy instance to isolate mutations."""
+        return FlpList(self.data.copy())

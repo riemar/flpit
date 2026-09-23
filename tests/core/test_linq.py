@@ -1,8 +1,7 @@
-import gc
 from dataclasses import dataclass
 
 import pytest
-from typing import Callable, List
+from typing import Callable
 
 import flp
 from flp import FlpIt, FlpList
@@ -12,36 +11,19 @@ class MyCustomType:
     age: int = 0
     name: str = ""
 
+class Animal:
+    """Base class for our polymorphism hierarchy."""
+    pass
+
+class Dog(Animal):
+    """Subclass inheriting from Animal."""
+    pass
+
+class Cat():
+    """Another valid subclass inheriting from Animal."""
+    pass
 
 class TestAdd:
-    def test_add_type_safety(self):
-        """Test O(1) type checking behavior when adding single items."""
-        str_list: FlpList[str] = FlpList(["first", "second"])
-
-        # Valid addition
-        str_list.add("third")
-        assert len(str_list) == 3
-        assert str_list[-1] == "third"
-
-        # Invalid addition raises TypeError
-        with pytest.raises(TypeError, match="does not match list item type"):
-            str_list.add(123)  # type: ignore[arg-type]
-
-
-    def test_add_range_type_safety(self):
-        """Test O(1) type checking on the first item when adding a sequence."""
-        int_list: FlpList[int] = FlpList([10, 20])
-
-        # Valid range addition
-        int_list.add_range([30, 40, 50])
-        assert len(int_list) == 5
-        assert int_list[2:] == [30, 40, 50]
-
-        # Invalid range addition (first element breaks type consistency)
-        with pytest.raises(TypeError, match="does not match list item type"):
-            int_list.add_range(["invalid", 60, 70])  # type: ignore[arg-type]
-
-
     def test_linq_query_append_and_prepend_deferred_evaluation(self):
         """Test that append and prepend on FlpIt yield elements lazily without mutating the source."""
         original_data = [2, 3, 4]
@@ -103,6 +85,51 @@ class TestAdd:
 
         assert appended.data == [100]
         assert prepended.data == [200]
+
+    def test_concat_combines_sequences_in_order(self):
+        result = FlpIt([1, 2, 3]).concat([4, 5, 6])
+
+        assert result.to_list() == [1, 2, 3, 4, 5, 6]
+
+    def test_concat_empty_first(self):
+        result = FlpIt([]).concat([1, 2, 3])
+
+        assert result.to_list() == [1, 2, 3]
+
+
+    def test_concat_empty_second(self):
+        result = FlpIt([1, 2, 3]).concat([])
+
+        assert result.to_list() == [1, 2, 3]
+
+
+    def test_concat_both_empty(self):
+        result = FlpIt([]).concat([])
+
+        assert result.to_list() == []
+
+
+    def test_concat_preserves_order_and_duplicates(self):
+        result = FlpIt([1, 2, 2]).concat([2, 3, 1])
+
+        assert result.to_list() == [1, 2, 2, 2, 3, 1]
+
+
+    def test_concat_is_lazy(self):
+        consumed = []
+
+        def source():
+            consumed.append("first")
+            yield 1
+            consumed.append("second")
+            yield 2
+
+        query = FlpIt(source()).concat([3, 4])
+
+        assert consumed == []
+
+        assert query.first() == 1
+        assert consumed == ["first"]
 
     def test_count_with_none_and_sentinel(self):
         """Test that count differentiates between no arguments and explicitly passing None."""
@@ -179,6 +206,37 @@ def test_take():
     assert data.take(10).to_list() == [1, 2, 3, 4, 5]
 
 
+def test_take_does_not_consume_upstream_beyond_limit():
+    def tracking_stream():
+        yield 10
+        yield 20
+        yield 30
+
+    source = tracking_stream()
+
+    result = FlpIt(source).take(1).to_list()
+
+    assert result == [10]
+    assert list(source) == [20, 30]
+
+
+def test_take_is_deferred():
+    consumed = []
+
+    def source():
+        consumed.append("started")
+        yield 1
+        consumed.append("second")
+        yield 2
+
+    query = FlpIt(source()).take(1)
+
+    assert consumed == []
+
+    assert query.to_list() == [1]
+    assert consumed == ["started"]
+
+
 def test_cast():
     data = FlpList([1, 2, 3])
     assert data.cast(int).to_list() == [1, 2, 3]
@@ -199,7 +257,7 @@ def test_group_by():
     assert groups[1].to_list() == ["banana", "blueberry"]
     assert repr(groups[0]) == "Grouping(key='a', elements=['apple', 'apricot'])"
 
-
+@pytest.mark.skip(reason="join temporarily removed")
 def test_join():
     outer = FlpList([1, 2, 3])
     inner = [("A", 1), ("B", 2), ("C", 2)]

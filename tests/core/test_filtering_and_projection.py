@@ -34,7 +34,7 @@ class TestFilteringAndProjection:
         assert list(query) == ["apple", "banana", "cherry"]
 
     def test_of_type_filters_by_class(self):
-        mixed: List[Union[int, str, float]] = [1, "two", 3.0, "four", 5]
+        mixed: list[Union[int, str, float]] = [1, "two", 3.0, "four", 5]
         query = FlpIt(mixed).of_type(str)
         assert list(query) == ["two", "four"]
 

@@ -2,14 +2,14 @@
 
 > **Fluent LINQ for Python – flip your iterables**
 
-`flp` brings .NET's LINQ fluent API to standard Python iterables with full static typing.
+`flp` brings a LINQ-inspired fluent API to standard Python iterables with full static typing.
 
 ## ⚡ Key Features
 
-* **⚡ Lazy Evaluation (`FlpIt`):** Deferred evaluation via pure Python generator expressions.
-* **📦 Eager Container (`FlpList`):** Persisted state backed by `collections.UserList`.
+* **⚡ Lazy Evaluation (`FlpIt`):** Deferred execution using Python iterators and generators.
+* **📦 Materialized Container (`FlpList`):** Eager, mutable container backed by `collections.UserList`.
 * **🔹 Static-First Typing:** Built for full `mypy` and `pyright` inference without plugins.
-* **🟢 O(1) Boundary Validation:** Boundary checks rely on O(1) sampling instead of O(N) scans.
+* **🔄 No Implicit Caching:** Query results are not cached unless explicitly documented, such as `order_by`.
 
 ## ⚙️ Installation
 
