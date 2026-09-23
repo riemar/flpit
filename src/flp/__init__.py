@@ -2,6 +2,8 @@
 Fluent LINQ for Python — flip your iterables.
 """
 from __future__ import annotations
+from importlib.metadata import version
+__version__ = version("flpit")
 
 import builtins
 from typing import Iterable as _Iterable, TypeVar
@@ -27,9 +29,6 @@ def repeat(element: TItem, count: int) -> FlpIt[TItem]:
     """Generates a lazy sequence that contains one repeated value."""
     return FlpIt(element for _ in builtins.range(count))
 
-Iterable = it
-List = lst
-
 __all__ = [
     "FlpIt",
     "OrderedIt",
@@ -37,8 +36,6 @@ __all__ = [
     "FlpList",
     "it",
     "lst",
-    "Iterable",
-    "List",
     "range",
     "repeat",
 ]

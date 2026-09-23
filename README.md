@@ -14,16 +14,17 @@
 ## ⚙️ Installation
 
 ```bash
-uv add flp
+uv add flpit
 ```
 
 ## 💡 Quick Start
 
 ```python
-from flp import FlpList, FlpIt
+import flp
+from flp import FlpIt, FlpList
 
-# Eager collection
-data = FlpList([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+# Deferred iterable via shorthand
+data: FlpIt[int] = flp.it([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 
 # Deferred / lazy pipeline
 query: FlpIt[int] = (
@@ -32,8 +33,11 @@ query: FlpIt[int] = (
     .select(lambda x: x * 10)
 )
 
-# Materialization happens explicitly
+# Materialize query results explicitly
 result: FlpList[int] = query.to_list()  # [20, 40, 60, 80, 100]
+
+# Or start directly with an eager container
+eager_list: FlpList[int] = flp.lst([1, 2, 3, 4])
 ```
 
 ## 📜 License
