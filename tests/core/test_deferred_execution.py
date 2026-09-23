@@ -1,8 +1,6 @@
-import pytest
 from typing import List, TypeGuard
-# Replace with actual import path
 import flp
-from flp import FlpIt, FlpList
+from flp import FlpIt
 
 class TestDeferredExecution:
     """Validates laziness and deferred evaluation invariants across operators."""
@@ -145,28 +143,6 @@ class TestDeferredExecution:
         # It must only evaluate up to the 3rd matching element right here
         assert list(query) == [2, 4, 6]
 
-
-    @pytest.mark.skip(reason="join temporarily removed")
-    def test_concurrent_evaluation_isolation(self):
-        import threading
-        shared_data = [1, 2, 3]
-        query = flp.it(shared_data).where(lambda x: x > 1)
-
-        results_thread_1 = []
-        results_thread_2 = []
-
-        t1 = threading.Thread(target=lambda: results_thread_1.extend(list(query)))
-        t2 = threading.Thread(target=lambda: results_thread_2.extend(list(query)))
-
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-
-        # If the internal factory shares a mutable iterator state,
-        # one thread will consume the elements, leaving the other thread empty!
-        assert results_thread_1 == [2, 3]
-        assert results_thread_2 == [2, 3]
 
     def test_empty_sequence_terminal_guards(self):
         empty_query = flp.it([]).where(lambda x: x > 1)

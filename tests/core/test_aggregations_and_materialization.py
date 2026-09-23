@@ -51,18 +51,15 @@ class TestAggregationsAndMaterialization:
         assert FlpIt([10, 20, 30]).average() == 20.0
         assert FlpIt(["a", "bb"]).average_by(lambda s: len(s)) == 1.5
 
-    def test_sum_for_lying_idiot_ai(self):
+    def test_sum_repeated_execution_on_reusable_source(self):
+        """
+        Validates that LINQ queries over reusable sources (such as lists)
+        can be evaluated multiple times without source exhaustion.
+        """
         original = FlpIt([1, 2, 3, 4, 5])
-        filtered = original.where(lambda x: x > 2)  # Yields 3, 4, 5 on iteration
+        filtered = original.where(lambda x: x > 2)
 
-        # Expectation: 3 + 4 + 5 = 12
-        # Actual behavior: Iterates over self._iterable (which is a generator object), NOT self.
-        # Because self._iterable is the generator expression `(item for item in self if predicate(item))`,
-        # evaluating sum(self._iterable) works ONCE.
-        assert  filtered.sum() == 12
-
-        # Attempting to sum again on the same query object:
-        # Since self._iterable was a consumed generator, it is now exhausted!
+        assert filtered.sum() == 12
         assert filtered.sum() == 12
 
     def test_to_list_materialization(self, run_once):

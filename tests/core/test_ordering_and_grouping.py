@@ -51,23 +51,6 @@ class TestOrderingAndGrouping:
         assert g2.key == "b"
         assert list(g2) == ["banana", "bear"]
 
-    @pytest.mark.skip(reason="join temporarily removed")
-    def test_hash_join_execution(self):
-        outer = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        inner = [{"owner_id": 1, "item": "Book"}, {"owner_id": 1, "item": "Pen"}, {"owner_id": 2, "item": "Car"}]
-
-        joined = FlpIt(outer).join(
-            inner=inner,
-            outer_key_selector=lambda o: o["id"],
-            inner_key_selector=lambda i: i["owner_id"],
-            result_selector=lambda o, i: (o["name"], i["item"])
-        )
-
-        result = list(joined)
-        assert len(result) == 3
-        assert ("Alice", "Book") in result
-        assert ("Alice", "Pen") in result
-        assert ("Bob", "Car") in result
 
     def test_group_by_lazy_then_count(self):
         """

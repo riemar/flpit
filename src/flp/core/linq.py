@@ -275,29 +275,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-    # def join(
-    #         self,
-    #         inner: Iterable[TOther],
-    #         outer_key_selector: Callable[[TItem], TKey],
-    #         inner_key_selector: Callable[[TOther], TKey],
-    #         result_selector: Callable[[TItem, TOther], TResult],
-    # ) -> FlpIt[TResult]:
-    #     """Correlates elements of two sequences based on matching keys (Hash Join)."""
-    #     def _generator() -> Iterator[TResult]:
-    #         lookup: dict[TKey, List[TOther]] = {}
-    #         for inner_item in inner:
-    #             key = inner_key_selector(inner_item)
-    #             lookup.setdefault(key, []).append(inner_item)
-    #
-    #         for outer_item in self:
-    #             key = outer_key_selector(outer_item)
-    #             if key in lookup:
-    #                 for inner_item in lookup[key]:
-    #                     yield result_selector(outer_item, inner_item)
-    #
-    #     return FlpIt(_FactoryIterable(_generator))
-
-    # --- Immediate Execution (Materialization & Aggregation) ---
+     # --- Immediate Execution (Materialization & Aggregation) ---
 
     @overload
     def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
@@ -718,17 +696,6 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[Grouping[TKey, TItem]]:
         return FlpIt(self.data).group_by(key_selector)
-
-    # def join(
-    #         self,
-    #         inner: Iterable[TOther],
-    #         outer_key_selector: Callable[[TItem], TKey],
-    #         inner_key_selector: Callable[[TOther], TKey],
-    #         result_selector: Callable[[TItem, TOther], TResult],
-    # ) -> FlpIt[TResult]:
-    #     return FlpIt(self.data).join(
-    #         inner, outer_key_selector, inner_key_selector, result_selector
-    #     )
 
     @overload
     def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...

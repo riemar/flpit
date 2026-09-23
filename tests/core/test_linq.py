@@ -257,20 +257,6 @@ def test_group_by():
     assert groups[1].to_list() == ["banana", "blueberry"]
     assert repr(groups[0]) == "Grouping(key='a', elements=['apple', 'apricot'])"
 
-@pytest.mark.skip(reason="join temporarily removed")
-def test_join():
-    outer = FlpList([1, 2, 3])
-    inner = [("A", 1), ("B", 2), ("C", 2)]
-
-    res = outer.join(
-        inner,
-        outer_key_selector=lambda x: x,
-        inner_key_selector=lambda y: y[1],
-        result_selector=lambda x, y: f"{x}:{y[0]}"
-    ).to_list()
-
-    assert res == ["1:A", "2:B", "2:C"]
-
 
 def test_count():
     data = FlpList([1, 2, 3, 4, 5])
