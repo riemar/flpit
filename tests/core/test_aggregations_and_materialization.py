@@ -1,3 +1,6 @@
+from flp.core.linq import MultipleElementsError
+from flp.core.linq import EmptySequenceError
+from flp.core.linq import MultipleMatchesError
 import pytest
 from flp import FlpIt, FlpList
 
@@ -15,18 +18,18 @@ class TestAggregationsAndMaterialization:
 
     def test_first_or_default(self):
         assert FlpIt([]).first_or_default(default=-1) == -1
-        assert FlpIt([1, 2, 3]).first_or_default(default=-1, predicate=lambda x: x > 10) == -1
-        assert FlpIt([1, 2, 3]).first_or_default(default=-1, predicate=lambda x: x == 2) == 2
+        assert FlpIt([1, 2, 3]).first_or_default(-1, lambda x: x > 10) == -1
+        assert FlpIt([1, 2, 3]).first_or_default(-1, lambda x: x == 2) == 2
 
     def test_single_contract(self):
         assert FlpIt([42]).single() == 42
         
         # Throws when sequence has more than one matching element
-        with pytest.raises(ValueError):
+        with pytest.raises(MultipleElementsError):
             FlpIt([1, 2]).single()
 
         # Throws when sequence is empty
-        with pytest.raises(ValueError):
+        with pytest.raises(EmptySequenceError):
             FlpIt([]).single()
 
     def test_aggregate_with_and_without_seed(self):

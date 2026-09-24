@@ -1,3 +1,4 @@
+import flp
 from typing import Iterable, Any, Generic, TypeVar, Iterator
 
 import pytest
@@ -9,6 +10,15 @@ def pytest_configure(config):
     config.option.log_cli = True
     config.option.log_cli_level = "INFO"
 
+@pytest.fixture(
+    params=[flp.it, flp.lst],
+    ids=["FlpIt", "FlpList"],
+)
+def flp_type(request):
+    return request.param
+
+
+##############################################
 
 class RunOnceEnumerable(Generic[T], Iterable[T]):
     """Wrapper that raises RuntimeError if __iter__ is called more than once."""

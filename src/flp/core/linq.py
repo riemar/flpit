@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import builtins
 from collections import UserList
 from functools import wraps
@@ -28,10 +30,23 @@ TOther = TypeVar("TOther")
 TAccumulate = TypeVar("TAccumulate")
 
 _SENTINEL = object()
+_MISSING = object()
 
 
 class EmptySequenceError(ValueError):
     def __init__(self, message="Sequence contains no elements"):
+        super().__init__(message)
+
+class NoMatchError(ValueError):
+    def __init__(self, message="Sequence contains no matching elements"):
+        super().__init__(message)
+
+class MultipleMatchesError(ValueError):
+    def __init__(self, message="Sequence contains more than one matching element"):
+        super().__init__(message)
+
+class MultipleElementsError(ValueError):
+    def __init__(self, message="Sequence contains more than one element"):
         super().__init__(message)
 
 
@@ -95,6 +110,49 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             yield element
 
         return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def any(self) -> bool: ...
+
+    @overload
+    def any(self, predicate: Callable[[TItem], bool]) -> bool: ...
+
+    def any(
+            self,
+            predicate: Optional[Callable[[TItem], bool]] = None,
+    ) -> bool:
+        """
+        Determines whether the sequence contains any elements,
+        or whether any element satisfies the predicate.
+
+        Mirrors Enumerable.Any:
+            Any()
+            Any(predicate)
+
+        Evaluation stops as soon as the result is known.
+        """
+        if predicate is not None:
+            return builtins.any(map(predicate, self))
+
+        iterator = iter(self)
+        try:
+            next(iterator)
+        except StopIteration:
+            return False
+
+        return True
+
+
+    def all(self, predicate: Callable[[TItem], bool]) -> bool:
+        """
+        Determines whether all elements satisfy the predicate.
+
+        Mirrors Enumerable.All.
+
+        Returns True for an empty sequence.
+        Evaluation stops at the first element that fails the predicate.
+        """
+        return builtins.all(map(predicate, self))
 
     def concat(self, second: Iterable[TItem]) -> "FlpIt[TItem]":
         def _generator() -> Iterator[TItem]:
@@ -305,33 +363,61 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                 accumulator = func(accumulator, item)
         return accumulator
 
+    @overload
+    def last(self) -> TItem: ...
+
+    @overload
+    def last(self, predicate: Callable[[TItem], bool]) -> TItem: ...
+
+    def last(
+            self,
+            predicate: Optional[Callable[[TItem], bool]] = None,
+    ) -> TItem:
+        """
+        Returns the last element of the sequence, or the last element
+        satisfying the predicate.
+
+        Mirrors Enumerable.Last:
+            Last()
+            Last(predicate)
+
+        Raises EmptySequenceError if the sequence is empty or if no
+        element satisfies the predicate.
+        """
+        last_item: TItem | object = _SENTINEL
+
+        for item in self:
+            if predicate is None or predicate(item):
+                last_item = item
+
+        if last_item is _SENTINEL:
+            raise EmptySequenceError() if predicate is None else NoMatchError()
+
+        return cast(TItem, last_item)
+
+    def _extreme(self, func, **kwargs) -> TItem:
+        result = func(self, default=_MISSING, **kwargs)
+
+        if result is _MISSING:
+            raise EmptySequenceError()
+
+        return cast(TItem, result)
+
     def min(self) -> TItem:
         """Returns the minimum value in a sequence."""
-        try:
-            return builtins.min(self)  # type: ignore[type-var]
-        except ValueError:
-            raise EmptySequenceError()
+        return self._extreme(builtins.min)
 
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
         """Returns the value in a sequence that has the minimum key value."""
-        try:
-            return builtins.min(self, key=key_selector)
-        except ValueError:
-            raise EmptySequenceError()
+        return self._extreme(builtins.min, key=key_selector)
 
     def max(self) -> TItem:
         """Returns the maximum value in a sequence."""
-        try:
-            return builtins.max(self)  # type: ignore[type-var]
-        except ValueError:
-            raise EmptySequenceError()
+        return self._extreme(builtins.max)
 
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
         """Returns the value in a sequence that has the maximum key value."""
-        try:
-            return builtins.max(self, key=key_selector)
-        except ValueError:
-            raise EmptySequenceError()
+        return self._extreme(builtins.max, key=key_selector)
 
     def average(
             self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
@@ -372,7 +458,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def count(self, predicate: Optional[Callable[[TItem], bool]] = None) -> int:
         """Counts elements in the sequence matching an optional predicate."""
-        query = self.where(predicate) if predicate else self
+        query = self.where(predicate) if predicate is not None else self
         return builtins.sum(1 for _ in query)
 
     def element_at(self, index: int) -> TItem:
@@ -386,10 +472,10 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def first(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
         """Returns the first element matching a predicate, or raises ValueError."""
-        query = self.where(predicate) if predicate else self
+        query = self.where(predicate) if predicate is not None else self
         for item in query:
             return item
-        raise ValueError("Sequence contains no matching elements")
+        raise EmptySequenceError() if predicate is None else NoMatchError()
 
     def first_or_default(
             self, default: TResult, predicate: Optional[Callable[[TItem], bool]] = None
@@ -397,24 +483,30 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         """Returns the first element matching a predicate, or a default value."""
         try:
             return self.first(predicate)
-        except ValueError:
+        except (EmptySequenceError, NoMatchError):
             return default
 
-    def single(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
+    def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
-        query = self.where(predicate) if predicate else self
+        if predicate is None:
+            raise TypeError("Predicate cannot be None")
+
+        has_predicate = predicate is not _SENTINEL
+        query = self.where(predicate) if has_predicate else self
         it = iter(query)
+
         try:
             first_val = next(it)
         except StopIteration:
-            raise ValueError("Sequence contains no matching elements")
+            raise NoMatchError() if has_predicate else EmptySequenceError()
 
         try:
             next(it)
         except StopIteration:
             return first_val
 
-        raise ValueError("Sequence contains more than one matching element")
+        raise MultipleMatchesError() if has_predicate else MultipleElementsError()
+
 
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
@@ -618,9 +710,26 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         self.data.append(first_item)
         self.data.extend(it)
 
-    def to_list(self) -> "FlpList[TItem]":
-        """Explicitly returns a new shallow copy instance to isolate mutations matching .NET."""
-        return FlpList(self.data.copy())
+    @overload
+    def any(self) -> bool: ...
+
+    @overload
+    def any(self, predicate: Callable[[TItem], bool]) -> bool: ...
+
+    def any(
+            self,
+            predicate: Optional[Callable[[TItem], bool]] = None,
+    ) -> bool:
+        if predicate is None:
+            return len(self.data) > 0
+
+        return any(predicate(item) for item in self.data)
+
+    def all(
+            self,
+            predicate: Callable[[TItem], bool],
+    ) -> bool:
+        return all(predicate(item) for item in self.data)
 
     def append_linq(self, element: TItem) -> FlpIt[TItem]:
         """Appends an element to the sequence lazily, returning a FlpIt without mutating this list."""
@@ -777,12 +886,44 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     def first(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
         return FlpIt(self.data).first(predicate)
 
+    @overload
+    def last(self) -> TItem: ...
+
+    @overload
+    def last(self, predicate: Callable[[TItem], bool]) -> TItem: ...
+
+    def last(
+            self,
+            predicate: Optional[Callable[[TItem], bool]] = None,
+    ) -> TItem:
+        """
+        Returns the last element of the sequence, or the last element
+        satisfying the predicate.
+
+        Mirrors Enumerable.Last:
+            Last()
+            Last(predicate)
+
+        Raises EmptySequenceError if the sequence is empty or if no
+        element satisfies the predicate.
+        """
+        if predicate is None:
+            if not self.data:
+                raise EmptySequenceError()
+            return self.data[-1]
+
+        for item in reversed(self.data):
+            if predicate(item):
+                return item
+
+        raise NoMatchError()
+
     def first_or_default(
             self, default: TResult, predicate: Optional[Callable[[TItem], bool]] = None
     ) -> Union[TItem, TResult]:
         return FlpIt(self.data).first_or_default(default, predicate)
 
-    def single(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
+    def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
         return FlpIt(self.data).single(predicate)
 
     def to_list(self) -> FlpList[TItem]:

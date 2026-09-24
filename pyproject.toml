@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.1.1"
+version = "0.1.2.dev1"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,3 +37,7 @@ module-root = "src"
 include = ["src"]
 exclude = ["**/__pycache__", "tests"]
 typeCheckingMode = "basic"
+
+#[tool.pyrefly]
+#extra-paths = ["src", "tests"]
+#python-interpreter-path = ".venv/bin/python" # or .venv/Scripts/python.exe on Windows
