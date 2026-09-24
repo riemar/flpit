@@ -663,7 +663,7 @@ class OrderedIt(FlpIt[TItem]):
 
 class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
     """Represents a collection of elements sharing a common key (.NET IGrouping<TKey, TElement>)."""
-    __slots__ = ("_key")
+    __slots__ = ("_key", )
 
     def __init__(self, key: TKey, elements: Iterable[TItem]) -> None:
         self._key: TKey = key
