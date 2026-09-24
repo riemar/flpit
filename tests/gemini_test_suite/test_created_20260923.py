@@ -732,9 +732,7 @@ def test_ordered_it_parent_invalidated_by_child_iteration():
     # Iterating child consumes generator and populates child_ordered._cached_result
     assert list(child_ordered) == [1, 2, 3]
 
-    # FAILURE: parent_ordered._cached_result is still None.
-    # It attempts to read list(self._source), but generator is exhausted.
-    assert list(parent_ordered) == []  # Expected [1, 2, 3]
+    assert list(parent_ordered) == [1, 2, 3]  # Expected [1, 2, 3]
 
 
 def test_distinct_on_unhashable_elements_raises_type_error():
@@ -744,3 +742,90 @@ def test_distinct_on_unhashable_elements_raises_type_error():
     # FAILURE: `item not in seen` raises TypeError: unhashable type: 'dict'
     with pytest.raises(TypeError, match="unhashable type"):
         it.distinct().to_list()
+
+
+
+def test_ordered_then_concat_then_order():
+    original = FlpIt([
+        ("A", 2),
+        ("B", 1),
+    ])
+
+    ordered = original.order_by(lambda x: x[0])
+
+    extended = ordered.concat([
+        ("A", 1),
+        ("B", 2),
+    ])
+
+    result = (
+        extended
+        .order_by(lambda x: x[0])
+        .then_by(lambda x: x[1])
+    )
+
+    assert list(result) == [
+        ("A", 1),
+        ("A", 2),
+        ("B", 1),
+        ("B", 2),
+    ]
+
+def test_ordered_then_concat_after_ordered_has_been_materialized():
+    original = FlpIt([
+        ("A", 2),
+        ("B", 1),
+    ])
+
+    ordered = original.order_by(lambda x: x[0])
+
+    assert list(ordered) == [
+        ("A", 2),
+        ("B", 1),
+    ]
+
+    extended = ordered.concat([
+        ("A", 1),
+        ("B", 2),
+    ])
+
+    result = (
+        extended
+        .order_by(lambda x: x[0])
+        .then_by(lambda x: x[1])
+    )
+
+    assert list(result) == [
+        ("A", 1),
+        ("A", 2),
+        ("B", 1),
+        ("B", 2),
+    ]
+
+
+def test_ordered_it_created_then_source_concatenated_before_then_by():
+    original = FlpIt([
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+    ])
+
+    ordered = original.order_by(lambda x: x["group"])
+
+    extended = original.concat([
+        {"group": "A", "value": 1},
+        {"group": "B", "value": 2},
+    ])
+
+    ordered_with_secondary = ordered.then_by(lambda x: x["value"])
+
+    assert list(ordered_with_secondary) == [
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+    ]
+
+    assert list(extended) == [
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+        {"group": "A", "value": 1},
+        {"group": "B", "value": 2},
+    ]

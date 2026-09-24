@@ -515,22 +515,68 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
 from threading import Lock
 
+from threading import Lock
+from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar
+
+TItem = TypeVar("TItem")
+
+_OrderCriterion = tuple[Callable[[TItem], Any], bool]
+
+
+from threading import Lock
+from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar
+
+TItem = TypeVar("TItem")
+
+_OrderCriterion = tuple[Callable[[TItem], Any], bool]
+
+
+class _OrderState(Generic[TItem]):
+    __slots__ = ("_source", "_items", "_lock")
+
+    def __init__(self, source: Iterable[TItem]) -> None:
+        self._source: Optional[Iterable[TItem]] = source
+        self._items: Optional[list[TItem]] = None
+        self._lock = Lock()
+
+    def materialize(self) -> list[TItem]:
+        items = self._items
+        if items is not None:
+            return items
+
+        with self._lock:
+            items = self._items
+
+            if items is None:
+                source = self._source
+                if source is None:
+                    raise RuntimeError("OrderState source was already released")
+
+                items = list(source)
+
+                # The original source is no longer needed after snapshotting.
+                self._source = None
+                self._items = items
+
+        return items
+
+
 class OrderedIt(FlpIt[TItem]):
     """
-    Ordered Iterable.
+    Lazy, memoized ordered sequence.
 
-    Sorts the source lazily on first iteration and caches the resulting order.
-    The source is consumed at most once; subsequent iterations reuse the cached
-    result.
+    The source is materialized at most once for the entire OrderBy/ThenBy
+    chain. Each OrderedIt node caches its own final sorted result.
+
+    ThenBy semantics are implemented with Python's stable sort by applying
+    the least-significant ordering criterion first.
     """
 
     __slots__ = (
-        "_source",
-        "_key_selector",
-        "_descending",
-        "_parent",
+        "_state",
+        "_criteria",
         "_cached_result",
-        "_lock",
+        "_result_lock",
     )
 
     def __init__(
@@ -538,109 +584,82 @@ class OrderedIt(FlpIt[TItem]):
             source: Iterable[TItem],
             key_selector: Callable[[TItem], Any],
             descending: bool = False,
-            parent: Optional["OrderedIt[TItem]"] = None,
     ) -> None:
+        # This is only used for the root OrderBy node.
         super().__init__(source)
 
-        self._source = source
-        self._key_selector = key_selector
-        self._descending = descending
-        self._parent = parent
+        self._state = _OrderState(source)
+        self._criteria: tuple[_OrderCriterion, ...] = (
+            (key_selector, descending),
+        )
 
         self._cached_result: Optional[list[TItem]] = None
-        self._lock = Lock()
+        self._result_lock = Lock()
+
+    @classmethod
+    def _from_parent(
+            cls,
+            parent: "OrderedIt[TItem]",
+            key_selector: Callable[[TItem], Any],
+            descending: bool,
+    ) -> "OrderedIt[TItem]":
+        # Bypass the root constructor because there is no new source/state.
+        obj = cls.__new__(cls)
+
+        # Keep FlpIt's internal field consistent.
+        FlpIt.__init__(obj, ())
+
+        obj._state = parent._state
+        obj._criteria = (
+            *parent._criteria,
+            (key_selector, descending),
+        )
+        obj._cached_result = None
+        obj._result_lock = Lock()
+
+        return obj
 
     def then_by(
             self,
             key_selector: Callable[[TItem], Any],
     ) -> "OrderedIt[TItem]":
-        return OrderedIt(
-            self._source,
+        return self._from_parent(
+            self,
             key_selector,
-            descending=False,
-            parent=self,
+            False,
         )
 
     def then_by_descending(
             self,
             key_selector: Callable[[TItem], Any],
     ) -> "OrderedIt[TItem]":
-        return OrderedIt(
-            self._source,
+        return self._from_parent(
+            self,
             key_selector,
-            descending=True,
-            parent=self,
+            True,
         )
 
     def __iter__(self) -> Iterator[TItem]:
         cached = self._cached_result
 
         if cached is None:
-            with self._lock:
+            with self._result_lock:
                 cached = self._cached_result
 
                 if cached is None:
-                    # Collect the complete ordering chain.
-                    comparers: list[
-                        tuple[Callable[[TItem], Any], bool]
-                    ] = []
+                    # Never sort the shared materialized source in place.
+                    result = list(self._state.materialize())
 
-                    node: Optional["OrderedIt[TItem]"] = self
-
-                    while node is not None:
-                        comparers.append(
-                            (node._key_selector, node._descending)
+                    # Python's sort is stable. Therefore the least-significant
+                    # criterion must be applied first.
+                    for selector, descending in reversed(self._criteria):
+                        result.sort(
+                            key=selector,
+                            reverse=descending,
                         )
-                        node = node._parent
 
-                    comparers.reverse()
-
-                    # Consume the source exactly once.
-                    items = list(self._source)
-
-                    class SortWrapper:
-                        __slots__ = ("obj", "keys")
-
-                        def __init__(self, obj: Any) -> None:
-                            self.obj = obj
-                            self.keys = [
-                                selector(obj)
-                                for selector, _ in comparers
-                            ]
-
-                        def __lt__(self, other: "SortWrapper") -> bool:
-                            for index, (_, descending) in enumerate(comparers):
-                                left = self.keys[index]
-                                right = other.keys[index]
-
-                                if left == right:
-                                    continue
-
-                                return right < left if descending else left < right
-
-                            return False
-
-                    wrapped_items = [
-                        SortWrapper(item)
-                        for item in items
-                    ]
-
-                    wrapped_items.sort()
-
-                    # Store ONLY the actual result objects.
-                    cached = [
-                        wrapper.obj
-                        for wrapper in wrapped_items
-                    ]
-
+                    cached = result
                     self._cached_result = cached
-
-                    # Important: __iter__ is a generator function.
-                    # Release potentially large temporary structures
-                    # before yielding anything.
-                    del wrapped_items
-                    del items
-                    del comparers
 
         yield from cached
 

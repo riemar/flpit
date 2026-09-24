@@ -189,3 +189,141 @@ def test_ordered_it_cache_released_with_query():
     gc.collect()
 
     assert tracker() is None
+
+
+def test_ordered_it_stable_then_by():
+    items = [
+        ("b", 2),
+        ("a", 2),
+        ("a", 1),
+        ("b", 1),
+    ]
+
+    result = list(
+        FlpIt(items)
+        .order_by(lambda x: x[0])
+        .then_by(lambda x: x[1])
+    )
+
+    assert result == [
+        ("a", 1),
+        ("a", 2),
+        ("b", 1),
+        ("b", 2),
+    ]
+
+
+def test_ordered_it_descending_then_by():
+    items = [
+        ("a", 1),
+        ("a", 3),
+        ("b", 2),
+        ("b", 1),
+    ]
+
+    result = list(
+        FlpIt(items)
+        .order_by_descending(lambda x: x[0])
+        .then_by(lambda x: x[1])
+    )
+
+    assert result == [
+        ("b", 1),
+        ("b", 2),
+        ("a", 1),
+        ("a", 3),
+    ]
+
+def test_ordered_it_source_consumed_once():
+    calls = 0
+
+    def generator():
+        nonlocal calls
+        calls += 1
+        yield from [3, 1, 2]
+
+    q = FlpIt(generator()).order_by(lambda x: x)
+
+    assert list(q) == [1, 2, 3]
+    assert list(q) == [1, 2, 3]
+    assert calls == 1
+
+
+def test_ordered_it_key_selector_called_once_per_item_per_node():
+    calls = 0
+
+    def key(x):
+        nonlocal calls
+        calls += 1
+        return x
+
+    q = FlpIt([3, 1, 2]).order_by(key)
+
+    assert list(q) == [1, 2, 3]
+    assert calls == 3
+
+    assert list(q) == [1, 2, 3]
+    assert calls == 3
+
+
+def test_ordered_it_then_by_branches_are_independent():
+    data = [
+        ("b", 2),
+        ("a", 1),
+        ("b", 1),
+        ("a", 2),
+    ]
+
+    root = FlpIt(data).order_by(lambda x: x[0])
+
+    by_value = root.then_by(lambda x: x[1])
+    by_value_desc = root.then_by_descending(lambda x: x[1])
+
+    assert list(by_value) == [
+        ("a", 1),
+        ("a", 2),
+        ("b", 1),
+        ("b", 2),
+    ]
+
+    assert list(by_value_desc) == [
+        ("a", 2),
+        ("a", 1),
+        ("b", 2),
+        ("b", 1),
+    ]
+
+    # Root remains independently valid.
+    assert list(root) == [
+        ("a", 1),
+        ("a", 2),
+        ("b", 2),
+        ("b", 1),
+    ]
+
+
+def test_ordered_it_parent_then_child():
+    data = [(2, 1), (1, 2), (1, 1)]
+
+    parent = FlpIt((x for x in data)).order_by(lambda x: x[0])
+    child = parent.then_by(lambda x: x[1])
+
+    assert list(parent) == [(1, 2), (1, 1), (2, 1)]
+    assert list(child) == [(1, 1), (1, 2), (2, 1)]
+
+
+def test_ordered_it_key_selector_exception_is_not_cached():
+    calls = 0
+
+    def key(x):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("boom")
+        return x
+
+    q = FlpIt([1, 2, 3]).order_by(key)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        list(q)
+
