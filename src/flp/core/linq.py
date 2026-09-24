@@ -1,8 +1,6 @@
 from __future__ import annotations
 from threading import Lock
 
-from typing import cast
-
 import builtins
 from collections import UserList
 from functools import wraps
@@ -20,6 +18,7 @@ from typing import (
     Type,
     TypeVar,
     Union,
+    override,
     overload,
     cast as typing_cast,
 )
@@ -35,26 +34,26 @@ _MISSING = object()
 
 
 class EmptySequenceError(ValueError):
-    def __init__(self, message="Sequence contains no elements"):
-        super().__init__(message)
+    def __init__(self):
+        super().__init__("Sequence contains no elements")
 
 class NoMatchError(ValueError):
-    def __init__(self, message="Sequence contains no matching elements"):
-        super().__init__(message)
+    def __init__(self):
+        super().__init__("Sequence contains no matching elements")
 
 class MultipleMatchesError(ValueError):
-    def __init__(self, message="Sequence contains more than one matching element"):
-        super().__init__(message)
+    def __init__(self):
+        super().__init__("Sequence contains more than one matching element")
 
 class MultipleElementsError(ValueError):
-    def __init__(self, message="Sequence contains more than one element"):
-        super().__init__(message)
+    def __init__(self):
+        super().__init__("Sequence contains more than one element")
 
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
     """Catches Python's native empty-sequence ValueError and re-raises LINQ-compliant error."""
     @wraps(func)
-    def wrapper(self, *args: Any, **kwargs: Any) -> Any:
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         try:
             return func(self, *args, **kwargs)
         except ValueError as e:
@@ -394,15 +393,15 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         if last_item is _SENTINEL:
             raise EmptySequenceError() if predicate is None else NoMatchError()
 
-        return cast(TItem, last_item)
+        return typing_cast(TItem, last_item)
 
-    def _extreme(self, func, **kwargs) -> TItem:
+    def _extreme(self, func: Any, **kwargs: Any) -> TItem:
         result = func(self, default=_MISSING, **kwargs)
 
         if result is _MISSING:
             raise EmptySequenceError()
 
-        return cast(TItem, result)
+        return typing_cast(TItem, result)
 
     def min(self) -> TItem:
         """Returns the minimum value in a sequence."""
@@ -487,6 +486,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         except (EmptySequenceError, NoMatchError):
             return default
 
+    # pyrefly: ignore [bad-function-definition]
     def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
         if predicate is None:
@@ -512,9 +512,6 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
         return FlpList(self)
-
-
-_OrderCriterion = tuple[Callable[[TItem], Any], bool]
 
 
 class _OrderState(Generic[TItem]):
@@ -580,8 +577,9 @@ class OrderedIt(FlpIt[TItem]):
         # Pass () to FlpIt to prevent storing a permanent reference to the raw source
         super().__init__(())
 
+
         self._state = _OrderState(source)
-        self._criteria: tuple[_OrderCriterion, ...] = (
+        self._criteria: tuple[tuple[Callable[[TItem], Any], bool], ...] = (
             (key_selector, descending),
         )
 
@@ -636,6 +634,7 @@ class OrderedIt(FlpIt[TItem]):
             descending=True,
         )
 
+    @override
     def __iter__(self) -> Iterator[TItem]:
         cached = self._cached_result
 
@@ -802,6 +801,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             second: Iterable[TOther],
             result_selector: Optional[Callable[[TItem, TOther], Any]] = None,
     ) -> FlpIt[Any]:
+        # pyrefly: ignore [bad-argument-type] # yeah well if overloads are just pretend
         return FlpIt(self.data).zip(second, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
@@ -839,7 +839,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     @_guard_empty
     def min(self) -> TItem:
-        return builtins.min(self.data)
+        return builtins.min(self.data) # pyrefly: ignore [bad-specialization]
 
     @_guard_empty
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
@@ -847,7 +847,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     @_guard_empty
     def max(self) -> TItem:
-        return builtins.max(self.data)
+        return builtins.max(self.data) # pyrefly: ignore [bad-specialization]
 
     @_guard_empty
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
@@ -866,7 +866,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         return FlpIt(self.data).average(selector)
 
     # --- Overloads for the Type System ---
-    # 1. Native compatibility path (MUST be first): exact value match
+    # 1. Native Python UserList compatibility path (MUST be first): exact value match
     @overload
     def count(self, item: TItem) -> int: ...
 
@@ -880,8 +880,24 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     # --- The Clean Implementation ---
     # We name the parameter 'item' to perfectly match UserList, but default it to None
+    @override
     def count(self, item: Any = _SENTINEL) -> int:
-        """Counts elements in the list matching an optional predicate or exact value."""
+        """
+        Counts elements using Python/UserList or .NET LINQ conventions.
+
+        Supported forms:
+
+            count()          -> count all elements                  (.NET LINQ)
+            count(predicate) -> count elements matching predicate   (.NET LINQ)
+            count(value)     -> count occurrences of an exact value (Python)
+
+        Note:
+            Because Python callables are also valid list values, ``count(value)``
+            is inherently ambiguous when ``value`` is callable. A callable
+            argument is interpreted as a LINQ predicate, so counting occurrences
+            of a callable object via the native ``UserList.count(value)`` behavior
+            is not distinguishable from ``count(predicate)``.
+        """
         # Scenario C: No argument passed (.count()) -> Return total length
         if item is _SENTINEL:
             return len(self.data)
@@ -939,6 +955,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     ) -> Union[TItem, TResult]:
         return FlpIt(self.data).first_or_default(default, predicate)
 
+    # pyrefly: ignore [bad-function-definition]
     def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
         return FlpIt(self.data).single(predicate)
 

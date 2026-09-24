@@ -328,33 +328,6 @@ def test_ordered_it_key_selector_exception_is_not_cached():
         list(q)
 
 
-import gc
-import weakref
-
-
-def test_ordered_it_does_not_retain_upstream_source_after_materialization():
-    class TrackedSource:
-        def __iter__(self):
-            yield from [3, 1, 2]
-
-    source = TrackedSource()
-    tracker = weakref.ref(source)
-
-    flp = FlpIt(source)
-    query = flp.order_by(lambda x: x)
-
-    # Materialize the OrderedIt. _OrderState should now release its source.
-    assert list(query) == [1, 2, 3]
-
-    # Remove all external references to the upstream source.
-    del flp
-    del source
-    gc.collect()
-
-    # OrderedIt must NOT keep the original source alive through FlpIt._iterable.
-    assert tracker() is None
-
-
 def test_ordered_it_does_not_retain_upstream_source_after_materialization():
     class TrackedSource:
         def __iter__(self):
@@ -373,3 +346,44 @@ def test_ordered_it_does_not_retain_upstream_source_after_materialization():
     gc.collect()
 
     assert tracker() is None
+
+
+def test_ordered_query_does_not_see_separately_created_concat_query():
+    """
+        verified with .NET counterpart to behave the same
+    """
+    original = [
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+    ]
+
+    # Create ordered query from original sequence
+    ordered = FlpIt(original).order_by(lambda x: x["group"])
+
+    # Create separate query from original sequence
+    extended = FlpIt(original).concat(
+        [
+            {"group": "A", "value": 1},
+            {"group": "B", "value": 2},
+        ]
+    )
+
+    # Add secondary ordering to existing query
+    ordered_with_secondary = ordered.then_by(lambda x: x["value"])
+
+    result = ordered_with_secondary.to_list()
+
+    expected = [
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+    ]
+
+    assert result == expected
+
+    # Separately created concatenated query remains unrelated
+    assert extended.to_list() == [
+        {"group": "A", "value": 2},
+        {"group": "B", "value": 1},
+        {"group": "A", "value": 1},
+        {"group": "B", "value": 2},
+    ]

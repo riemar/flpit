@@ -63,14 +63,6 @@ def volatile_gen(data: Iterable[Any]) -> Iterator[Any]:
 # ==============================================================================
 
 class TestInfrastructure:
-    def test_empty_sequence_error_inheritance_and_message(self):
-        err = EmptySequenceError()
-        assert isinstance(err, ValueError)
-        assert str(err) == "Sequence contains no elements"
-
-        err_custom = EmptySequenceError("Custom message")
-        assert str(err_custom) == "Custom message"
-
     def test_factory_iterable_produces_fresh_iterators(self):
         call_count = 0
 

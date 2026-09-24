@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.1.3"
+version = "0.1.4.dev1"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,10 +34,11 @@ build-backend = "uv_build"
 module-name = "flp"
 module-root = "src"
 
-[tool.pyright]
-include = ["src"]
-exclude = ["**/__pycache__", "tests"]
-typeCheckingMode = "basic"
+[tool.pyrefly]
+project-includes = ["src"]
+project-excludes = ["**/__pycache__", "tests"]
+# Entspricht 'typeCheckingMode = "basic"' (nur kritische Bugs/Syntaxfehler abfangen)
+preset = "strict"
 
 [tool.pytest.ini_options]
 addopts = "-m 'not benchmark'"

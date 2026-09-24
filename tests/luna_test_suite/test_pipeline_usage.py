@@ -105,6 +105,7 @@ def test_mapping_like_definition_can_drive_chunk_generation() -> None:
     chunks = (
         flp.it(definitions)
         .select_many(
+            # pyrefly: ignore [bad-argument-type, bad-index]
             lambda definition: flp.it(records[definition["device"]]).chunk(definition["chunk_size"])
         )
         .to_list()
