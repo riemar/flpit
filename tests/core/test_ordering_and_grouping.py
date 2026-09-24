@@ -327,3 +327,49 @@ def test_ordered_it_key_selector_exception_is_not_cached():
     with pytest.raises(RuntimeError, match="boom"):
         list(q)
 
+
+import gc
+import weakref
+
+
+def test_ordered_it_does_not_retain_upstream_source_after_materialization():
+    class TrackedSource:
+        def __iter__(self):
+            yield from [3, 1, 2]
+
+    source = TrackedSource()
+    tracker = weakref.ref(source)
+
+    flp = FlpIt(source)
+    query = flp.order_by(lambda x: x)
+
+    # Materialize the OrderedIt. _OrderState should now release its source.
+    assert list(query) == [1, 2, 3]
+
+    # Remove all external references to the upstream source.
+    del flp
+    del source
+    gc.collect()
+
+    # OrderedIt must NOT keep the original source alive through FlpIt._iterable.
+    assert tracker() is None
+
+
+def test_ordered_it_does_not_retain_upstream_source_after_materialization():
+    class TrackedSource:
+        def __iter__(self):
+            yield from [3, 1, 2]
+
+    source = TrackedSource()
+    tracker = weakref.ref(source)
+
+    flp = FlpIt(source)
+    query = flp.order_by(lambda x: x)
+
+    assert list(query) == [1, 2, 3]
+
+    del flp
+    del source
+    gc.collect()
+
+    assert tracker() is None

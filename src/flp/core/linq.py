@@ -1,4 +1,5 @@
 from __future__ import annotations
+from threading import Lock
 
 from typing import cast
 
@@ -513,25 +514,17 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return FlpList(self)
 
 
-from threading import Lock
-
-from threading import Lock
-from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar
-
-TItem = TypeVar("TItem")
-
-_OrderCriterion = tuple[Callable[[TItem], Any], bool]
-
-
-from threading import Lock
-from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar
-
-TItem = TypeVar("TItem")
-
 _OrderCriterion = tuple[Callable[[TItem], Any], bool]
 
 
 class _OrderState(Generic[TItem]):
+    """
+    Shared lazy snapshot for an OrderBy/ThenBy chain.
+
+    The upstream source is consumed at most once. After materialization,
+    the original source reference is released.
+    """
+
     __slots__ = ("_source", "_items", "_lock")
 
     def __init__(self, source: Iterable[TItem]) -> None:
@@ -541,6 +534,7 @@ class _OrderState(Generic[TItem]):
 
     def materialize(self) -> list[TItem]:
         items = self._items
+
         if items is not None:
             return items
 
@@ -549,12 +543,12 @@ class _OrderState(Generic[TItem]):
 
             if items is None:
                 source = self._source
+
                 if source is None:
-                    raise RuntimeError("OrderState source was already released")
+                    raise RuntimeError("OrderState source is unavailable")
 
                 items = list(source)
 
-                # The original source is no longer needed after snapshotting.
                 self._source = None
                 self._items = items
 
@@ -563,13 +557,11 @@ class _OrderState(Generic[TItem]):
 
 class OrderedIt(FlpIt[TItem]):
     """
-    Lazy, memoized ordered sequence.
+    Lazy, memoized ordered iterable.
 
-    The source is materialized at most once for the entire OrderBy/ThenBy
-    chain. Each OrderedIt node caches its own final sorted result.
-
-    ThenBy semantics are implemented with Python's stable sort by applying
-    the least-significant ordering criterion first.
+    The source is materialized once per OrderBy chain.
+    ThenBy nodes share that source snapshot but maintain independent
+    ordered-result caches.
     """
 
     __slots__ = (
@@ -585,8 +577,8 @@ class OrderedIt(FlpIt[TItem]):
             key_selector: Callable[[TItem], Any],
             descending: bool = False,
     ) -> None:
-        # This is only used for the root OrderBy node.
-        super().__init__(source)
+        # Pass () to FlpIt to prevent storing a permanent reference to the raw source
+        super().__init__(())
 
         self._state = _OrderState(source)
         self._criteria: tuple[_OrderCriterion, ...] = (
@@ -599,44 +591,49 @@ class OrderedIt(FlpIt[TItem]):
     @classmethod
     def _from_parent(
             cls,
-            parent: "OrderedIt[TItem]",
+            parent: OrderedIt[TItem],
             key_selector: Callable[[TItem], Any],
             descending: bool,
-    ) -> "OrderedIt[TItem]":
-        # Bypass the root constructor because there is no new source/state.
-        obj = cls.__new__(cls)
+    ) -> OrderedIt[TItem]:
+        """
+        Create a child ordering node sharing the parent's source state.
 
-        # Keep FlpIt's internal field consistent.
-        FlpIt.__init__(obj, ())
+        The FlpIt source is intentionally empty because OrderedIt overrides
+        __iter__ and uses _OrderState as its real source.
+        """
+        child = cls.__new__(cls)
 
-        obj._state = parent._state
-        obj._criteria = (
+        # Do not retain the parent OrderedIt through FlpIt's _iterable.
+        FlpIt.__init__(child, ())
+
+        child._state = parent._state
+        child._criteria = (
             *parent._criteria,
             (key_selector, descending),
         )
-        obj._cached_result = None
-        obj._result_lock = Lock()
+        child._cached_result = None
+        child._result_lock = Lock()
 
-        return obj
+        return child
 
     def then_by(
             self,
             key_selector: Callable[[TItem], Any],
-    ) -> "OrderedIt[TItem]":
+    ) -> OrderedIt[TItem]:
         return self._from_parent(
             self,
             key_selector,
-            False,
+            descending=False,
         )
 
     def then_by_descending(
             self,
             key_selector: Callable[[TItem], Any],
-    ) -> "OrderedIt[TItem]":
+    ) -> OrderedIt[TItem]:
         return self._from_parent(
             self,
             key_selector,
-            True,
+            descending=True,
         )
 
     def __iter__(self) -> Iterator[TItem]:
@@ -647,11 +644,11 @@ class OrderedIt(FlpIt[TItem]):
                 cached = self._cached_result
 
                 if cached is None:
-                    # Never sort the shared materialized source in place.
+                    # Never mutate the shared source snapshot.
                     result = list(self._state.materialize())
 
-                    # Python's sort is stable. Therefore the least-significant
-                    # criterion must be applied first.
+                    # Python sort is stable, so apply the least-significant
+                    # criterion first.
                     for selector, descending in reversed(self._criteria):
                         result.sort(
                             key=selector,
