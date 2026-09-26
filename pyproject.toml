@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.1.4.dev1"
+version = "0.1.4.dev2"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.11"
