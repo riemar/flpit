@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.1.4.dev4"
+version = "0.1.4.dev5"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -35,7 +35,8 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "flpit"
-module-root = "src"
+namespace = true
+source-include = ["src/flp/**/*", "src/flpit/**/*"]
 
 [tool.pyrefly]
 project-includes = ["src"]
