@@ -49,6 +49,14 @@ class MultipleElementsError(ValueError):
     def __init__(self):
         super().__init__("Sequence contains more than one element")
 
+class SourceNoneError(TypeError):
+    def __init__(self):
+        super().__init__("Value cannot be None. (Argument 'source')")
+
+class PredicateNoneError(TypeError):
+    def __init__(self):
+        super().__init__("Value cannot be None. (Argument 'predicate')")
+
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
     """Catches Python's native empty-sequence ValueError and re-raises LINQ-compliant error."""
@@ -90,8 +98,10 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     """
     __slots__ = ("_iterable",)
 
-    def __init__(self, iterable: Iterable[TItem]) -> None:
-        self._iterable: Iterable[TItem] = iterable
+    def __init__(self, source: Iterable[TItem]) -> None:
+        if source is None:
+            raise SourceNoneError()
+        self._iterable: Iterable[TItem] = source
 
     def __iter__(self) -> Iterator[TItem]:
         return iter(self._iterable)
@@ -371,7 +381,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def last(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = None,
+            predicate: Optional[Callable[[TItem], bool]] = _SENTINEL,
     ) -> TItem:
         """
         Returns the last element of the sequence, or the last element
@@ -384,14 +394,17 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         Raises EmptySequenceError if the sequence is empty or if no
         element satisfies the predicate.
         """
-        last_item: TItem | object = _SENTINEL
+        if predicate is None:
+            raise PredicateNoneError()
+
+        last_item: TItem | object = _MISSING
 
         for item in self:
-            if predicate is None or predicate(item):
+            if predicate is _SENTINEL or predicate(item):
                 last_item = item
 
-        if last_item is _SENTINEL:
-            raise EmptySequenceError() if predicate is None else NoMatchError()
+        if last_item is _MISSING:
+            raise EmptySequenceError() if predicate is _SENTINEL else NoMatchError()
 
         return typing_cast(TItem, last_item)
 
@@ -689,6 +702,12 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     | Fluent List
     A materialized list extending UserList that yields lazy FlpIt instances for query operations.
     """
+    def __init__(self, source: TItem=_SENTINEL):
+        if source is None:
+            raise SourceNoneError()
+        if source is _SENTINEL:
+            source = [] # don't depend on the base class to do the right thing
+        super().__init__(source)
 
     def add(self, item: TItem) -> None:
         """
@@ -926,7 +945,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     def last(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = None,
+            predicate: Optional[Callable[[TItem], bool]] = _SENTINEL,
     ) -> TItem:
         """
         Returns the last element of the sequence, or the last element
@@ -940,6 +959,9 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         element satisfies the predicate.
         """
         if predicate is None:
+            raise PredicateNoneError()
+
+        if predicate is _SENTINEL:
             if not self.data:
                 raise EmptySequenceError()
             return self.data[-1]
@@ -948,7 +970,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             if predicate(item):
                 return item
 
-        raise NoMatchError()
+        raise EmptySequenceError() if predicate is None else NoMatchError()
 
     def first_or_default(
             self, default: TResult, predicate: Optional[Callable[[TItem], bool]] = None
