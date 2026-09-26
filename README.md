@@ -38,8 +38,8 @@ result = (
 ## 💡 Quick Start
 
 ```python
-import flp
-from flp import FlpIt, FlpList
+
+from flpit import flp, FlpIt, FlpList
 
 # Deferred iterable via shorthand
 data: FlpIt[int] = flp.it(range(1, 11))

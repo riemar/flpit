@@ -1,41 +1,21 @@
-"""
-Fluent LINQ for Python — flip your iterables.
-"""
-from __future__ import annotations
-from importlib.metadata import version
-__version__ = version("flpit")
+import warnings
+import flpit  # The NEW location
 
-import builtins
-from typing import Iterable as _Iterable, TypeVar
+# Enforce a loud, clear deprecation alert
+warnings.warn(
+    "The top-level 'flp' namespace is deprecated and has been moved to 'flpit'. "
+    "Please update your imports to 'from flpit import flp, FlpIt, FlpList'"
+    "This legacy entry point will throw a hard ImportError in a future version.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
-from flp.core.linq import Grouping, FlpList, FlpIt, OrderedIt
+__all__ = getattr(flpit.flp, "__all__", []) + getattr(flpit, "__all__", [])
+mods = [flpit, flpit.flp]
 
-TItem = TypeVar("TItem")
+def __getattr__(name: str):
+    for mod in mods:
+        if hasattr(mod, name):
+            return getattr(mod, name)
 
-def it(iterable: _Iterable[TItem]) -> FlpIt[TItem]:
-    """shorthand to create a linq query object"""
-    return FlpIt(iterable)
-
-def lst(iterable: _Iterable[TItem]) -> FlpList[TItem]:
-    """shorthand to create a linq list object"""
-    return FlpList(iterable)
-
-# noinspection shadowing-builtins
-def range(start: int, count: int) -> FlpIt[int]:
-    """Generates a lazy sequence of integral numbers within a specified range."""
-    return FlpIt(builtins.range(start, start + count))
-
-def repeat(element: TItem, count: int) -> FlpIt[TItem]:
-    """Generates a lazy sequence that contains one repeated value."""
-    return FlpIt(element for _ in builtins.range(count))
-
-__all__ = [
-    "FlpIt",
-    "OrderedIt",
-    "Grouping",
-    "FlpList",
-    "it",
-    "lst",
-    "range",
-    "repeat",
-]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

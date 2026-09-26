@@ -1,5 +1,5 @@
 import pytest
-from flp import FlpList, FlpIt
+from flpit import flp, FlpList, FlpIt
 
 class TestFlpList:
 

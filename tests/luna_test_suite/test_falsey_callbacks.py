@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-import flp
-
+from flpit import flp
 
 class FalseyPredicate:
     def __call__(self, value):

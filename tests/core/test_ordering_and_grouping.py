@@ -1,5 +1,5 @@
 import pytest
-from flp import FlpIt, Grouping
+from flpit import flp, FlpIt, Grouping
 
 class TestOrderingAndGrouping:
 

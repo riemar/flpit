@@ -7,16 +7,17 @@ from pytest import param as pp
 from typing import Any, Callable, Iterable, Iterator, Type
 
 # noinspection protected-member
-from flp.core.linq import (
+from flpit import (
+    flp,
     EmptySequenceError,
     NoMatchError,
     MultipleMatchesError,
     FlpIt,
     FlpList,
     Grouping,
-    _FactoryIterable,
 )
 
+from flpit.core.linq import _FactoryIterable
 
 # ==============================================================================
 # Domain Types & Test Helpers

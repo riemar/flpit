@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import flp
-from flp import FlpIt
+
+from flpit import flp, FlpIt
 
 
 class TrackedIterable:

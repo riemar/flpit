@@ -1,6 +1,6 @@
 import pytest
 
-from flp import FlpIt
+from flpit import flp, FlpIt
 
 
 def _make_data(size: int) -> list[dict[str, int]]:

@@ -1,6 +1,6 @@
 import pytest
 
-import flp
+from flpit import flp
 from helpers import Bomb
 
 # ---------------------------------------------------------------------------

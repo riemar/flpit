@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import flp
-from flp import FlpList, Grouping
-from flp.core.linq import EmptySequenceError
+from flpit import flp, FlpList, Grouping, EmptySequenceError
 
 
 def test_chunk_splits_exact_multiple() -> None:

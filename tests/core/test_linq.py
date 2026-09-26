@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import pytest
 from typing import Callable
 
-import flp
-from flp import FlpIt, FlpList
+
+from flpit import flp, FlpIt, FlpList
 
 @dataclass
 class MyCustomType:

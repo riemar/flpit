@@ -1,6 +1,6 @@
 import pytest
 from typing import Union
-from flp import FlpIt, FlpList
+from flpit import flp, FlpIt, FlpList
 
 class TestFilteringAndProjection:
     

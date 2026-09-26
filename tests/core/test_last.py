@@ -1,5 +1,4 @@
-import flp
-from flp.core.linq import EmptySequenceError, NoMatchError
+from flpit import flp, EmptySequenceError, NoMatchError
 
 import pytest
 from pytest import param as pp

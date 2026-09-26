@@ -19,14 +19,17 @@ each generic type argument.
 
 import pytest
 
-import flp
-from flp.core.linq import (
+
+from flpit import (
+    flp,
     FlpIt,
     FlpList,
     EmptySequenceError,
     NoMatchError,
     MultipleElementsError,
-    MultipleMatchesError, SourceNoneError, PredicateNoneError,
+    MultipleMatchesError,
+    SourceNoneError,
+    PredicateNoneError,
 )
 
 from tests.helpers import (

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import flp
-from flp.core.linq import EmptySequenceError
+
+from flpit import flp, EmptySequenceError
 
 
 def test_first_or_default_does_not_swallow_value_error_from_predicate(flp_type) -> None:

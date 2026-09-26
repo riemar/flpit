@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from collections import UserList
-
-import flp
-from flp import FlpIt, FlpList, Grouping, OrderedIt
+import flpit
+from flpit import flp, FlpIt, FlpList, Grouping, OrderedIt
 
 
 def test_public_exports_are_present() -> None:
-    assert flp.FlpIt is FlpIt
-    assert flp.FlpList is FlpList
-    assert flp.Grouping is Grouping
-    assert flp.OrderedIt is OrderedIt
+    assert flpit.FlpIt is FlpIt
+    assert flpit.FlpList is FlpList
+    assert flpit.Grouping is Grouping
+    assert flpit.OrderedIt is OrderedIt
     assert callable(flp.it)
     assert callable(flp.lst)
     assert callable(flp.range)

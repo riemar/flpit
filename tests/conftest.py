@@ -1,4 +1,4 @@
-import flp
+from flpit import flp
 from typing import Iterable, Any, Generic, TypeVar, Iterator
 
 import pytest

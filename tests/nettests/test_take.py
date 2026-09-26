@@ -16,8 +16,8 @@ These test are just a sm subset as several as e.g. Take(1..2) is not possible in
 
 import pytest
 
-import flp
-from flp.core.linq import (
+from flpit import (
+    flp,
     EmptySequenceError,
     NoMatchError,
     MultipleElementsError,

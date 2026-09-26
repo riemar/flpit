@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-import flp
-from flp.core.linq import EmptySequenceError, NoMatchError, MultipleMatchesError, MultipleElementsError
+
+from flpit import flp, EmptySequenceError, NoMatchError, MultipleMatchesError, MultipleElementsError
 
 
 @pytest.mark.parametrize(

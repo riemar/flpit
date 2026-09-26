@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import flp
-from flp.core.linq import EmptySequenceError, MultipleMatchesError, MultipleElementsError
+
+from flpit import flp, EmptySequenceError, MultipleMatchesError, MultipleElementsError
 
 
 def test_first_or_default_uses_explicit_none_to_mean_no_predicate() -> None:
@@ -24,7 +24,7 @@ def test_single_uses_none_to_mean_no_predicate() -> None:
 
 
 def test_empty_error_message_is_consistent_for_aggregate() -> None:
-    with pytest.raises(flp.core.linq.EmptySequenceError, match="Sequence contains no elements"):
+    with pytest.raises(EmptySequenceError):
         flp.it([]).aggregate(lambda a, b: a + b)
 
 

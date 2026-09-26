@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 from pytest import param as pp
-from flp import FlpIt
+from flpit import flp, FlpIt
 from helpers import Falsy, Bomb
 
 

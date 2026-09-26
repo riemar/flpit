@@ -1,6 +1,6 @@
 from typing import List, TypeGuard
-import flp
-from flp import FlpIt
+
+from flpit import flp, FlpIt
 
 class TestDeferredExecution:
     """Validates laziness and deferred evaluation invariants across operators."""

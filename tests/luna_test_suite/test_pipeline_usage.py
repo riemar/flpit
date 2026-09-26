@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-import flp
-
+from flpit import flp
 
 @dataclass(frozen=True)
 class RawRecord:

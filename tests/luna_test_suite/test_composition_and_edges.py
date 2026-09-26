@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-import flp
-from flp import FlpList
+
+from flpit import flp, FlpList
 
 
 @pytest.mark.parametrize(

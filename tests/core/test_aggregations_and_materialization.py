@@ -1,8 +1,12 @@
-from flp.core.linq import MultipleElementsError
-from flp.core.linq import EmptySequenceError
-from flp.core.linq import MultipleMatchesError
 import pytest
-from flp import FlpIt, FlpList
+
+from flpit import (
+    FlpIt,
+    FlpList,
+    EmptySequenceError,
+    MultipleElementsError,
+    MultipleMatchesError,
+)
 
 class TestAggregationsAndMaterialization:
 

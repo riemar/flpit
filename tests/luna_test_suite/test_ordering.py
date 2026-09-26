@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-import flp
-from flp import OrderedIt
+
+from flpit import flp, OrderedIt
 
 
 def test_order_by_returns_ordered_it() -> None:

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-import flp
-
+from flpit import flp
 
 class ClosableIterator:
     def __init__(self, values):

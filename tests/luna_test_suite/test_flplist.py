@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import flp
-from flp import FlpList
+
+from flpit import flp, FlpList
 
 
 def test_add_appends_single_item() -> None:

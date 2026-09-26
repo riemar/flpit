@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import flp
-from flp import FlpList, OrderedIt
-from flp.core.linq import EmptySequenceError
+from flpit import flp, FlpList, OrderedIt, EmptySequenceError
 
 
 def test_flplist_to_list_returns_shallow_independent_copy() -> None:
