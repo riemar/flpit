@@ -895,7 +895,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         return FlpIt(self.data).average(selector)
 
     def count_item(self, item: TItem) -> int:
-        return self.data.count(item) # just redirect how the count redicted before
+        return self.data.count(item) # just redirect how the count redirected before
 
     @override
     def count( # type: ignore  # pyrefly: ignore [bad-override-param-name]  # pyright: ignore[reportIncompatibleMethodOverride]
