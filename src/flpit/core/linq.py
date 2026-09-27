@@ -29,7 +29,6 @@ TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
 TAccumulate = TypeVar("TAccumulate")
 
-
 class _Sentinel:
     __slots__ = ()
 
@@ -362,9 +361,9 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def aggregate(
             self,
-            func: Callable[[Any, TItem], Any],
+            func: Callable[[Any, Any], Any],
             seed: Any = _SENTINEL,
-    ) -> Any:
+    ) -> TItem | TAccumulate:
         """Applies an accumulator function over a sequence."""
         it = iter(self)
         if seed is _SENTINEL:
@@ -864,7 +863,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             self,
             func: Callable[[Any, Any], Any],
             seed: Any = _SENTINEL,
-    ) -> Any:
+    ) -> TItem | TAccumulate:
         return FlpIt(self.data).aggregate(func, seed=seed)
 
     @_guard_empty
