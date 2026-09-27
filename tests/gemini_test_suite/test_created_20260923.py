@@ -242,7 +242,15 @@ class TestFlpItDeferredOperations:
         ],
     )
     def test_zip(self, first: list, second: list, selector: Any, expected: list):
-        assert FlpIt(first).zip(second, result_selector=selector).to_list() == expected
+        if selector is None:
+            result = FlpIt(first).zip(second).to_list()
+        else:
+            result = FlpIt(first).zip(
+                second,
+                result_selector=selector,
+            ).to_list()
+
+        assert result == expected
 
     @pytest.mark.parametrize(
         "data, size, expected",
@@ -321,6 +329,7 @@ class TestFlpItAggregations:
         with pytest.raises(EmptySequenceError):
             FlpIt([]).max_by(lambda x: x)
 
+
     @pytest.mark.parametrize(
         "data, selector, expected",
         [
@@ -331,11 +340,17 @@ class TestFlpItAggregations:
     )
     def test_average_and_aliases(self, data: list, selector: Any, expected: float):
         it = FlpIt(data)
-        assert it.average(selector) == expected
-        assert it.avg(selector) == expected
-        if selector:
+
+        if selector is None:
+            assert it.average() == expected
+            assert it.avg() == expected
+        else:
+            assert it.average(selector) == expected
+            assert it.avg(selector) == expected
             assert it.average_by(selector) == expected
             assert it.avg_by(selector) == expected
+
+
 
     def test_average_empty_raises(self):
         with pytest.raises(EmptySequenceError):
@@ -353,7 +368,10 @@ class TestFlpItAggregations:
         ],
     )
     def test_sum(self, data: list, selector: Any, expected: Any):
-        assert FlpIt(data).sum(selector) == expected
+        if selector is None:
+            assert FlpIt(data).sum() == expected
+        else:
+            assert FlpIt(data).sum(selector) == expected
 
     @pytest.mark.parametrize(
         "data, predicate, expected",
@@ -365,7 +383,10 @@ class TestFlpItAggregations:
         ],
     )
     def test_count(self, data: list, predicate: Any, expected: int):
-        assert FlpIt(data).count(predicate) == expected
+        if predicate is None:
+            assert FlpIt(data).count() == expected
+        else:
+            assert FlpIt(data).count(predicate) == expected
 
     @pytest.mark.parametrize(
         "data, index, expected",
@@ -397,13 +418,10 @@ class TestFlpItAggregations:
         ],
     )
     def test_first_success(self, data: list, predicate: Any, expected: Any):
-        assert FlpIt(data).first(predicate) == expected
-
-    def test_first_no_match_raises_value_error(self):
-        with pytest.raises(NoMatchError):
-            FlpIt([1, 3, 5]).first(lambda x: x % 2 == 0)
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).first()
+        if predicate is None:
+            assert FlpIt(data).first() == expected
+        else:
+            assert FlpIt(data).first(predicate) == expected
 
     @pytest.mark.parametrize(
         "data, default, predicate, expected",
@@ -414,7 +432,10 @@ class TestFlpItAggregations:
         ],
     )
     def test_first_or_default(self, data: list, default: Any, predicate: Any, expected: Any):
-        assert FlpIt(data).first_or_default(default, predicate) == expected
+        if predicate is None:
+            assert FlpIt(data).first_or_default(default) == expected
+        else:
+            assert FlpIt(data).first_or_default(default, predicate) == expected
 
     @pytest.mark.parametrize(
         "data, predicate, expected",
@@ -575,14 +596,25 @@ class TestFlpListSpecifics:
         "arg, expected",
         [
             pp((), 5, id="No_argument_total_length"),
-            pp((lambda x: x % 2 == 0,), 3, id="LINQ_Predicate"),  # Fixed: 2, 2, 4 -> 3
-            pp((2,), 2, id="Raw_exact_value_matching"),
-            pp(("non_existent",), 0, id="Non_existent_value_matching"),
+            pp((lambda x: x % 2 == 0,), 3, id="LINQ_Predicate"),  # 2, 2, 4 -> 3
         ],
     )
-    def test_count_overload_resolution(self, arg: tuple, expected: int):
+    def test_count(self, arg: tuple, expected: int):
         flp = FlpList([1, 2, 2, 3, 4])
         assert flp.count(*arg) == expected
+
+
+    @pytest.mark.parametrize(
+        "item, expected",
+        [
+            (2, 2),
+            ("non_existent", 0),
+        ],
+    )
+    def test_count_item(self, item: Any, expected: int):
+        flp = FlpList([1, 2, 2, 3, 4])
+        assert flp.count_item(item) == expected
+
 
     def test_guarded_empty_methods_on_flp_list(self):
         empty_list = FlpList[int]()

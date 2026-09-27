@@ -149,7 +149,11 @@ def test_flplist_count_no_argument_is_length() -> None:
 
 
 def test_flplist_count_exact_value() -> None:
-    assert FlpList([1, 1, 2]).count(1) == 2
+    """
+        ambiguity couldn't be reconciled thus count(item) not throws a type error
+    """
+    with pytest.raises(TypeError):
+        assert FlpList([1, 1, 2]).count(1) == 2
 
 
 def test_flplist_count_predicate() -> None:

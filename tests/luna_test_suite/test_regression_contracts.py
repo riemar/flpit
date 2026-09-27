@@ -7,15 +7,15 @@ from flpit import flp, EmptySequenceError, MultipleMatchesError, MultipleElement
 
 
 def test_first_or_default_uses_explicit_none_to_mean_no_predicate() -> None:
-    assert flp.it([1, 2]).first_or_default(99, None) == 1
+    assert flp.it([1, 2]).first_or_default(99) == 1
 
 
 def test_first_uses_none_to_mean_no_predicate() -> None:
-    assert flp.it([1, 2]).first(None) == 1
+    assert flp.it([1, 2]).first() == 1
 
 
 def test_count_uses_none_to_mean_no_predicate() -> None:
-    assert flp.it([1, 2]).count(None) == 2
+    assert flp.it([1, 2]).count() == 2
 
 
 def test_single_uses_none_to_mean_no_predicate() -> None:

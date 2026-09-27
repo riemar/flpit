@@ -139,7 +139,7 @@ class TestAdd:
         assert list_with_nones.count() == 5
 
         # Scenario B: Searching for None explicitly returns exact occurrences of None
-        assert list_with_nones.count(None) == 2
+        assert list_with_nones.count_item(None) == 2
 
 
 def test_count_with_predicates_and_values():
@@ -151,8 +151,8 @@ def test_count_with_predicates_and_values():
     assert numbers.count(is_even) == 3
 
     # Scenario B: Exact native value lookup
-    assert numbers.count(4) == 1
-    assert numbers.count(99) == 0
+    assert numbers.count_item(4) == 1
+    assert numbers.count_item(99) == 0
 
 
 def test_where():

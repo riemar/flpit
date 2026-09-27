@@ -29,7 +29,14 @@ TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
 TAccumulate = TypeVar("TAccumulate")
 
-_SENTINEL = object()
+
+class _Sentinel:
+    __slots__ = ()
+
+    def __call__(self, *args: object, **kwargs: object) -> Any:
+        raise TypeError("_SENTINEL cannot be called")
+
+_SENTINEL = _Sentinel()
 _MISSING = object()
 
 
@@ -129,7 +136,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def any(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = None,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> bool:
         """
         Determines whether the sequence contains any elements,
@@ -141,7 +148,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         Evaluation stops as soon as the result is known.
         """
-        if predicate is not None:
+        if predicate is not _SENTINEL:
             return builtins.any(map(predicate, self))
 
         iterator = iter(self)
@@ -288,12 +295,12 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     def zip(
             self,
             second: Iterable[TOther],
-            result_selector: Optional[Callable[[TItem, TOther], Any]] = None,
+            result_selector: Callable[[TItem, TOther], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         """Applies a specified function to corresponding elements of two sequences."""
         def _generator() -> Iterator[Any]:
             for first_item, second_item in zip(self, second):
-                if result_selector is not None:
+                if result_selector is not _SENTINEL:
                     yield result_selector(first_item, second_item)
                 else:
                     yield first_item, second_item
@@ -343,7 +350,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-     # --- Immediate Execution (Materialization & Aggregation) ---
+    # --- Immediate Execution (Materialization & Aggregation) ---
 
     @overload
     def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
@@ -381,7 +388,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def last(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = _SENTINEL,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> TItem:
         """
         Returns the last element of the sequence, or the last element
@@ -433,12 +440,12 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return self._extreme(builtins.max, key=key_selector)
 
     def average(
-            self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
+            self, selector: Callable[[TItem], Union[int, float]] | _Sentinel = _SENTINEL
     ) -> float:
         """Computes the arithmetic mean of the sequence, optionally applying a selector."""
         total = 0.0
         count = 0
-        query = (selector(x) for x in self) if selector is not None else self
+        query = (selector(x) for x in self) if selector is not _SENTINEL else self
         for item in query:
             total += float(item)  # type: ignore[arg-type]
             count += 1
@@ -462,17 +469,22 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     avg_by = average_by
 
     def sum(
-            self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
+            self, selector: Callable[[TItem], Union[int, float]] | _Sentinel = _SENTINEL
     ) -> Union[int, float]:
         """Calculates the sum of the sequence, optionally applying a selector."""
-        if selector is not None:
+        if selector is not _SENTINEL:
             return builtins.sum(selector(x) for x in self)
         return builtins.sum(self)  # type: ignore[arg-type]
 
-    def count(self, predicate: Optional[Callable[[TItem], bool]] = None) -> int:
-        """Counts elements in the sequence matching an optional predicate."""
-        query = self.where(predicate) if predicate is not None else self
-        return builtins.sum(1 for _ in query)
+    def count(
+            self,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
+    ) -> int:
+        """Counts elements in the sequence, optionally matching a predicate."""
+        if predicate is _SENTINEL:
+            return builtins.sum(1 for _ in self)
+
+        return builtins.sum(1 for _ in self.where(predicate))
 
     def element_at(self, index: int) -> TItem:
         """Returns the element at a specified index in a sequence."""
@@ -483,15 +495,15 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
                 return item
         raise IndexError("Index out of range")
 
-    def first(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
+    def first(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the first element matching a predicate, or raises ValueError."""
-        query = self.where(predicate) if predicate is not None else self
+        query = self.where(predicate) if predicate is not _SENTINEL else self
         for item in query:
             return item
-        raise EmptySequenceError() if predicate is None else NoMatchError()
+        raise EmptySequenceError() if predicate is _SENTINEL else NoMatchError()
 
     def first_or_default(
-            self, default: TResult, predicate: Optional[Callable[[TItem], bool]] = None
+            self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
     ) -> Union[TItem, TResult]:
         """Returns the first element matching a predicate, or a default value."""
         try:
@@ -499,12 +511,8 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         except (EmptySequenceError, NoMatchError):
             return default
 
-    # pyrefly: ignore [bad-function-definition]
-    def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
+    def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
-        if predicate is None:
-            raise TypeError("Predicate cannot be None")
-
         has_predicate = predicate is not _SENTINEL
         query = self.where(predicate) if has_predicate else self
         it = iter(query)
@@ -702,12 +710,16 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     | Fluent List
     A materialized list extending UserList that yields lazy FlpIt instances for query operations.
     """
-    def __init__(self, source: TItem=_SENTINEL):
+    def __init__(self, source: Iterable[TItem] | _Sentinel=_SENTINEL):
         if source is None:
             raise SourceNoneError()
+
         if source is _SENTINEL:
-            source = [] # don't depend on the base class to do the right thing
-        super().__init__(source)
+            init_list: Iterable[TItem] = list[TItem]()  # don't depend on the base class to do the right thing
+        else:
+            init_list = typing_cast(Iterable[TItem], source)
+
+        super().__init__(init_list)
 
     def add(self, item: TItem) -> None:
         """
@@ -752,9 +764,9 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     def any(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = None,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> bool:
-        if predicate is None:
+        if predicate is _SENTINEL:
             return len(self.data) > 0
 
         return any(predicate(item) for item in self.data)
@@ -818,9 +830,8 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     def zip(
             self,
             second: Iterable[TOther],
-            result_selector: Optional[Callable[[TItem, TOther], Any]] = None,
+            result_selector: Callable[[TItem, TOther], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
-        # pyrefly: ignore [bad-argument-type] # yeah well if overloads are just pretend
         return FlpIt(self.data).zip(second, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
@@ -873,68 +884,44 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         return builtins.max(self.data, key=key_selector)
 
     def sum(
-            self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
-    ) -> Union[int, float]:
+            self, selector: Callable[[TItem], int | float] | _Sentinel = _SENTINEL
+    ) -> int | float:
         """Calculates the sum of elements, optionally applying a selector."""
         return FlpIt(self.data).sum(selector)
 
     def average(
-            self, selector: Optional[Callable[[TItem], Union[int, float]]] = None
+            self, selector: Callable[[TItem], int | float] | _Sentinel = _SENTINEL
     ) -> float:
         """Calculates the arithmetic mean, optionally applying a selector."""
         return FlpIt(self.data).average(selector)
 
-    # --- Overloads for the Type System ---
-    # 1. Native Python UserList compatibility path (MUST be first): exact value match
-    @overload
-    def count(self, item: TItem) -> int: ...
+    def count_item(self, item: TItem) -> int:
+        return self.data.count(item) # just redirect how the count redicted before
 
-    # 2. LINQ style path: matching via predicate function
-    @overload
-    def count(self, item: Callable[[TItem], bool]) -> int: ...
-
-    # 3. LINQ style path: no arguments (counts everything)
-    @overload
-    def count(self) -> int: ...
-
-    # --- The Clean Implementation ---
-    # We name the parameter 'item' to perfectly match UserList, but default it to None
     @override
-    def count(self, item: Any = _SENTINEL) -> int:
+    def count( # type: ignore  # pyrefly: ignore [bad-override-param-name]  # pyright: ignore[reportIncompatibleMethodOverride]
+            self,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
+    ) -> int:
         """
-        Counts elements using Python/UserList or .NET LINQ conventions.
+        Counts elements using LINQ semantics.
 
         Supported forms:
 
-            count()          -> count all elements                  (.NET LINQ)
-            count(predicate) -> count elements matching predicate   (.NET LINQ)
-            count(value)     -> count occurrences of an exact value (Python)
-
-        Note:
-            Because Python callables are also valid list values, ``count(value)``
-            is inherently ambiguous when ``value`` is callable. A callable
-            argument is interpreted as a LINQ predicate, so counting occurrences
-            of a callable object via the native ``UserList.count(value)`` behavior
-            is not distinguishable from ``count(predicate)``.
+            count()          -> total number of elements
+            count(predicate) -> number of elements satisfying the predicate
         """
-        # Scenario C: No argument passed (.count()) -> Return total length
-        if item is _SENTINEL:
+        if predicate is _SENTINEL:
             return len(self.data)
 
-        # Scenario A: A LINQ predicate function was passed
-        if callable(item):
-            return FlpIt(self.data).count(item)
-
-        # Scenario B: An exact raw value was passed (.count(4))
-        # Invokes the original parent implementation of UserList to remain 100% compliant
-        return super().count(item)
+        return FlpIt(self.data).count(predicate)
 
     def element_at(self, index: int) -> TItem:
         if index < 0 or index >= len(self.data):
             raise IndexError("Index out of range")
         return self.data[index]
 
-    def first(self, predicate: Optional[Callable[[TItem], bool]] = None) -> TItem:
+    def first(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         return FlpIt(self.data).first(predicate)
 
     @overload
@@ -945,7 +932,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
 
     def last(
             self,
-            predicate: Optional[Callable[[TItem], bool]] = _SENTINEL,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> TItem:
         """
         Returns the last element of the sequence, or the last element
@@ -970,15 +957,14 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             if predicate(item):
                 return item
 
-        raise EmptySequenceError() if predicate is None else NoMatchError()
+        raise EmptySequenceError() if predicate is _SENTINEL else NoMatchError()
 
     def first_or_default(
-            self, default: TResult, predicate: Optional[Callable[[TItem], bool]] = None
-    ) -> Union[TItem, TResult]:
+            self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
+    ) -> TItem | TResult:
         return FlpIt(self.data).first_or_default(default, predicate)
 
-    # pyrefly: ignore [bad-function-definition]
-    def single(self, predicate: Optional[Callable[[TItem], bool]] = _SENTINEL) -> TItem:
+    def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         return FlpIt(self.data).single(predicate)
 
     def to_list(self) -> FlpList[TItem]:
