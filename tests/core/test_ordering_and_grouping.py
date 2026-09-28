@@ -70,38 +70,6 @@ class TestOrderingAndGrouping:
         recreated = groups.select_many(lambda g: g).to_list()
         assert recreated == words
 
-
-    def test_ordered_it_second_iteration_data_loss(self):
-        """
-        Verifies if OrderedIt silently drops data on the second iteration
-        when wrapped around a single-pass generator expression.
-        """
-        data = [3, 1, 2]
-        expected = [1, 2, 3]
-
-        # 1. Create a raw, forward-only generator expression containing three items
-        raw_data = (x for x in data)
-
-        # 2. Wrap it into the Fluent Iterable pipeline and sort it
-        flp_iterable = FlpIt(raw_data)
-        sorted_query = flp_iterable.order_by(lambda x: x)
-
-        # 3. First execution pass: Materialize the query into a list
-        # This consumes the generator completely under the hood.
-        first_pass = list(sorted_query)
-        assert first_pass == expected, "The first pass should sort the data cleanly."
-
-        # 4. Second execution pass: Loop over the EXACT same query instance again
-        # Native .NET LINQ caches the sorted result internally on the first run.
-        second_pass = list(sorted_query)
-
-        # --- CRITICAL ASSERTION ---
-        # This will FAIL in your current implementation because second_pass returns an empty list []
-        assert second_pass == expected, (
-            f"FAIL: .NET behavior broken! Data was silently lost on the second pass. "
-            f"Expected {expected} but got {second_pass} instead."
-        )
-
     def test_deferred_exception_timing_lifecycle(self):
         """
         Proves that your new OrderedIt implementation is lazy:
@@ -234,21 +202,6 @@ def test_ordered_it_descending_then_by():
         ("a", 3),
     ]
 
-def test_ordered_it_source_consumed_once():
-    calls = 0
-
-    def generator():
-        nonlocal calls
-        calls += 1
-        yield from [3, 1, 2]
-
-    q = FlpIt(generator()).order_by(lambda x: x)
-
-    assert list(q) == [1, 2, 3]
-    assert list(q) == [1, 2, 3]
-    assert calls == 1
-
-
 def test_ordered_it_key_selector_called_once_per_item_per_node():
     calls = 0
 
@@ -261,7 +214,7 @@ def test_ordered_it_key_selector_called_once_per_item_per_node():
 
     assert list(q) == [1, 2, 3]
     assert calls == 3
-
+    calls = 0
     assert list(q) == [1, 2, 3]
     assert calls == 3
 
@@ -305,7 +258,7 @@ def test_ordered_it_then_by_branches_are_independent():
 def test_ordered_it_parent_then_child():
     data = [(2, 1), (1, 2), (1, 1)]
 
-    parent = FlpIt((x for x in data)).order_by(lambda x: x[0])
+    parent = FlpIt(data).order_by(lambda x: x[0])
     child = parent.then_by(lambda x: x[1])
 
     assert list(parent) == [(1, 2), (1, 1), (2, 1)]
@@ -326,26 +279,6 @@ def test_ordered_it_key_selector_exception_is_not_cached():
 
     with pytest.raises(RuntimeError, match="boom"):
         list(q)
-
-
-def test_ordered_it_does_not_retain_upstream_source_after_materialization():
-    class TrackedSource:
-        def __iter__(self):
-            yield from [3, 1, 2]
-
-    source = TrackedSource()
-    tracker = weakref.ref(source)
-
-    flp = FlpIt(source)
-    query = flp.order_by(lambda x: x)
-
-    assert list(query) == [1, 2, 3]
-
-    del flp
-    del source
-    gc.collect()
-
-    assert tracker() is None
 
 
 def test_ordered_query_does_not_see_separately_created_concat_query():

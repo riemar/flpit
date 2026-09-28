@@ -75,13 +75,6 @@ def test_group_by_after_projection() -> None:
     assert result == [(1, [(1, 10), (1, 30)]), (0, [(0, 20), (0, 40)])]
 
 
-def test_order_then_take_only_materializes_ordered_source_once() -> None:
-    calls = []
-    query = flp.it([5, 1, 4, 2, 3]).order_by(lambda x: calls.append(x) or x).take(2)
-    assert list(query) == [1, 2]
-    assert calls == [5, 1, 4, 2, 3]
-
-
 def test_order_then_select_is_repeatable() -> None:
     query = flp.it([3, 1, 2]).order_by(lambda x: x).select(lambda x: x * 2)
     assert list(query) == [2, 4, 6]

@@ -63,6 +63,10 @@ class PredicateNoneError(TypeError):
     def __init__(self):
         super().__init__("Value cannot be None. (Argument 'predicate')")
 
+class SelectorNoneError(TypeError):
+    def __init__(self):
+        super().__init__("Value cannot be null. (Parameter 'keySelector')")
+
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
     """Catches Python's native empty-sequence ValueError and re-raises LINQ-compliant error."""
@@ -533,151 +537,108 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         """Explicitly materializes the query into a FlpList."""
         return FlpList(self)
 
+from functools import partial
 
-class _OrderState(Generic[TItem]):
-    """
-    Shared lazy snapshot for an OrderBy/ThenBy chain.
+class _NoneOrderKey:
+    __slots__ = ()
 
-    The upstream source is consumed at most once. After materialization,
-    the original source reference is released.
-    """
+    def __lt__(self, other: object) -> bool:
+        return other is not self
 
-    __slots__ = ("_source", "_items", "_lock")
+    def __gt__(self, other: object) -> bool:
+        return False
 
-    def __init__(self, source: Iterable[TItem]) -> None:
-        self._source: Optional[Iterable[TItem]] = source
-        self._items: Optional[list[TItem]] = None
-        self._lock = Lock()
+    def __eq__(self, other: object) -> bool:
+        return other is self
 
-    def materialize(self) -> list[TItem]:
-        items = self._items
 
-        if items is not None:
-            return items
+_NONE_ORDER_KEY = _NoneOrderKey()
 
-        with self._lock:
-            items = self._items
-
-            if items is None:
-                source = self._source
-
-                if source is None:
-                    raise RuntimeError("OrderState source is unavailable")
-
-                items = list(source)
-
-                self._source = None
-                self._items = items
-
-        return items
-
+def _none_aware_key(
+        selector: Callable[[TItem], Any],
+        item: TItem,
+) -> Any:
+    key = selector(item)
+    return _NONE_ORDER_KEY if key is None else key
 
 class OrderedIt(FlpIt[TItem]):
-    """
-    Lazy, memoized ordered iterable.
-
-    The source is materialized once per OrderBy chain.
-    ThenBy nodes share that source snapshot but maintain independent
-    ordered-result caches.
-    """
-
-    __slots__ = (
-        "_state",
-        "_criteria",
-        "_cached_result",
-        "_result_lock",
-    )
+    __slots__ = ("_criteria",)
 
     def __init__(
             self,
             source: Iterable[TItem],
-            key_selector: Callable[[TItem], Any],
+            selector: Callable[[TItem], Any],
             descending: bool = False,
-    ) -> None:
-        # Pass () to FlpIt to prevent storing a permanent reference to the raw source
-        super().__init__(())
+            *,
+            _criteria: tuple[tuple[Callable[[TItem], Any], bool], ...] | None = None,
+    ):
+        if selector is None:
+            raise SelectorNoneError()
 
+        super().__init__(source)
 
-        self._state = _OrderState(source)
-        self._criteria: tuple[tuple[Callable[[TItem], Any], bool], ...] = (
-            (key_selector, descending),
-        )
+        if _criteria is None:
+            self._criteria = ((selector, descending),)
+        else:
+            self._criteria = _criteria + ((selector, descending),)
 
-        self._cached_result: Optional[list[TItem]] = None
-        self._result_lock = Lock()
+    # def __iter__(self) -> Iterator[TItem]:
+    #     items = list(self._iterable)
+    #
+    #     for selector, descending in reversed(self._criteria):
+    #         keys = [selector(item) for item in items]
+    #
+    #         if any(key is None for key in keys):
+    #             # Null-aware path
+    #             items = [
+    #                 item
+    #                 for _, item in sorted(
+    #                     zip(keys, items),
+    #                     key=lambda pair: (
+    #                         pair[0] is not None,
+    #                         pair[0] if pair[0] is not None else 0,
+    #                     ),
+    #                     reverse=descending,
+    #                 )
+    #             ]
+    #         else:
+    #             # Fast path
+    #             items.sort(key=selector, reverse=descending)
+    #
+    #     yield from items
 
-    @classmethod
-    def _from_parent(
-            cls,
-            parent: OrderedIt[TItem],
-            key_selector: Callable[[TItem], Any],
-            descending: bool,
-    ) -> OrderedIt[TItem]:
-        """
-        Create a child ordering node sharing the parent's source state.
+    def __iter__(self) -> Iterator[TItem]:
+        items = list(self._iterable)
 
-        The FlpIt source is intentionally empty because OrderedIt overrides
-        __iter__ and uses _OrderState as its real source.
-        """
-        child = cls.__new__(cls)
+        for selector, descending in reversed(self._criteria):
+            items.sort(
+                key=partial(_none_aware_key, selector),
+                reverse=descending,
+            )
 
-        # Do not retain the parent OrderedIt through FlpIt's _iterable.
-        FlpIt.__init__(child, ())
-
-        child._state = parent._state
-        child._criteria = (
-            *parent._criteria,
-            (key_selector, descending),
-        )
-        child._cached_result = None
-        child._result_lock = Lock()
-
-        return child
+        yield from items
 
     def then_by(
             self,
             key_selector: Callable[[TItem], Any],
-    ) -> OrderedIt[TItem]:
-        return self._from_parent(
-            self,
+    ) -> "OrderedIt[TItem]":
+        return OrderedIt(
+            self._iterable,
             key_selector,
-            descending=False,
+            False,
+            _criteria=self._criteria,
         )
 
     def then_by_descending(
             self,
             key_selector: Callable[[TItem], Any],
-    ) -> OrderedIt[TItem]:
-        return self._from_parent(
-            self,
+    ) -> "OrderedIt[TItem]":
+        return OrderedIt(
+            self._iterable,
             key_selector,
-            descending=True,
+            True,
+            _criteria=self._criteria,
         )
-
-    @override
-    def __iter__(self) -> Iterator[TItem]:
-        cached = self._cached_result
-
-        if cached is None:
-            with self._result_lock:
-                cached = self._cached_result
-
-                if cached is None:
-                    # Never mutate the shared source snapshot.
-                    result = list(self._state.materialize())
-
-                    # Python sort is stable, so apply the least-significant
-                    # criterion first.
-                    for selector, descending in reversed(self._criteria):
-                        result.sort(
-                            key=selector,
-                            reverse=descending,
-                        )
-
-                    cached = result
-                    self._cached_result = cached
-
-        yield from cached
 
 
 class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
