@@ -455,7 +455,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def average(
             self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
-    ) -> float | int | Decimal | None : # todo: adjust all types
+    ) -> float | int | Decimal | None:
         """Computes the arithmetic mean of the sequence, optionally applying a selector."""
         with dotnet_context():
             total, count = self.__sum_and_count(selector)

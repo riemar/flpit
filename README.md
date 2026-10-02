@@ -323,6 +323,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | tests/nettests/test_all.py                     |          80 |
 | tests/nettests/test_any.py                     |          90 |
 | tests/nettests/test_average.py                 |         572 |
+| tests/nettests/test_count.py                   |          37 |
 | tests/nettests/test_last.py                    |          29 |
 | tests/nettests/test_order_by.py                |         100 |
 | tests/nettests/test_order_descending_by.py     |          45 |
@@ -331,6 +332,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | tests/nettests/test_then_by.py                 |          40 |
 | tests/nettests/test_then_descending_by.py      |          34 |
 ----------------------------------------------------------------
-| GRAND TOTALS                                   |        1163 |
+| GRAND TOTALS                                   |        1200 |
 ================================================================
 ```
