@@ -404,23 +404,6 @@ def test_max_and_max_by():
         empty.max_by(lambda x: x)
 
 
-def test_average_and_average_by():
-    numbers = flp.it([10, 20, 30])
-    assert numbers.average() == 20.0
-    assert numbers.to_list().average() == 20.0
-    assert numbers.avg() == 20.0
-
-    objs = flp.it([{"val": 5.5}, {"val": 14.5}])
-    assert objs.average_by(lambda x: x["val"]) == 10.0
-    assert objs.avg_by(lambda x: x["val"]) == 10.0
-
-    empty = flp.it([])
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.average()
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.average_by(lambda x: x)
-
-
 def test_ordering_chaining():
     data = FlpList([
         {"age": 30, "score": 90, "name": "Bob"},

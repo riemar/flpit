@@ -64,22 +64,6 @@ def test_average_selector() -> None:
     assert flp.it(rows).average(lambda row: row["x"]) == 3.0
 
 
-def test_average_by() -> None:
-    rows = [("a", 1), ("b", 5)]
-    assert flp.it(rows).average_by(lambda row: row[1]) == 3.0
-    assert flp.it(rows).avg_by(lambda row: row[1]) == 3.0
-
-
-def test_average_empty_raises() -> None:
-    with pytest.raises(EmptySequenceError):
-        flp.it([]).average()
-
-
-def test_average_by_empty_raises() -> None:
-    with pytest.raises(EmptySequenceError):
-        flp.it([]).average_by(lambda x: x)
-
-
 def test_average_callback_exception_propagates() -> None:
     def fail(value):
         raise RuntimeError("boom")
@@ -88,9 +72,9 @@ def test_average_callback_exception_propagates() -> None:
         flp.it([1, 2]).average(fail)
 
 
-def test_average_by_callback_exception_propagates() -> None:
+def test_average_callback_exception_propagates() -> None:
     with pytest.raises(RuntimeError, match="boom"):
-        flp.it([1, 2]).average_by(lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
+        flp.it([1, 2]).average(lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
 
 
 def test_sum_numbers() -> None:

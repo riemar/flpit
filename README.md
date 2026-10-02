@@ -243,7 +243,7 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 groups = query.group_by(lambda x: x % 3)
 
 result = (
-    groups
+    groups(...)
     .where(...)
     .select(...)
     .to_list()
@@ -309,3 +309,28 @@ uv add flpit
 ## 📜 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
+
+
+### Migrated .NET Unit Tests
+
+> Migrated from the official .NET Runtime LINQ Tests.
+> Note: The test cases exercise both core types, `FlpIt` and `FlpList`, with transitions between lazy and eager execution occurring as part of the individual test cases.
+
+```
+================================================================
+| Test Module File                               |  Test Cases |
+----------------------------------------------------------------
+| tests/nettests/test_all.py                     |          80 |
+| tests/nettests/test_any.py                     |          90 |
+| tests/nettests/test_average.py                 |         572 |
+| tests/nettests/test_last.py                    |          29 |
+| tests/nettests/test_order_by.py                |         100 |
+| tests/nettests/test_order_descending_by.py     |          45 |
+| tests/nettests/test_sum.py                     |         134 |
+| tests/nettests/test_take.py                    |          39 |
+| tests/nettests/test_then_by.py                 |          40 |
+| tests/nettests/test_then_descending_by.py      |          34 |
+----------------------------------------------------------------
+| GRAND TOTALS                                   |        1163 |
+================================================================
+```

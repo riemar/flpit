@@ -100,7 +100,24 @@ def test_average_accepts_decimal_like_float_convertible_values() -> None:
         def __float__(self):
             return float(self.value)
 
+        def __add__(self, other: Number) -> Number:
+            return self.value + other.value
+
+    # but it will blow up as __add__ / __iadd__ are not implemented
+    # with pytest.raises(TypeError):
     assert flp.it([Number(1), Number(3)]).average() == 2.0
+
+def test_average_accepts_decimal_like_float_convertible_values_and_throws_type_error_on_missing_add() -> None:
+    class Number:
+        def __init__(self, value):
+            self.value = value
+
+        def __float__(self):
+            return float(self.value)
+
+    # but it will blow up as __add__ / __iadd__ are not implemented
+    with pytest.raises(TypeError):
+        assert flp.it([Number(1), Number(3)]).average() == 2.0
 
 
 def test_sum_selector_can_return_ints_from_objects() -> None:

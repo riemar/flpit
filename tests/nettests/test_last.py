@@ -3,8 +3,6 @@ Copyright (c) .NET Foundation and Contributors.
 Copyright (c) FlpIt
 SPDX-License-Identifier: MIT
 
-Tests for the FlpIt ``last`` operator.
-
 Ported to pytest/Python from the .NET Runtime System.Linq LastTests.cs:
 https://github.com/dotnet/runtime/blob/main/src/libraries/System.Linq/tests/LastTests.cs
 

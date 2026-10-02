@@ -56,7 +56,7 @@ class TestAggregationsAndMaterialization:
         assert FlpIt([1, 2, 3, 4]).sum() == 10
         assert FlpIt(["a", "bb", "ccc"]).sum(lambda s: len(s)) == 6
         assert FlpIt([10, 20, 30]).average() == 20.0
-        assert FlpIt(["a", "bb"]).average_by(lambda s: len(s)) == 1.5
+
 
     def test_sum_repeated_execution_on_reusable_source(self):
         """

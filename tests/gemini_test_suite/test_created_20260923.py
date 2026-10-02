@@ -347,16 +347,6 @@ class TestFlpItAggregations:
         else:
             assert it.average(selector) == expected
             assert it.avg(selector) == expected
-            assert it.average_by(selector) == expected
-            assert it.avg_by(selector) == expected
-
-
-
-    def test_average_empty_raises(self):
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).average()
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).average_by(lambda x: x)
 
     @pytest.mark.parametrize(
         "data, selector, expected",

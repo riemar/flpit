@@ -1,5 +1,6 @@
 from __future__ import annotations
-from threading import Lock
+import decimal
+from decimal import Decimal, Overflow, Inexact
 
 import builtins
 from collections import UserList
@@ -12,7 +13,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Optional,
     Sequence,
     Set,
     Type,
@@ -79,6 +79,17 @@ def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
                 raise EmptySequenceError() from e
             raise
     return wrapper
+
+
+# noinspection unresolved-references,protected-member
+def dotnet_context() -> decimal._ContextManager: # awesome that type was not intended
+    # 1. Create and configure pure Context object
+    ctx = decimal.getcontext().copy()
+    ctx.prec = max(ctx.prec, 29)
+    ctx.traps[Overflow] = True
+    ctx.traps[Inexact] = True
+
+    return decimal.localcontext(ctx)
 
 
 class _FactoryIterable(Iterable[TItem], Generic[TItem]):
@@ -443,41 +454,61 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return self._extreme(builtins.max, key=key_selector)
 
     def average(
-            self, selector: Callable[[TItem], Union[int, float]] | _Sentinel = _SENTINEL
-    ) -> float:
+            self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
+    ) -> float | int | Decimal | None : # todo: adjust all types
         """Computes the arithmetic mean of the sequence, optionally applying a selector."""
-        total = 0.0
-        count = 0
-        query = (selector(x) for x in self) if selector is not _SENTINEL else self
-        for item in query:
-            total += float(item)  # type: ignore[arg-type]
-            count += 1
-        if count == 0:
-            raise EmptySequenceError()
-        return total / count
+        with dotnet_context():
+            total, count = self.__sum_and_count(selector)
+
+            if total is None:
+                return None
+
+            if isinstance(total, Decimal):
+                return total / Decimal(count)
+
+            assert total is not None
+            assert isinstance(total, Decimal) or isinstance(total, int) or isinstance(total, float)
+            return total / count
 
     avg = average
 
-    def average_by(self, key_selector: Callable[[TItem], Union[int, float]]) -> float:
-        """Computes the average of a sequence of numeric values projected by a key selector."""
-        total = 0.0
-        count = 0
-        for item in self:
-            total += float(key_selector(item))
-            count += 1
-        if count == 0:
-            raise EmptySequenceError()
-        return total / count
-
-    avg_by = average_by
-
     def sum(
-            self, selector: Callable[[TItem], Union[int, float]] | _Sentinel = _SENTINEL
-    ) -> Union[int, float]:
+            self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
+    ) -> Union[int, float, Decimal]:
         """Calculates the sum of the sequence, optionally applying a selector."""
-        if selector is not _SENTINEL:
-            return builtins.sum(selector(x) for x in self)
-        return builtins.sum(self)  # type: ignore[arg-type]
+        with dotnet_context():
+            total, count = self.__sum_and_count(selector)
+
+            if count == 0:
+                return 0
+
+            assert total is not None
+            assert isinstance(total, Decimal) or isinstance(total, int) or isinstance(total, float)
+            return total
+
+    def __sum_and_count(self, selector: Callable[[TItem], int | float | Decimal]) -> tuple[Decimal | float | int | TItem | None, int]:
+        if selector is None:
+            raise SelectorNoneError()
+
+        total = None
+        count: int = 0
+        query = (selector(x) for x in self) if selector is not _SENTINEL else self
+
+        for item in query:
+            if item is not None:
+                if total is None:
+                    total = item
+                else:
+                    try:
+                        total += item
+                    except (Overflow, Inexact):
+                        raise OverflowError(
+                            "System.OverflowException: Value was either too large or too small for a Decimal."
+                        )
+                count += 1
+
+        return total, count
+
 
     def count(
             self,
@@ -582,31 +613,7 @@ class OrderedIt(FlpIt[TItem]):
         else:
             self._criteria = _criteria + ((selector, descending),)
 
-    # def __iter__(self) -> Iterator[TItem]:
-    #     items = list(self._iterable)
-    #
-    #     for selector, descending in reversed(self._criteria):
-    #         keys = [selector(item) for item in items]
-    #
-    #         if any(key is None for key in keys):
-    #             # Null-aware path
-    #             items = [
-    #                 item
-    #                 for _, item in sorted(
-    #                     zip(keys, items),
-    #                     key=lambda pair: (
-    #                         pair[0] is not None,
-    #                         pair[0] if pair[0] is not None else 0,
-    #                     ),
-    #                     reverse=descending,
-    #                 )
-    #             ]
-    #         else:
-    #             # Fast path
-    #             items.sort(key=selector, reverse=descending)
-    #
-    #     yield from items
-
+    @override
     def __iter__(self) -> Iterator[TItem]:
         items = list(self._iterable)
 
@@ -844,22 +851,24 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         return builtins.max(self.data, key=key_selector)
 
     def sum(
-            self, selector: Callable[[TItem], int | float] | _Sentinel = _SENTINEL
-    ) -> int | float:
+            self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
+    ) -> int | float | Decimal:
         """Calculates the sum of elements, optionally applying a selector."""
         return FlpIt(self.data).sum(selector)
 
     def average(
-            self, selector: Callable[[TItem], int | float] | _Sentinel = _SENTINEL
-    ) -> float:
+            self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
+    ) -> float | int | Decimal | None:
         """Calculates the arithmetic mean, optionally applying a selector."""
         return FlpIt(self.data).average(selector)
 
     def count_item(self, item: TItem) -> int:
         return self.data.count(item) # just redirect how the count redirected before
 
+    # noinspection method-overriding
     @override
-    def count( # type: ignore  # pyrefly: ignore [bad-override-param-name]  # pyright: ignore[reportIncompatibleMethodOverride]
+    # pyrefly: ignore [bad-override-param-name]
+    def count(
             self,
             predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> int:
@@ -867,9 +876,8 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         Counts elements using LINQ semantics.
 
         Supported forms:
-
-            count()          -> total number of elements
-            count(predicate) -> number of elements satisfying the predicate
+            - count()          -> total number of elements
+            - count(predicate) -> number of elements satisfying the predicate
         """
         if predicate is _SENTINEL:
             return len(self.data)
