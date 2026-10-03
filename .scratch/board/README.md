@@ -58,7 +58,7 @@
 | D20 | **Negative indices count from the end** (`element_at(-1)` is the last element; maps .NET `^1`), consistent with `take(slice(...))` (N09). Breaking for code expecting `IndexError`. | L10, N09: upstream asserts like `ElementAtOrDefault(-1) == default` are skipped as `NO_INDEX_RANGE_TYPE`; legacy tests migrated. |
 | D21 | **Empty aggregates follow .NET non-nullable semantics**: `min`, `max`, `average` raise `EmptySequenceError` on an empty sequence; a sequence of only `None` returns `None` (the .NET nullable case); `None` elements are skipped. `sum` of empty stays `0`. **Breaking** for `average()` on empty (today returns `None`). | L27 (min/max + `average` alignment). |
 | D22 | **`rank`/`rank_by` rank by key** (equal keys share a rank), descending by default like MoreLINQ; MoreLINQ's item-dedup quirk is an `EXPECTED_DIFFERENCE`. | M27 |
-| D23 | **Bug-fix backfills pulled forward** to Phase 0.5 (B02, B01, B08, B04, B09) right after the foundation; the small validation bugs ride in F05. | Execution order §5. |
+| D23 | **Bug-fix backfills pulled forward** to Phase 0.5 (B02, B01, B08, B04, B09) right after the foundation, plus the heavily used `distinct` (B05) and `chunk` (B06: ~24× slower than `itertools.batched`, accepts non-int sizes); the small validation bugs ride in F05. | Execution order §5. |
 | D24 | **Tuple results are generic `NamedTuple`s** (still plain tuples for equality/unpacking): `Indexed(index, item)` (N01), `KeyValue(key, value)` (count_by/aggregate_by), `JoinPair(outer, inner)` (join, left/right/full join). `zip` keeps plain tuples (Python idiom). Defined once in the first card that needs them (L25 `JoinPair`; N01 the others). | L25, N01–N06 |
 | D25 | **`result_selector` is keyword-only** whenever a positional callable would be ambiguous (group_by, group_adjacent, split, zip_longest, equi_zip, cartesian, 3-way zip). Existing `zip(second, result_selector)` keeps positional for compatibility and also accepts the keyword. | L24, N08, M08, M09, M14–M16 |
 | D26 | **Equality rule** for value comparisons (`contains`, `sequence_equal`, `starts_with`, `ends_with`, set ops): `a is b or a == b` (so `nan` objects match themselves, like .NET `EqualityComparer.Default`), implemented once in `_equality.py` (L06). | L06, L14, L21–L23, M24 |
@@ -185,64 +185,64 @@ The numeric file prefix **is** the execution order; IDs are stable. "Extra deps"
 | 014 | B08 | [flp.repeat](014-B08-repeat.md) | S | — |
 | 015 | B04 | [of_type](015-B04-of-type.md) | S | — |
 | 016 | B09 | [to_list](016-B09-to-list.md) | S | — |
+| 017 | B05 | [distinct / distinct_by](017-B05-distinct.md) | S | — |
+| 018 | B06 | [chunk](018-B06-chunk.md) | S | — |
 
 ### Phase 1: Core .NET LINQ gaps (daily-use value)
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 017 | L01 | [skip](017-L01-skip.md) | S | — |
-| 018 | L02 | [take_while (+ indexed)](018-L02-take-while.md) | S | — |
-| 019 | L03 | [skip_while (+ indexed)](019-L03-skip-while.md) | S | L02 |
-| 020 | L04 | [take_last](020-L04-take-last.md) | S | — |
-| 021 | L05 | [skip_last](021-L05-skip-last.md) | S | L04 |
-| 022 | L06 | [contains](022-L06-contains.md) | S | — |
-| 023 | L07 | [first / first_or_default (D5 migration)](023-L07-first-or-default.md) | M | — |
-| 024 | L08 | [last_or_default](024-L08-last-or-default.md) | S | L04, L07 |
-| 025 | L09 | [single / single_or_default](025-L09-single-or-default.md) | S | L04, L07 |
-| 026 | L10 | [element_at (from-end) / element_at_or_default](026-L10-element-at-or-default.md) | S | L04, L07 |
-| 027 | L11 | [reverse](027-L11-reverse.md) | S | L04 |
-| 028 | L12 | [default_if_empty](028-L12-default-if-empty.md) | S | — |
-| 029 | L13 | [flp.empty](029-L13-empty.md) | S | — |
-| 030 | L14 | [sequence_equal](030-L14-sequence-equal.md) | S | L06 |
-| 031 | L15 | [where_indexed + WhereTests backfill](031-L15-where-indexed.md) | M | — |
-| 032 | L16 | [select_indexed + SelectTests backfill](032-L16-select-indexed.md) | M | L01, L08, L10, L15 |
-| 033 | L17 | [select_many overloads (result selector, indexed)](033-L17-select-many-overloads.md) | M | L15 |
-| 034 | L18 | [to_dictionary](034-L18-to-dictionary.md) | M | — |
-| 035 | L19 | [to_set / to_hash_set](035-L19-to-set.md) | S | — |
-| 036 | L20 | [to_lookup + Lookup type](036-L20-to-lookup.md) | M | — |
-| 037 | L21 | [union / union_by](037-L21-union.md) | M | L06 |
-| 038 | L22 | [intersect / intersect_by](038-L22-intersect.md) | S | L06, L21 |
-| 039 | L23 | [except_ / except_by](039-L23-except.md) | S | L06, L21 |
-| 040 | L24 | [group_by overloads (element/result selector)](040-L24-group-by-overloads.md) | M | L20 |
-| 041 | L25 | [join](041-L25-join.md) | M | L20 |
-| 042 | L26 | [group_join](042-L26-group-join.md) | M | L20, L25 |
-| 043 | L27 | [min / max selector overloads + MinBy/MaxBy backfill](043-L27-min-max-overloads.md) | M | — |
-| 044 | L28 | [aggregate result-selector overload + backfill](044-L28-aggregate-result-selector.md) | S | — |
+| 019 | L01 | [skip](019-L01-skip.md) | S | — |
+| 020 | L02 | [take_while (+ indexed)](020-L02-take-while.md) | S | — |
+| 021 | L03 | [skip_while (+ indexed)](021-L03-skip-while.md) | S | L02 |
+| 022 | L04 | [take_last](022-L04-take-last.md) | S | — |
+| 023 | L05 | [skip_last](023-L05-skip-last.md) | S | L04 |
+| 024 | L06 | [contains](024-L06-contains.md) | S | — |
+| 025 | L07 | [first / first_or_default (D5 migration)](025-L07-first-or-default.md) | M | — |
+| 026 | L08 | [last_or_default](026-L08-last-or-default.md) | S | L04, L07 |
+| 027 | L09 | [single / single_or_default](027-L09-single-or-default.md) | S | L04, L07 |
+| 028 | L10 | [element_at (from-end) / element_at_or_default](028-L10-element-at-or-default.md) | S | L04, L07 |
+| 029 | L11 | [reverse](029-L11-reverse.md) | S | L04 |
+| 030 | L12 | [default_if_empty](030-L12-default-if-empty.md) | S | — |
+| 031 | L13 | [flp.empty](031-L13-empty.md) | S | — |
+| 032 | L14 | [sequence_equal](032-L14-sequence-equal.md) | S | L06 |
+| 033 | L15 | [where_indexed + WhereTests backfill](033-L15-where-indexed.md) | M | — |
+| 034 | L16 | [select_indexed + SelectTests backfill](034-L16-select-indexed.md) | M | L01, L08, L10, L15 |
+| 035 | L17 | [select_many overloads (result selector, indexed)](035-L17-select-many-overloads.md) | M | L15 |
+| 036 | L18 | [to_dictionary](036-L18-to-dictionary.md) | M | — |
+| 037 | L19 | [to_set / to_hash_set](037-L19-to-set.md) | S | — |
+| 038 | L20 | [to_lookup + Lookup type](038-L20-to-lookup.md) | M | — |
+| 039 | L21 | [union / union_by](039-L21-union.md) | M | L06 |
+| 040 | L22 | [intersect / intersect_by](040-L22-intersect.md) | S | L06, L21 |
+| 041 | L23 | [except_ / except_by](041-L23-except.md) | S | L06, L21 |
+| 042 | L24 | [group_by overloads (element/result selector)](042-L24-group-by-overloads.md) | M | L20 |
+| 043 | L25 | [join](043-L25-join.md) | M | L20 |
+| 044 | L26 | [group_join](044-L26-group-join.md) | M | L20, L25 |
+| 045 | L27 | [min / max selector overloads + MinBy/MaxBy backfill](045-L27-min-max-overloads.md) | M | — |
+| 046 | L28 | [aggregate result-selector overload + backfill](046-L28-aggregate-result-selector.md) | S | — |
 
 ### Phase 2: Modern .NET (9 / 10 / main)
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 045 | N01 | [index](045-N01-index.md) | S | — |
-| 046 | N02 | [count_by](046-N02-count-by.md) | S | N01 |
-| 047 | N03 | [aggregate_by](047-N03-aggregate-by.md) | S | N02 |
-| 048 | N04 | [left_join](048-N04-left-join.md) | M | L20, L25, N01 |
-| 049 | N05 | [right_join](049-N05-right-join.md) | M | L20, N04 |
-| 050 | N06 | [full_join](050-N06-full-join.md) | M | L20, N04 |
-| 051 | N07 | [order / order_descending](051-N07-order.md) | S | L07, L08, L10 |
-| 052 | N08 | [zip 3-way + ZipTests backfill](052-N08-zip-three-way.md) | M | — |
-| 053 | N09 | [take(slice) (Take(Range))](053-N09-take-slice.md) | M | L01, L04, L05, L07, L08, L10 |
-| 054 | N10 | [try_get_non_enumerated_count](054-N10-try-get-non-enumerated-count.md) | S | N09 |
-| 055 | N11 | [shuffle](055-N11-shuffle.md) | S | L07, L08, L10 |
-| 056 | N12 | [flp.sequence / flp.infinite_sequence](056-N12-sequence.md) | S | — |
+| 047 | N01 | [index](047-N01-index.md) | S | — |
+| 048 | N02 | [count_by](048-N02-count-by.md) | S | N01 |
+| 049 | N03 | [aggregate_by](049-N03-aggregate-by.md) | S | N02 |
+| 050 | N04 | [left_join](050-N04-left-join.md) | M | L20, L25, N01 |
+| 051 | N05 | [right_join](051-N05-right-join.md) | M | L20, N04 |
+| 052 | N06 | [full_join](052-N06-full-join.md) | M | L20, N04 |
+| 053 | N07 | [order / order_descending](053-N07-order.md) | S | L07, L08, L10 |
+| 054 | N08 | [zip 3-way + ZipTests backfill](054-N08-zip-three-way.md) | M | — |
+| 055 | N09 | [take(slice) (Take(Range))](055-N09-take-slice.md) | M | L01, L04, L05, L07, L08, L10 |
+| 056 | N10 | [try_get_non_enumerated_count](056-N10-try-get-non-enumerated-count.md) | S | N09 |
+| 057 | N11 | [shuffle](057-N11-shuffle.md) | S | L07, L08, L10 |
+| 058 | N12 | [flp.sequence / flp.infinite_sequence](058-N12-sequence.md) | S | — |
 
 ### Phase B: Remaining backfill of .NET tests for existing operators (parallelisable)
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 057 | B03 | [cast](057-B03-cast.md) | S | — |
-| 058 | B05 | [distinct / distinct_by](058-B05-distinct.md) | S | — |
-| 059 | B06 | [chunk](059-B06-chunk.md) | S | — |
+| 059 | B03 | [cast](059-B03-cast.md) | S | — |
 | 060 | B07 | [flp.range](060-B07-range.md) | S | — |
 
 ### Phase 3: Curated MoreLINQ (high value)
@@ -295,7 +295,7 @@ The numeric file prefix **is** the execution order; IDs are stable. "Extra deps"
 ### Dependency sketch
 ```
 F01 → F02 → F03 ─┬→ F04 ─────────────────────────┐
-                 ├→ F05 → F06 ─┬→ F08 ─┬→ Phase 0.5 (B02 → B01, B08, B04, B09) → L/N/B/M cards
+                 ├→ F05 → F06 ─┬→ F08 ─┬→ Phase 0.5 (B02 → B01, B08, B04, B09 → B05, B06) → L/N/B/M cards
                  └→ F07 ───────┤  F09 ─┘
                                └→ A01 → A02 (needs F04 for versioning)
 Helper chains (see §3.1 helper table):
