@@ -49,9 +49,10 @@ Segments are `FlpList` (same choice as `chunk`), so they are re-iterable, indexa
 ### 3.3 Implementation sketch
 ```python
 def segment_with_previous(self, predicate):
-    _require_not_none(predicate, "predicate")
+    _require_callable(predicate, "predicate")
+    src = self._source()
     def _generator():
-        it = iter(self)
+        it = iter(src)
         for previous in it:              # at most one iteration: the first element
             current_segment = [previous]
             for index, current in enumerate(it, 1):
@@ -80,7 +81,7 @@ morelinq = "MoreEnumerable.Segment"
 python_equivalent = "manual loop accumulating runs"
 since = "0.4.0"   # Phase 3 target; adjust when the release is cut
 ```
-(`segment_indexed` and `segment_with_previous` get identical entries with their own names, so contract tests cover all three.)
+`[operators.segment_indexed]` and `[operators.segment_with_previous]` repeat these fields plus `variant_of = "segment"` (same pattern as L02), so contract tests cover all three.
 
 ## 4. Tests
 - **Ported:** none (D7). `SegmentTest.cs` (8 cases) as checklist, all applicable and covered by own tests: laziness, identity segment (predicate always false → one segment), empty sequence, every element a segment, first segment never empty for all three shapes, segmentation starts with the second item, segment by index, segment by previous. Target: 100 %.

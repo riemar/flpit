@@ -61,7 +61,7 @@ Implementation signature: `split(self, separator=_SENTINEL, count=None, *, predi
 def _generator():
     remaining = count            # None = unlimited
     part: list | None = None
-    for item in self:
+    for item in src:                                   # src = self._source() (F05)
         if remaining != 0 and is_sep(item):        # is_sep bound once: predicate or identity/== check
             yield emit(part or [])
             if remaining is not None:

@@ -48,6 +48,7 @@ def tag_first_last(
 - None elements are ordinary items.
 - Validation (eager): `result_selector is None` raises `ArgumentNoneError("result_selector")`; omitting it selects the default.
 - Exceptions from the source while looking ahead surface **before** the current element is yielded (same as MoreLINQ, since `MoveNext` happens first).
+- New public name: `TaggedItem` is added to `flpit.__all__` and `tests/contracts/public_api.txt` (F05 snapshot).
 - Re-enumeration re-runs the source.
 
 ### 3.3 Implementation sketch
@@ -55,8 +56,9 @@ def tag_first_last(
 def tag_first_last(self, result_selector=_SENTINEL):
     if result_selector is None:
         raise ArgumentNoneError("result_selector")
+    src = self._source()                                        # F05
     def _generator():
-        it = iter(self)
+        it = iter(src)
         for current in it:
             break
         else:
@@ -85,9 +87,13 @@ category = "projection"
 kind = "intermediate"
 buffering = "partial"      # one-element look-ahead
 short_circuit = false
+origin = "morelinq"
+dotnet = ""
 morelinq = "MoreEnumerable.TagFirstLast"
 python_equivalent = "[(x, i == 0, i == len(xs) - 1) for i, x in enumerate(xs)]"
+contract_args = "()"
 since = "0.4.0"   # adjust to the release that ships it
+card = "M20"
 ```
 
 ## 4. Tests
@@ -105,8 +111,9 @@ since = "0.4.0"   # adjust to the release that ships it
 
 ## 5. Differential harness
 `difftest/specs/tag_first_last.toml`; oracle calls `MoreEnumerable.TagFirstLast(source, (x, f, l) => new { x, f, l })` serialized as `[x, f, l]`; the Python side maps `TaggedItem` to the same 3-element list.
-- Sources: empty, singleton, two, many, strings, nullable ints, a throwing source (throws at index 0, 1, 2).
-- Probes: result, `source_items_requested` after `first()` and after `take(k)`, `selector_calls`, exception timing.
+- Sources: `list`, `one_shot`, `counting`, `throwing_at(i)` for i in {0, 1, 2}; items: empty, singleton, two, many, strings, ints with nulls.
+- Terminals: `to_list`, `first`, `take(k)` then `to_list`.
+- Probes: values and `trace` (look-ahead visible as `src.move_next(i+1)` before `yield(i)`; selector `fn.call` right before each yield; exception position).
 - Expected: all MATCH.
 
 ## 6. Benchmarks

@@ -63,10 +63,10 @@ New TypeVar `TElement` (shared with L24).
 ```python
 def _generator():
     if element_selector is _SENTINEL:
-        for key, run in groupby(self, key_selector):
+        for key, run in groupby(src, key_selector):
             yield make(key, list(run))
     else:
-        for key, run in groupby(self, key_selector):
+        for key, run in groupby(src, key_selector):
             yield make(key, list(map(element_selector, run)))
 # make = Grouping (default) or lambda k, xs: result_selector(k, FlpList(xs))
 ```

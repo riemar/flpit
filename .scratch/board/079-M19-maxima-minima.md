@@ -23,6 +23,13 @@ pr:
 - The `IExtremaEnumerable<T>` return type and its members `Take(n)`, `TakeLast(n)` and the `First/FirstOrDefault/Last/LastOrDefault/Single/SingleOrDefault` extension overloads. They only bound memory (keep the first/last `n` extremes instead of all); the **values** they return are identical to `maxima(k).take(n)`, `.take_last(n)` (L04), `.first()` and so on over the plain `FlpIt`. Dropped extras are listed in README deviations; a bounded-memory `_ExtremaIt` subclass can be a follow-up if a benchmark ever needs it.
 - A keyless `maxima()`: not in MoreLINQ; `maxima(lambda x: x)` covers it.
 
+**MoreLINQ overload mapping**
+| MoreLINQ | flpit |
+|---|---|
+| `Maxima(selector)` / `Minima(selector)` | `maxima(key_selector)` / `minima(key_selector)` |
+| `Maxima(selector, IComparer<TKey>)` / `Minima(...)` | omitted (D3); reversed comparer = the other method |
+| `IExtremaEnumerable.Take/TakeLast`, `First/Last/Single(+OrDefault)(IExtremaEnumerable)` | `.take(n)`, `.take_last(n)`, `.first()`, ... on the returned `FlpIt` (same values, no memory bound) |
+
 ## 3. Detailed design
 ### 3.1 Signatures
 ```python
@@ -48,7 +55,8 @@ def minima(self, key_selector: Callable[[TItem], Any]) -> FlpIt[TItem]: ...
 ```python
 def maxima(self, key_selector):
     _require_callable(key_selector, "key_selector")             # F05 helper
-    return FlpIt(_FactoryIterable(lambda: _extrema(self, key_selector, operator.gt)))
+    src = self._source()                                         # F05: self for FlpIt, backing list for FlpList
+    return FlpIt(_FactoryIterable(lambda: _extrema(src, key_selector, operator.gt)))
 
 def _extrema(source, key_selector, better):                     # module-level, shared by minima (operator.lt)
     it = iter(source)
@@ -76,18 +84,15 @@ category = "aggregation"
 kind = "intermediate"
 buffering = "full"
 short_circuit = false
+origin = "morelinq"
+dotnet = ""
 morelinq = "MoreEnumerable.Maxima"
 python_equivalent = "m = max(map(key, xs)); [x for x in xs if key(x) == m]"
+contract_args = "(len,)"
 since = "0.4.0"   # adjust to the release that ships it
+card = "M19"
 
-[operators.minima]
-category = "aggregation"
-kind = "intermediate"
-buffering = "full"
-short_circuit = false
-morelinq = "MoreEnumerable.Minima"
-python_equivalent = "m = min(map(key, xs)); [x for x in xs if key(x) == m]"
-since = "0.4.0"
+[operators.minima]   # same fields; morelinq = "MoreEnumerable.Minima", python_equivalent uses min
 ```
 
 ## 4. Tests
@@ -108,9 +113,10 @@ since = "0.4.0"
 
 ## 5. Differential harness
 `difftest/specs/maxima.toml`, `difftest/specs/minima.toml`; oracle `difftest/oracle/Operators/Maxima.cs` calls `MoreEnumerable.Maxima(source, selector)` statically (avoids extension-method ambiguity with .NET 10).
-- Sources: empty, singleton, all equal, ints with ties at start/middle/end, strings, records `{id, score}` with duplicate scores, nullable ints (None keys).
-- Selectors from the harness catalogue: `identity`, `mod(k)`, `field(score)`, `len`, `throws_on(v)`.
-- Probes: result sequence, `selector_calls` (= n), `source_enumerations` (= 1 per enumeration), re-enumeration twice.
+- Items: empty, singleton, all equal, ints with ties at start/middle/end, strings, ints with nulls (None keys).
+- Sources (F09 kinds): `list`, `one_shot`, `throwing_at(i)`, `counting`.
+- Key selectors from the F09 catalogue: `identity`, `mod(k)`, `key_len`, `throws_on(k)`; records with a `score` field once X01 adds record domains.
+- Probes: values, `trace` (exactly one `fn.call` per element in source order, all `src.move_next` before the first `yield`), re-enumeration twice.
 - Expected: all MATCH. Mixed-type keys are UNCOMPARABLE (.NET throws `ArgumentException`, Python `TypeError`; excluded from the domain with that reason).
 
 ## 6. Benchmarks
