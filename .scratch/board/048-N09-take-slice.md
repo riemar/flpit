@@ -48,7 +48,7 @@ def take(self, count: int | slice) -> FlpIt[TItem]: ...   # implementation; keyw
 - Kind: intermediate, deferred. Buffering: streaming for `int` and for non-negative bounds; partial otherwise (bounded buffer, below). Short-circuit: stops pulling once the window is complete when `stop >= 0`.
 - **Specification**: `list(q.take(s)) == list(q)[s]` for every `slice` with `step in (None, 1)`, on any source. Python's clamping rules equal .NET's (`Take` never throws for out-of-range bounds): negative bounds below `-len` clamp to 0, bounds past the end clamp to `len`, `start >= stop` after normalisation is empty.
 - Validation (eager): `slice.step` not `None`/`1` → `ArgumentOutOfRangeError("range")` (a `ValueError`) with message "step must be None or 1; use take_every for strides"; `start`/`stop` must be `None` or index-like (`operator.index`), else `TypeError`.
-- **Known-empty windows return an empty query without touching the source** (as .NET): both bounds non-negative with `start >= stop`; both bounds negative with `stop >= start` (e.g. `slice(-2, -3)`).
+- **Known-empty windows return an empty query without touching the source** (as .NET): both bounds non-negative with `start >= stop`; both bounds negative with `stop <= start` (e.g. `slice(-2, -3)`; .NET `^s..^e` with `e >= s`).
 - Pull behaviour by bound kind (mirrors `Take.cs`; `n` = source length):
   | start | stop | strategy | first element yielded after | memory |
   |---|---|---|---|---|
@@ -76,7 +76,7 @@ def _take_slice(self, s):
     start, stop = _normalise_slice(s)            # validates step, operator.index on bounds
     a = 0 if start is None else start
     if (a >= 0 and stop is not None and stop >= 0 and a >= stop) or \
-       (a < 0 and stop is not None and stop < 0 and stop >= a):
+       (a < 0 and stop is not None and stop < 0 and stop <= a):
         return FlpIt(())
     if a >= 0 and (stop is None or stop >= 0):
         src = self._source()
@@ -90,11 +90,11 @@ def _take_range_from_end(q, a, stop):            # shared with take_last / skip_
         yield from islice(q._source(), lo, hi); return
     it = iter(q._source())
     if a < 0:                                     # start from end: buffer last -a items
-        counter = count()
+        counter = itertools.count()
         dq = deque(map(itemgetter(0), zip(it, counter)), maxlen=-a)   # C-level, counts n
         n = next(counter); m = len(dq)
         lo, hi, _ = slice(a, stop).indices(n)
-        yield from islice(dq, lo - (n - m), hi - (n - m))
+        yield from islice(dq, 0, max(0, hi - (n - m)))     # lo == n - m by construction
     else:                                         # start from start, stop = -e: sliding queue
         e = -stop
         it = islice(it, a, None)
