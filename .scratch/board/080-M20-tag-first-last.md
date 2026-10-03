@@ -38,7 +38,7 @@ def tag_first_last(
     self, result_selector: Callable[[TItem, bool, bool], Any] | _Sentinel = _SENTINEL
 ) -> FlpIt[Any]: ...
 ```
-.NET overload mapping: `TagFirstLast(Func<TSource, bool, bool, TResult>)` → `tag_first_last(result_selector)` with the same argument order `(item, is_first, is_last)`. The no-argument form is a Python addition (MoreLINQ users write `(x, f, l) => (x, f, l)`).
+MoreLINQ overload mapping: `TagFirstLast(Func<TSource, bool, bool, TResult>)` → `tag_first_last(result_selector)` with the same argument order `(item, is_first, is_last)`. The no-argument form is a Python addition (MoreLINQ users write `(x, f, l) => (x, f, l)`).
 
 ### 3.2 Semantics
 - Kind: intermediate, deferred. Buffering: partial, a look-ahead of exactly one element. Short-circuit: n/a, but it never pulls more than one element beyond what it has yielded.

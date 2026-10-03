@@ -36,6 +36,8 @@ Implement the first vertical slice of the private differential-testing system in
       Sources.cs            # same source kinds, with trace hooks
       Operators/*.cs        # one file per operator (Where.cs first)
   ```
+- Source kinds: `list`, `one_shot`, `throwing_at(i)`, `counting`, and `factory` (scenario starts from a factory such as `flp.range`/`flp.repeat`/`flp.sequence`/traverse instead of a source list; used by B07, B08, N12, M18).
+- Comparison profiles: `exact` (default) and `sorted_ties_unordered` (elements with equal sort keys may appear in any order; used by M28 because MoreLINQ's partial sort is unstable).
 - Slice operator: **`where`** (exercises predicate catalog, laziness, exceptions) with terminals `to_list`, `first`, `count`.
 - Probe: **execution trace** (ordered events: `src.get_enumerator`, `src.move_next(i)`, `fn.call(name, arg)`, `yield(value)`, `throw(type, message)`).
 - One deterministic regression test captured from a harness case into `tests/regressions/test_difftest_where.py` (via `python -m difftest repro --emit-pytest`).
@@ -73,6 +75,11 @@ Exceptions: `"result":{"kind":"exception","type":"InvalidOperationException","me
 | "more than one element" / "more than one matching element" | `Multiple*Error` | idem |
 | `ArgumentOutOfRangeException` | `ArgumentOutOfRangeError` / `IndexError` (element_at) | type family + timing |
 | catalog `throws_on` → `TestException` | `TestException` | type + position in trace |
+| `ArgumentException` (duplicate key) | `DuplicateKeyError` | message (L18) |
+| `InvalidCastException` | `InvalidCastError` | message family (B03) |
+| MoreLINQ `InvalidOperationException` "First/Second sequence too short." | `SequenceLengthMismatchError` | message + index (M15) |
+| MoreLINQ fold count mismatch | `SequenceCountError` | message (M31) |
+Rows are added by the card that introduces the exception.
 Per testplan §27, message equality is primary and type is secondary.
 
 ### 3.4 Classification

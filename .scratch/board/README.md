@@ -27,6 +27,7 @@
 | Docs | README only; docstrings are uneven (some one-liners, some none on FlpList). | F06 + every card |
 | Benchmarks | `pytest-benchmark` installed; one ordering benchmark; benchmarks deselected by default (`-m 'not benchmark'`). | F07 + every card |
 | Differential testing | `.agents/testplan.md` specifies a .NET oracle harness (JSON Lines); nothing is implemented. | F09 + every card |
+| **Confirmed bugs** (reproduced on 3.12 while planning) | `flp.repeat(x, n)` is one-shot (second enumeration empty); ~1000 chained `concat`/`append`/`prepend` raise `RecursionError` (nested generators); `of_type(object)` yields `None` (.NET `OfType` never yields null); `concat(None)`, `where(None)`, `select(None)`, `select_many(None)`, `group_by(None)` fail only on enumeration; `aggregate(None, seed)` on an empty source returns `seed`; `min_by(None)`/`max_by(None)` silently behave like `min()`/`max()`; `chunk(2.5)` is accepted; `flp.range`/`flp.repeat` with negative counts return empty instead of raising; `FlpList` construction is ~15× slower than `list()` (via `UserList`); `tests/nettests/test_count.py` defines `test_it_Int` twice (the FlpIt variant never runs). | Phase 0.5 (B02, B01, B08, B04, B09), F05, F08, L27, L28, B06, B07 |
 
 ---
 
@@ -53,12 +54,22 @@
 | D17 | **Conversions**: `to_dictionary` → `dict` (raises `DuplicateKeyError` on duplicates), `to_set` (alias `to_hash_set`) → `set`, `to_lookup` → new immutable `Lookup[TKey, TItem]`. | L18–L20. |
 | D18 | **Differential harness included early** (F09); every operator card registers a harness spec and passes the differential CI job. | Every card. |
 | D19 | **Test tree reorganised** (F02); nothing deleted, only moved. | — |
+| D20 | **Negative indices count from the end** (`element_at(-1)` is the last element; maps .NET `^1`), consistent with `take(slice(...))` (N09). Breaking for code expecting `IndexError`. | L10, N09: upstream asserts like `ElementAtOrDefault(-1) == default` are skipped as `NO_INDEX_RANGE_TYPE`; legacy tests migrated. |
+| D21 | **Empty aggregates follow .NET non-nullable semantics**: `min`, `max`, `average` raise `EmptySequenceError` on an empty sequence; a sequence of only `None` returns `None` (the .NET nullable case); `None` elements are skipped. `sum` of empty stays `0`. **Breaking** for `average()` on empty (today returns `None`). | L27 (min/max + `average` alignment). |
+| D22 | **`rank`/`rank_by` rank by key** (equal keys share a rank), descending by default like MoreLINQ; MoreLINQ's item-dedup quirk is an `EXPECTED_DIFFERENCE`. | M27 |
+| D23 | **Bug-fix backfills pulled forward** to Phase 0.5 (B02, B01, B08, B04, B09) right after the foundation; the small validation bugs ride in F05. | Execution order §5. |
+| D24 | **Tuple results are generic `NamedTuple`s** (still plain tuples for equality/unpacking): `Indexed(index, item)` (N01), `KeyValue(key, value)` (count_by/aggregate_by), `JoinPair(outer, inner)` (join, left/right/full join). `zip` keeps plain tuples (Python idiom). Defined once in the first card that needs them (L25 `JoinPair`; N01 the others). | L25, N01–N06 |
+| D25 | **`result_selector` is keyword-only** whenever a positional callable would be ambiguous (group_by, group_adjacent, split, zip_longest, equi_zip, cartesian, 3-way zip). Existing `zip(second, result_selector)` keeps positional for compatibility and also accepts the keyword. | L24, N08, M08, M09, M14–M16 |
+| D26 | **Equality rule** for value comparisons (`contains`, `sequence_equal`, `starts_with`, `ends_with`, set ops): `a is b or a == b` (so `nan` objects match themselves, like .NET `EqualityComparer.Default`), implemented once in `_equality.py` (L06). | L06, L14, L21–L23, M24 |
+| D27 | **Argument order `func` before `seed`** for `aggregate`, `aggregate_by`, `scan`, `pre_scan` (existing flpit API) even though .NET puts `seed` first; `seed_selector` is keyword-only. | L28, N03, M03, M04 |
 
-### Open questions, to be resolved inside the named card (each card proposes a default)
-1. Keyword collision: `Except` becomes **`except_`** (PEP 8 trailing underscore) with `except_by`. Alternative: `difference`. → L23
-2. FullJoin is only in runtime `main`, not in a GA SDK. The harness oracle runs on .NET 10 GA, so `full_join` is verified by ported unit tests only until GA. → N06, F09
-3. `Take(Range)` / `ElementAt(Index)` map to Python `slice` / negative ints. → L10, N09
-4. Rename the `range(start, count)` factory? It shadows the builtin inside `flp`; kept as-is, documented. → B07
+### Open questions: status
+1. `Except`: resolved as **`except_`** + `except_by`, no alias (L23).
+2. Operators newer than the .NET 10 GA oracle (**FullJoin, tuple-returning Join, selector-less GroupJoin**: .NET 11 / runtime `main`): verified by ported unit tests; in the harness they are exercised through the GA result-selector overloads with an equivalent lambda (`(o, i) => (o, i)`) where possible, otherwise `UNCOMPARABLE` until the oracle SDK moves to .NET 11 (X01). (L25, L26, N04–N06, F09)
+3. `Take(Range)` / `ElementAt(Index)`: resolved by D20 (`slice` / negative ints). (L10, N09)
+4. `flp.range(start, count)`: resolved, kept (.NET signature), documented as shadowing the builtin only inside `flp`; removed from `flp.__all__` so `from flpit.flp import *` cannot shadow `range` (B07).
+5. `to_dictionary` with `None` keys: allowed (Python dicts accept `None`), documented deviation (.NET throws). (L18) **Maintainer may override.**
+6. Unhashable elements in set ops / `distinct` / `to_set`: `TypeError` (no silent O(n²) fallback). (L21–L23, B05)
 
 ---
 
@@ -71,7 +82,20 @@
 - **Return types**: intermediate → `FlpIt[T]` (`OrderedIt[T]` for ordering); terminal → plain value; materialisers → `FlpList` / `dict` / `set` / `Lookup`.
 - **FlpList**: never mutated by LINQ operators. Overrides allowed only for O(1)/O(k) fast paths whose observable behaviour (values, exceptions, callback calls) is identical.
 - **Fast paths on FlpIt for `Sequence` sources** (e.g. `take_last` slicing a `list`): allowed only if results, exceptions and callback invocation counts are identical; tests must cover both a `list` source and the `non_collection` fixture.
-- **Exceptions**: reuse the existing taxonomy (`EmptySequenceError`, `NoMatchError`, `MultipleElementsError`, `MultipleMatchesError`, `SourceNoneError`, ...). New ones (F05/cards): `ArgumentNoneError(TypeError)`, `ArgumentOutOfRangeError(ValueError)`, `DuplicateKeyError(ValueError)`. Index out of range on `element_at` stays `IndexError`. Messages mirror .NET wording.
+- **Exceptions**: reuse the existing taxonomy (`EmptySequenceError`, `NoMatchError`, `MultipleElementsError`, `MultipleMatchesError`, `SourceNoneError`, ...). New ones (F05/cards): `ArgumentNoneError(TypeError)`, `ArgumentOutOfRangeError(ValueError)`, `DuplicateKeyError(ValueError)` (L18), `InvalidCastError(TypeError)` (B03), `SequenceLengthMismatchError(ValueError)` (M15, with `.index`), `SequenceCountError(ValueError)` (M31); the last two share a base `SequenceShapeError(ValueError)` introduced by whichever lands first. Index out of range on `element_at` stays `IndexError`. Messages mirror .NET wording.
+- **Result tuples / keyword selectors / equality / argument order**: see D24–D27.
+- **Shared private helpers** (the first card listed introduces it, later ones reuse; never duplicate):
+  | Helper | Introduced by | Reused by |
+  |---|---|---|
+  | `_require_*` validation (`_require_bool` added for M27/M28) | F05 | all |
+  | `_ChainIterable` (flat chain, no recursion) | B02 | B01, concat-like ops |
+  | `FlpList._adopt(list)` (no-copy construction) | B09 | B06 chunk, M02 window, M29/M30, every op building many FlpLists |
+  | `_indexable()` (Sequence fast-path detection) | L04 | L05, L08–L11 |
+  | `_equality.py` (`items_equal`, `container_contains`) | L06 | L14, L21–L23, M24 |
+  | indexed-callback helper | first of L02/L15 to land | L03, L16, L17, M26 |
+  | set-operation helper | L21 | L22, L23 |
+  | lookup builder + read-only `Grouping` (len/index/in) | L20 | L24–L26, N04–N06 |
+  | `_count_if_cheap()` (absorbs `_sized_source`) | N09 | N10 (public `try_get_non_enumerated_count`), L10, M23, M24, B08 |
 - **Typing**: `@overload` per .NET overload/variation; `pyrefly` strict must be clean; each card adds `tests/typing/test_types_<op>.py` with `typing.assert_type` checks.
 
 ### 3.2 Tests (layout after F02)
@@ -85,7 +109,7 @@ tests/
 difftest/               # differential harness (python runner + dotnet oracle)
 ```
 - **Porting rules (F08)**: one `test_<op>.py` per upstream `*Tests.cs`; keep the upstream test names (snake_case) for traceability; parametrize with the `flp_type` fixture (FlpIt + FlpList); every non-portable case is kept as an explicit `pytest.skip(reason=<CATEGORY>: detail)` with categories `COMPARER_NOT_SUPPORTED`, `NO_VALUE_TYPES`, `NO_SPAN_OR_ARRAY`, `NO_INDEX_RANGE_TYPE`, `INTERNAL_OPTIMIZATION`, `NO_NULLABLE_DISTINCTION`, `LONG_RUNNING`, `OTHER`. Skips are counted by `scripts/nettest_report.py` (the former `nettest_skips.py`) into the README table.
-- **Contract tests**: each operator's registry entry declares `kind = intermediate|terminal|factory` and `buffering = streaming|partial|full`, plus `short_circuit = true|false`. `tests/contracts/` auto-parametrizes over the registry, so a new operator gets deferral/one-shot/short-circuit checks for free once registered.
+- **Contract tests**: each operator's registry entry declares `kind = intermediate|terminal|factory` and `buffering = streaming|partial|full|hybrid` (`hybrid` = fully buffers one input, streams the other: intersect, except, joins), plus `short_circuit`, `deferred_validation` (true only when an argument can only be checked during enumeration, e.g. M30 `subsets(k)`), `aliases` (e.g. `to_hash_set`), `contract_args`, `contract_max_pull`. F08 also provides a `requires_op("name")` marker that skips ported tests depending on operators not yet implemented. `tests/contracts/` auto-parametrizes over the registry, so a new operator gets deferral/one-shot/short-circuit checks for free once registered.
 
 ### 3.3 Benchmarks
 - `tests/benchmarks/test_bench_<op>.py`, groups `"<op>-<size>"`, sizes `1_000` and `100_000`, three variants: `flpit-FlpIt`, `flpit-FlpList`, `native` (most idiomatic stdlib/itertools equivalent, written as a reviewer would expect).
@@ -133,9 +157,11 @@ uv run python -m difftest run --op <op>            # requires dotnet SDK locally
 ## 5. Priority list
 
 Status values: `todo`, `doing`, `review`, `done`, `dropped`. Effort: S ≤ ½ day, M ≤ 1–2 days, L > 2 days.
+The numeric file prefix **is** the execution order; IDs are stable. "Extra deps" lists dependencies beyond the standard foundation set (F05–F09).
 
 ### Phase 0: Foundation (blocking, in order)
-| # | ID | Card | Effort | Depends |
+
+| # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
 | 001 | F01 | [Python floor 3.12 + red tests](001-F01-python-floor-and-red-tests.md) | S | — |
 | 002 | F02 | [Test tree reorganisation](002-F02-test-tree-reorg.md) | S | F01 |
@@ -145,125 +171,146 @@ Status values: `todo`, `doing`, `review`, `done`, `dropped`. Effort: S ≤ ½ da
 | 006 | F06 | [Operator registry, docstring conventions, docs generator](006-F06-operator-registry-and-docs.md) | M | F05 |
 | 007 | F07 | [Benchmark infrastructure + tracked history](007-F07-benchmark-infra.md) | M | F03 |
 | 008 | F08 | [.NET test porting kit + registry-driven contract tests](008-F08-nettest-porting-kit.md) | M | F06 |
-| 009 | F09 | [Differential harness: smallest end-to-end slice](009-F09-differential-harness-slice.md) | L | F06 |
+| 009 | F09 | [Differential harness: smallest end-to-end slice](009-F09-differential-harness-slice.md) | L | F06, F08 |
 | 010 | A01 | [Agent skill (SKILL.md + generated references)](010-A01-agent-skill.md) | M | F06 |
 | 011 | A02 | [Claude plugin + marketplace in this repo](011-A02-claude-plugin-marketplace.md) | S | A01, F04 |
 
+### Phase 0.5: Bug-fix backfills (pulled forward, decision D23)
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 012 | B02 | [concat](012-B02-concat.md) | S | — |
+| 013 | B01 | [append / prepend](013-B01-append-prepend.md) | S | — |
+| 014 | B08 | [flp.repeat](014-B08-repeat.md) | S | — |
+| 015 | B04 | [of_type](015-B04-of-type.md) | S | — |
+| 016 | B09 | [to_list](016-B09-to-list.md) | S | — |
+
 ### Phase 1: Core .NET LINQ gaps (daily-use value)
-| # | ID | Card | Effort |
-|---|---|---|---|
-| 012 | L01 | [skip](012-L01-skip.md) | S |
-| 013 | L02 | [take_while (+ indexed)](013-L02-take-while.md) | S |
-| 014 | L03 | [skip_while (+ indexed)](014-L03-skip-while.md) | S |
-| 015 | L04 | [take_last](015-L04-take-last.md) | S |
-| 016 | L05 | [skip_last](016-L05-skip-last.md) | S |
-| 017 | L06 | [contains](017-L06-contains.md) | S |
-| 018 | L07 | [first / first_or_default (D5 migration)](018-L07-first-or-default.md) | M |
-| 019 | L08 | [last_or_default](019-L08-last-or-default.md) | S |
-| 020 | L09 | [single / single_or_default](020-L09-single-or-default.md) | S |
-| 021 | L10 | [element_at (from-end) / element_at_or_default](021-L10-element-at-or-default.md) | S |
-| 022 | L11 | [reverse](022-L11-reverse.md) | S |
-| 023 | L12 | [default_if_empty](023-L12-default-if-empty.md) | S |
-| 024 | L13 | [flp.empty](024-L13-empty.md) | S |
-| 025 | L14 | [sequence_equal](025-L14-sequence-equal.md) | S |
-| 026 | L15 | [where_indexed + WhereTests backfill](026-L15-where-indexed.md) | M |
-| 027 | L16 | [select_indexed + SelectTests backfill](027-L16-select-indexed.md) | M |
-| 028 | L17 | [select_many overloads (result selector, indexed)](028-L17-select-many-overloads.md) | M |
-| 029 | L18 | [to_dictionary](029-L18-to-dictionary.md) | M |
-| 030 | L19 | [to_set / to_hash_set](030-L19-to-set.md) | S |
-| 031 | L20 | [to_lookup + Lookup type](031-L20-to-lookup.md) | M |
-| 032 | L21 | [union / union_by](032-L21-union.md) | M |
-| 033 | L22 | [intersect / intersect_by](033-L22-intersect.md) | S |
-| 034 | L23 | [except_ / except_by](034-L23-except.md) | S |
-| 035 | L24 | [group_by overloads (element/result selector)](035-L24-group-by-overloads.md) | M |
-| 036 | L25 | [join](036-L25-join.md) | M |
-| 037 | L26 | [group_join](037-L26-group-join.md) | M |
-| 038 | L27 | [min / max selector overloads + MinBy/MaxBy backfill](038-L27-min-max-overloads.md) | M |
-| 039 | L28 | [aggregate result-selector overload + backfill](039-L28-aggregate-result-selector.md) | S |
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 017 | L01 | [skip](017-L01-skip.md) | S | — |
+| 018 | L02 | [take_while (+ indexed)](018-L02-take-while.md) | S | — |
+| 019 | L03 | [skip_while (+ indexed)](019-L03-skip-while.md) | S | L02 |
+| 020 | L04 | [take_last](020-L04-take-last.md) | S | — |
+| 021 | L05 | [skip_last](021-L05-skip-last.md) | S | L04 |
+| 022 | L06 | [contains](022-L06-contains.md) | S | — |
+| 023 | L07 | [first / first_or_default (D5 migration)](023-L07-first-or-default.md) | M | — |
+| 024 | L08 | [last_or_default](024-L08-last-or-default.md) | S | L04, L07 |
+| 025 | L09 | [single / single_or_default](025-L09-single-or-default.md) | S | L04, L07 |
+| 026 | L10 | [element_at (from-end) / element_at_or_default](026-L10-element-at-or-default.md) | S | L04, L07 |
+| 027 | L11 | [reverse](027-L11-reverse.md) | S | L04 |
+| 028 | L12 | [default_if_empty](028-L12-default-if-empty.md) | S | — |
+| 029 | L13 | [flp.empty](029-L13-empty.md) | S | — |
+| 030 | L14 | [sequence_equal](030-L14-sequence-equal.md) | S | L06 |
+| 031 | L15 | [where_indexed + WhereTests backfill](031-L15-where-indexed.md) | M | — |
+| 032 | L16 | [select_indexed + SelectTests backfill](032-L16-select-indexed.md) | M | L01, L08, L10, L15 |
+| 033 | L17 | [select_many overloads (result selector, indexed)](033-L17-select-many-overloads.md) | M | L15 |
+| 034 | L18 | [to_dictionary](034-L18-to-dictionary.md) | M | — |
+| 035 | L19 | [to_set / to_hash_set](035-L19-to-set.md) | S | — |
+| 036 | L20 | [to_lookup + Lookup type](036-L20-to-lookup.md) | M | — |
+| 037 | L21 | [union / union_by](037-L21-union.md) | M | L06 |
+| 038 | L22 | [intersect / intersect_by](038-L22-intersect.md) | S | L06, L21 |
+| 039 | L23 | [except_ / except_by](039-L23-except.md) | S | L06, L21 |
+| 040 | L24 | [group_by overloads (element/result selector)](040-L24-group-by-overloads.md) | M | L20 |
+| 041 | L25 | [join](041-L25-join.md) | M | L20 |
+| 042 | L26 | [group_join](042-L26-group-join.md) | M | L20, L25 |
+| 043 | L27 | [min / max selector overloads + MinBy/MaxBy backfill](043-L27-min-max-overloads.md) | M | — |
+| 044 | L28 | [aggregate result-selector overload + backfill](044-L28-aggregate-result-selector.md) | S | — |
 
 ### Phase 2: Modern .NET (9 / 10 / main)
-| # | ID | Card | Effort |
-|---|---|---|---|
-| 040 | N01 | [index](040-N01-index.md) | S |
-| 041 | N02 | [count_by](041-N02-count-by.md) | S |
-| 042 | N03 | [aggregate_by](042-N03-aggregate-by.md) | S |
-| 043 | N04 | [left_join](043-N04-left-join.md) | M |
-| 044 | N05 | [right_join](044-N05-right-join.md) | M |
-| 045 | N06 | [full_join](045-N06-full-join.md) | M |
-| 046 | N07 | [order / order_descending](046-N07-order.md) | S |
-| 047 | N08 | [zip 3-way + ZipTests backfill](047-N08-zip-three-way.md) | M |
-| 048 | N09 | [take(slice) (Take(Range))](048-N09-take-slice.md) | M |
-| 049 | N10 | [try_get_non_enumerated_count](049-N10-try-get-non-enumerated-count.md) | S |
-| 050 | N11 | [shuffle](050-N11-shuffle.md) | S |
-| 051 | N12 | [flp.sequence / flp.infinite_sequence](051-N12-sequence.md) | S |
 
-### Phase B: Backfill .NET tests for existing operators (parallelisable, interleave freely)
-| # | ID | Card | Effort |
-|---|---|---|---|
-| 052 | B01 | [append / prepend](052-B01-append-prepend.md) | S |
-| 053 | B02 | [concat](053-B02-concat.md) | S |
-| 054 | B03 | [cast](054-B03-cast.md) | S |
-| 055 | B04 | [of_type](055-B04-of-type.md) | S |
-| 056 | B05 | [distinct / distinct_by](056-B05-distinct.md) | S |
-| 057 | B06 | [chunk](057-B06-chunk.md) | S |
-| 058 | B07 | [flp.range](058-B07-range.md) | S |
-| 059 | B08 | [flp.repeat](059-B08-repeat.md) | S |
-| 060 | B09 | [to_list](060-B09-to-list.md) | S |
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 045 | N01 | [index](045-N01-index.md) | S | — |
+| 046 | N02 | [count_by](046-N02-count-by.md) | S | N01 |
+| 047 | N03 | [aggregate_by](047-N03-aggregate-by.md) | S | N02 |
+| 048 | N04 | [left_join](048-N04-left-join.md) | M | L20, L25, N01 |
+| 049 | N05 | [right_join](049-N05-right-join.md) | M | L20, N04 |
+| 050 | N06 | [full_join](050-N06-full-join.md) | M | L20, N04 |
+| 051 | N07 | [order / order_descending](051-N07-order.md) | S | L07, L08, L10 |
+| 052 | N08 | [zip 3-way + ZipTests backfill](052-N08-zip-three-way.md) | M | — |
+| 053 | N09 | [take(slice) (Take(Range))](053-N09-take-slice.md) | M | L01, L04, L05, L07, L08, L10 |
+| 054 | N10 | [try_get_non_enumerated_count](054-N10-try-get-non-enumerated-count.md) | S | N09 |
+| 055 | N11 | [shuffle](055-N11-shuffle.md) | S | L07, L08, L10 |
+| 056 | N12 | [flp.sequence / flp.infinite_sequence](056-N12-sequence.md) | S | — |
+
+### Phase B: Remaining backfill of .NET tests for existing operators (parallelisable)
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 057 | B03 | [cast](057-B03-cast.md) | S | — |
+| 058 | B05 | [distinct / distinct_by](058-B05-distinct.md) | S | — |
+| 059 | B06 | [chunk](059-B06-chunk.md) | S | — |
+| 060 | B07 | [flp.range](060-B07-range.md) | S | — |
 
 ### Phase 3: Curated MoreLINQ (high value)
-| # | ID | Card | Effort |
-|---|---|---|---|
-| 061 | M01 | [pairwise](061-M01-pairwise.md) | S |
-| 062 | M02 | [window / window_left / window_right](062-M02-window.md) | M |
-| 063 | M03 | [scan / scan_right](063-M03-scan.md) | S |
-| 064 | M04 | [pre_scan](064-M04-pre-scan.md) | S |
-| 065 | M05 | [lag](065-M05-lag.md) | S |
-| 066 | M06 | [lead](066-M06-lead.md) | S |
-| 067 | M07 | [segment](067-M07-segment.md) | S |
-| 068 | M08 | [split](068-M08-split.md) | S |
-| 069 | M09 | [group_adjacent](069-M09-group-adjacent.md) | M |
-| 070 | M10 | [run_length_encode](070-M10-run-length-encode.md) | S |
-| 071 | M11 | [fill_forward / fill_backward](071-M11-fill-forward-backward.md) | S |
-| 072 | M12 | [pad / pad_start](072-M12-pad.md) | S |
-| 073 | M13 | [interleave](073-M13-interleave.md) | S |
-| 074 | M14 | [zip_longest](074-M14-zip-longest.md) | S |
-| 075 | M15 | [equi_zip](075-M15-equi-zip.md) | S |
-| 076 | M16 | [cartesian](076-M16-cartesian.md) | S |
-| 077 | M17 | [flatten](077-M17-flatten.md) | M |
-| 078 | M18 | [traverse_depth_first / traverse_breadth_first](078-M18-traverse.md) | S |
-| 079 | M19 | [maxima / minima](079-M19-maxima-minima.md) | S |
-| 080 | M20 | [tag_first_last](080-M20-tag-first-last.md) | S |
-| 081 | M21 | [take_every](081-M21-take-every.md) | S |
-| 082 | M22 | [take_until / skip_until](082-M22-take-until-skip-until.md) | S |
-| 083 | M23 | [at_least / at_most / exactly / count_between](083-M23-count-bounds.md) | S |
-| 084 | M24 | [starts_with / ends_with](084-M24-starts-ends-with.md) | S |
-| 085 | M25 | [to_delimited_string](085-M25-to-delimited-string.md) | S |
-| 086 | M26 | [for_each / consume](086-M26-for-each-consume.md) | S |
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 061 | M01 | [pairwise](061-M01-pairwise.md) | S | — |
+| 062 | M02 | [window / window_left / window_right](062-M02-window.md) | M | — |
+| 063 | M03 | [scan / scan_right](063-M03-scan.md) | S | — |
+| 064 | M04 | [pre_scan](064-M04-pre-scan.md) | S | — |
+| 065 | M05 | [lag](065-M05-lag.md) | S | — |
+| 066 | M06 | [lead](066-M06-lead.md) | S | — |
+| 067 | M07 | [segment](067-M07-segment.md) | S | — |
+| 068 | M08 | [split](068-M08-split.md) | S | — |
+| 069 | M09 | [group_adjacent](069-M09-group-adjacent.md) | M | — |
+| 070 | M10 | [run_length_encode](070-M10-run-length-encode.md) | S | — |
+| 071 | M11 | [fill_forward / fill_backward](071-M11-fill-forward-backward.md) | S | — |
+| 072 | M12 | [pad / pad_start](072-M12-pad.md) | S | — |
+| 073 | M13 | [interleave](073-M13-interleave.md) | S | — |
+| 074 | M14 | [zip_longest](074-M14-zip-longest.md) | S | — |
+| 075 | M15 | [equi_zip](075-M15-equi-zip.md) | S | M14 |
+| 076 | M16 | [cartesian](076-M16-cartesian.md) | S | M14 |
+| 077 | M17 | [flatten](077-M17-flatten.md) | M | — |
+| 078 | M18 | [traverse_depth_first / traverse_breadth_first](078-M18-traverse.md) | S | — |
+| 079 | M19 | [maxima / minima](079-M19-maxima-minima.md) | S | — |
+| 080 | M20 | [tag_first_last](080-M20-tag-first-last.md) | S | — |
+| 081 | M21 | [take_every](081-M21-take-every.md) | S | — |
+| 082 | M22 | [take_until / skip_until](082-M22-take-until-skip-until.md) | S | L02, L03 |
+| 083 | M23 | [at_least / at_most / exactly / count_between](083-M23-count-bounds.md) | S | N10 |
+| 084 | M24 | [starts_with / ends_with](084-M24-starts-ends-with.md) | S | L04, L06, N10 |
+| 085 | M25 | [to_delimited_string](085-M25-to-delimited-string.md) | S | — |
+| 086 | M26 | [for_each / consume](086-M26-for-each-consume.md) | S | — |
 
 ### Phase 4: Niche MoreLINQ
-| # | ID | Card | Effort |
-|---|---|---|---|
-| 087 | M27 | [rank / rank_by](087-M27-rank.md) | S |
-| 088 | M28 | [partial_sort / partial_sort_by](088-M28-partial-sort.md) | M |
-| 089 | M29 | [permutations](089-M29-permutations.md) | S |
-| 090 | M30 | [subsets](090-M30-subsets.md) | S |
-| 091 | M31 | [fold](091-M31-fold.md) | S |
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 087 | M27 | [rank / rank_by](087-M27-rank.md) | S | — |
+| 088 | M28 | [partial_sort / partial_sort_by](088-M28-partial-sort.md) | M | — |
+| 089 | M29 | [permutations](089-M29-permutations.md) | S | B09 |
+| 090 | M30 | [subsets](090-M30-subsets.md) | S | B09, M29 |
+| 091 | M31 | [fold](091-M31-fold.md) | S | — |
 
 ### Future / epics
-| # | ID | Card |
-|---|---|---|
-| 092 | X01 | [Differential harness: compositions, property-based generation, full coverage](092-X01-difftest-expansion.md) |
+
+| # | ID | Card | Effort | Extra deps |
+|---|---|---|---|---|
+| 092 | X01 | [Differential harness: compositions, property-based generation, full coverage](092-X01-difftest-expansion.md) | L | F03 |
 
 ### Dependency sketch
 ```
-F01 → F02 → F03 ─┬→ F04 ──────────────┐
-                 ├→ F05 → F06 ─┬→ F08 ─┼→ every L/N/B/M card
-                 └→ F07 ───────┤  F09 ─┤
+F01 → F02 → F03 ─┬→ F04 ─────────────────────────┐
+                 ├→ F05 → F06 ─┬→ F08 ─┬→ Phase 0.5 (B02 → B01, B08, B04, B09) → L/N/B/M cards
+                 └→ F07 ───────┤  F09 ─┘
                                └→ A01 → A02 (needs F04 for versioning)
-L06 contains ← L21–L23 set ops reuse the hashing helper
-L20 Lookup ← L26 group_join, N04–N06 joins reuse lookup building
-L15/L16 indexed pattern ← L02/L03/L17 indexed variants (either order; first one lands the helper)
+Helper chains (see §3.1 helper table):
+  B02 _ChainIterable → B01        B09 _adopt → B06, M02, M29, M30
+  L04 _indexable → L05, L08–L11   L06 _equality → L14, L21–L23, M24
+  L21 set helper → L22, L23       L20 lookup/Grouping → L24–L26, N04–N06
+  L25 JoinPair → N04–N06          N01 Indexed/KeyValue → N02, N03
+  N09 _count_if_cheap → N10 → B08 (count provider), M23, M24
+  M14 → M15, M16                  L01, L08, L10 ← L16 (ported tests use them)
 ```
+Cards declare these in `depends_on`; when a card depends on a later-numbered card, that dependency only gates the *ported tests* (via `requires_op`), not the implementation.
+
+### Candidate follow-ups (not yet carded)
+- O(n) `OrderedIt.first()/last()` without a full sort (.NET `OrderedIterator.TryGetFirst/Last`), noted by L07/L08.
+- Split `_LinqOps` into per-category mixins once `linq.py` exceeds ~2,500 lines (F05 §3.1).
+- Nightly harness job on the .NET 11 SDK to compare FullJoin / tuple Join / selector-less GroupJoin (X01).
 
 ---
 

@@ -34,6 +34,8 @@ Before ~80 operators are added, remove the structural duplication between `FlpIt
   - `DuplicateKeyError(ValueError)` (reserved for L18)
 - **Eager argument validation** on all existing deferred operators (`where`, `select`, `select_many`, `distinct_by`, `zip`, `concat`, `group_by`, `order_by*`, `then_by*`, `cast`, `of_type`): `None` callables/sources now raise at call time, not at first enumeration (matches .NET `ArgumentNullException` timing; rules.md "Callbacks & Exceptions" unaffected, since callbacks still run lazily).
 - Public-API guard tests (see §4).
+- **Small validation bug fixes pulled forward (D23)**: `aggregate(None, seed)` → `ArgumentNoneError("func")` (today returns `seed` on empty input); `min_by(None)`/`max_by(None)` → `ArgumentNoneError("key_selector")` (today silently behave like `min()`/`max()`); `chunk(2.5)` → `TypeError` via `_require_index` (today accepted). Each gets a regression test in `tests/unit/test_argument_validation.py`.
+- `_require_bool(value, param)` helper (used later by M27/M28).
 
 **Out:** new operators; renaming; PEP 695 syntax migration; any semantic change other than validation timing.
 

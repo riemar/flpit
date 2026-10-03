@@ -45,7 +45,7 @@ category       = "filtering"          # filtering|projection|partitioning|orderi
                                       # element|quantifier|aggregation|conversion|generation|
                                       # concatenation|windowing|combinatorics|misc
 kind           = "intermediate"       # intermediate|terminal|factory
-buffering      = "streaming"          # streaming|partial|full
+buffering      = "streaming"          # streaming|partial|full|hybrid (hybrid: buffers one input fully, streams the other)
 short_circuit  = false                # terminal ops: stops early when result known
 deferred_validation = false           # true only if an argument can't be validated eagerly
 origin         = "dotnet"             # dotnet|morelinq|flpit
@@ -53,6 +53,10 @@ dotnet         = "Enumerable.Where"   # or "" for morelinq-only
 morelinq       = ""                   # e.g. "MoreEnumerable.Window"
 python_equivalent = "(x for x in xs if pred(x))"
 variations     = ["where_indexed"]    # methods delivered together (D4/D5 variants)
+aliases        = []                   # e.g. ["to_hash_set"] on to_set
+contract_args  = "(lambda x: x > 1,)" # example args for registry-driven contract tests (F08)
+contract_max_pull = ""                # short-circuit bound expression, e.g. "1" for first()
+bench_target   = 1.5                  # optional override of the default ratio target (F07)
 classes        = ["FlpIt", "FlpList", "OrderedIt", "Grouping"]   # default: all via _LinqOps
 status         = "implemented"        # implemented|planned|dropped
 since          = "0.1.0"

@@ -14,7 +14,7 @@ pr:
 # M19: `maxima` / `minima`
 
 ## 1. Goal
-`max_by`/`min_by` return exactly one element, so "all employees with the top salary" needs two passes (`m = max(map(key, xs)); [x for x in xs if key(x) == m]`) or a hand-written loop. MoreLINQ `Maxima`/`Minima` return **every** element whose key is extreme, in source order, in one pass. It is the most requested MoreLINQ aggregate-style operator and reuses the None-aware key ordering that `order_by` already has.
+`max_by`/`min_by` return exactly one element, so "all employees with the top salary" needs two passes (`m = max(map(key, xs)); [x for x in xs if key(x) == m]`) or a hand-written loop. MoreLINQ `Maxima`/`Minima` return **every** element whose key is extreme, in source order, in one pass. It is one of the most commonly used MoreLINQ aggregate-style operators and reuses the None-aware key ordering that `order_by` already has.
 
 ## 2. Scope
 **In:** `maxima(key_selector)` and `minima(key_selector)` on `_LinqOps` (FlpIt, FlpList, OrderedIt, Grouping). No FlpList override.
