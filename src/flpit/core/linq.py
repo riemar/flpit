@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import SupportsIndex
 import decimal
 from decimal import Decimal, Overflow, Inexact
 
@@ -6,14 +7,15 @@ import builtins
 from collections import UserList
 from functools import wraps
 from itertools import islice
+
 from typing import (
     Any,
     Callable,
     Generic,
     Iterable,
     Iterator,
+    Collection,
     List,
-    Sequence,
     Set,
     Type,
     TypeVar,
@@ -22,7 +24,6 @@ from typing import (
     overload,
     cast as typing_cast,
 )
-
 TItem = TypeVar("TItem")
 TResult = TypeVar("TResult")
 TKey = TypeVar("TKey")
@@ -75,7 +76,7 @@ def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return func(self, *args, **kwargs)
         except ValueError as e:
-            if not self.data:
+            if not self._FlpList__list.data:
                 raise EmptySequenceError() from e
             raise
     return wrapper
@@ -672,7 +673,7 @@ class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
         return self.key == other.key and self.to_list() == other.to_list()
 
 
-class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
+class FlpList(Collection[TItem], Generic[TItem]):
     """
     | Fluent List
     A materialized list extending UserList that yields lazy FlpIt instances for query operations.
@@ -686,7 +687,88 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         else:
             init_list = typing_cast(Iterable[TItem], source)
 
-        super().__init__(init_list)
+        self.__list: UserList[TItem] = UserList[TItem](init_list)
+
+    # =====================================================================
+    # 1. THE ABC CONTRACT
+    # =====================================================================
+    def __iter__(self) -> Iterator[Any]:
+        return self.__list.__iter__()
+
+    def __len__(self) -> int:
+        """Evaluates the stream to get total count."""
+        return self.__list.__len__()
+
+    def __contains__(self, item: TItem) -> bool:
+        return self.__list.__contains__(item)
+
+    # =====================================================================
+    # 2. Keep some of the Python UserList like behavior
+    # =====================================================================
+
+    def __repr__(self):
+        return self.__list.__repr__()
+
+    def __str__(self) -> str:
+        return self.__list.__str__()
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, FlpList):
+            return self.__list.__eq__(other.__list)
+        return self.__list.__eq__(other)
+
+    def __lt__(self, other: Any) -> bool:
+        target = other.__list if isinstance(other, FlpList) else other
+        return self.__list.__lt__(target)
+
+    def __le__(self, other: Any) -> bool:
+        target = other.__list if isinstance(other, FlpList) else other
+        return self.__list.__le__(target)
+
+    def __gt__(self, other: Any) -> bool:
+        target = other.__list if isinstance(other, FlpList) else other
+        return self.__list.__gt__(target)
+
+    def __ge__(self, other: Any) -> bool:
+        target = other.__list if isinstance(other, FlpList) else other
+        return self.__list.__ge__(target)
+
+
+    @overload
+    def __getitem__(self, index: SupportsIndex) -> TItem: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> FlpList[TItem]: ...
+
+    def __getitem__(self, index: SupportsIndex | slice):
+        if isinstance(index, slice):
+            return self.__class__(self.__list[index])
+        else:
+            return self.__list[index]
+
+    @overload
+    def __setitem__(self, index: SupportsIndex, value: TItem) -> None: ...
+
+    @overload
+    def __setitem__(self, index: slice, value: Iterable[TItem]) -> None: ...
+
+    def __setitem__(
+            self,
+            index: SupportsIndex | slice,
+            value: TItem | Iterable[TItem],
+    ) -> None:
+        if isinstance(index, slice):
+            if not isinstance(value, Iterable):
+                raise TypeError("slice assignment requires an iterable value")
+            self.__list.data[index] = value
+        else:
+            if isinstance(value, Iterable):
+                raise TypeError("item assignment requires a non-iterable value")
+            self.__list.data[index] = value
+
+    # =====================================================================
+    # 3. Put .NET List<T> mechanics on top
+    # =====================================================================
 
     def add(self, item: TItem) -> None:
         """
@@ -696,7 +778,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         - type checks
         - manual of_type(...) filter if you don't trust your checks
         """
-        self.data.append(item)
+        self.__list.data.append(item)
 
     def add_range(self, items: Iterable[TItem]) -> None:
         """
@@ -707,21 +789,7 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
         - type checks
         - manual of_type(...) filter if you don't trust your checks
         """
-        # 1. Optimized Path: Fast memory extensions for pre-materialized sequences
-        if isinstance(items, (Sequence, list, tuple, UserList)):
-            self.data.extend(items)
-            return
-
-        # 2. Stream Path: Volatile one-shot generator handling
-        it = iter(items)
-        try:
-            first_item = next(it)
-        except StopIteration:
-            return
-
-        # Append the tracked peek-element and stream the remainder safely
-        self.data.append(first_item)
-        self.data.extend(it)
+        self.__list.data.extend(items)
 
     @overload
     def any(self) -> bool: ...
@@ -734,55 +802,55 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
     ) -> bool:
         if predicate is _SENTINEL:
-            return len(self.data) > 0
+            return len(self.__list.data) > 0
 
-        return any(predicate(item) for item in self.data)
+        return any(predicate(item) for item in self.__list.data)
 
     def all(
             self,
             predicate: Callable[[TItem], bool],
     ) -> bool:
-        return all(predicate(item) for item in self.data)
+        return all(predicate(item) for item in self.__list.data)
 
-    def append_linq(self, element: TItem) -> FlpIt[TItem]:
+    def append(self, element: TItem) -> FlpIt[TItem]:
         """Appends an element to the sequence lazily, returning a FlpIt without mutating this list."""
-        return FlpIt(self.data).append(element)
+        return FlpIt(self.__list.data).append(element)
 
     def prepend(self, element: TItem) -> FlpIt[TItem]:
         """Prepends an element to the sequence lazily, returning a FlpIt without mutating this list."""
-        return FlpIt(self.data).prepend(element)
+        return FlpIt(self.__list.data).prepend(element)
 
     # noinspection unused-parameter
     def as_type(self, target_type: Type[TResult]) -> FlpList[TResult]:
         return self  # type: ignore[return-value]
 
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
-        return FlpIt(self.data).where(predicate)
+        return FlpIt(self.__list.data).where(predicate)
 
     def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
-        return FlpIt(self.data).select(selector)
+        return FlpIt(self.__list.data).select(selector)
 
     def select_many(
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
-        return FlpIt(self.data).select_many(selector)
+        return FlpIt(self.__list.data).select_many(selector)
 
     def take(self, count: int) -> FlpIt[TItem]:
-        return FlpIt(self.data).take(count)
+        return FlpIt(self.__list.data).take(count)
 
     def cast(self, target_type: Type[TResult]) -> FlpIt[TResult]:
-        return FlpIt(self.data).cast(target_type)
+        return FlpIt(self.__list.data).cast(target_type)
 
     def of_type(self, target_type: Type[TResult]) -> FlpIt[TResult]:
-        return FlpIt(self.data).of_type(target_type)
+        return FlpIt(self.__list.data).of_type(target_type)
 
     def distinct(self) -> FlpIt[TItem]:
-        return FlpIt(self.data).distinct()
+        return FlpIt(self.__list.data).distinct()
 
     def distinct_by(
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[TItem]:
-        return FlpIt(self.data).distinct_by(key_selector)
+        return FlpIt(self.__list.data).distinct_by(key_selector)
 
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
@@ -799,25 +867,25 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             second: Iterable[TOther],
             result_selector: Callable[[TItem, TOther], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
-        return FlpIt(self.data).zip(second, result_selector)
+        return FlpIt(self.__list.data).zip(second, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
-        return FlpIt(self.data).chunk(size)
+        return FlpIt(self.__list.data).chunk(size)
 
     def order_by(
             self, key_selector: Callable[[TItem], Any]
     ) -> OrderedIt[TItem]:
-        return FlpIt(self.data).order_by(key_selector)
+        return FlpIt(self.__list.data).order_by(key_selector)
 
     def order_by_descending(
             self, key_selector: Callable[[TItem], Any]
     ) -> OrderedIt[TItem]:
-        return FlpIt(self.data).order_by_descending(key_selector)
+        return FlpIt(self.__list.data).order_by_descending(key_selector)
 
     def group_by(
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[Grouping[TKey, TItem]]:
-        return FlpIt(self.data).group_by(key_selector)
+        return FlpIt(self.__list.data).group_by(key_selector)
 
     @overload
     def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
@@ -832,42 +900,36 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             func: Callable[[Any, Any], Any],
             seed: Any = _SENTINEL,
     ) -> TItem | TAccumulate:
-        return FlpIt(self.data).aggregate(func, seed=seed)
+        return FlpIt(self.__list.data).aggregate(func, seed=seed)
 
     @_guard_empty
     def min(self) -> TItem:
-        return builtins.min(self.data) # pyrefly: ignore [bad-specialization]
+        return builtins.min(self.__list.data) # pyrefly: ignore [bad-specialization]
 
     @_guard_empty
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        return builtins.min(self.data, key=key_selector)
+        return builtins.min(self.__list.data, key=key_selector)
 
     @_guard_empty
     def max(self) -> TItem:
-        return builtins.max(self.data) # pyrefly: ignore [bad-specialization]
+        return builtins.max(self.__list.data) # pyrefly: ignore [bad-specialization]
 
     @_guard_empty
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        return builtins.max(self.data, key=key_selector)
+        return builtins.max(self.__list.data, key=key_selector)
 
     def sum(
             self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
     ) -> int | float | Decimal:
         """Calculates the sum of elements, optionally applying a selector."""
-        return FlpIt(self.data).sum(selector)
+        return FlpIt(self.__list.data).sum(selector)
 
     def average(
             self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
     ) -> float | int | Decimal | None:
         """Calculates the arithmetic mean, optionally applying a selector."""
-        return FlpIt(self.data).average(selector)
+        return FlpIt(self.__list.data).average(selector)
 
-    def count_item(self, item: TItem) -> int:
-        return self.data.count(item) # just redirect how the count redirected before
-
-    # noinspection method-overriding
-    @override
-    # pyrefly: ignore [bad-override-param-name]
     def count(
             self,
             predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
@@ -880,17 +942,17 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             - count(predicate) -> number of elements satisfying the predicate
         """
         if predicate is _SENTINEL:
-            return len(self.data)
+            return len(self.__list.data)
 
-        return FlpIt(self.data).count(predicate)
+        return FlpIt(self.__list.data).count(predicate)
 
     def element_at(self, index: int) -> TItem:
-        if index < 0 or index >= len(self.data):
+        if index < 0 or index >= len(self.__list.data):
             raise IndexError("Index out of range")
-        return self.data[index]
+        return self.__list.data[index]
 
     def first(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
-        return FlpIt(self.data).first(predicate)
+        return FlpIt(self.__list.data).first(predicate)
 
     @overload
     def last(self) -> TItem: ...
@@ -917,11 +979,11 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
             raise PredicateNoneError()
 
         if predicate is _SENTINEL:
-            if not self.data:
+            if not self.__list.data:
                 raise EmptySequenceError()
-            return self.data[-1]
+            return self.__list.data[-1]
 
-        for item in reversed(self.data):
+        for item in reversed(self.__list.data):
             if predicate(item):
                 return item
 
@@ -930,11 +992,11 @@ class FlpList(UserList[TItem], Sequence[TItem], Generic[TItem]):
     def first_or_default(
             self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
     ) -> TItem | TResult:
-        return FlpIt(self.data).first_or_default(default, predicate)
+        return FlpIt(self.__list.data).first_or_default(default, predicate)
 
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
-        return FlpIt(self.data).single(predicate)
+        return FlpIt(self.__list.data).single(predicate)
 
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
-        return FlpList(self.data.copy())
+        return FlpList(self.__list.data.copy())

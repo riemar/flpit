@@ -92,6 +92,6 @@ def test_flplist_slice_is_supported() -> None:
 
 def test_flplist_extend_inherited_behavior() -> None:
     result = FlpList([1])
-    result.extend([2, 3])
+    result.add_range([2, 3])
     assert result == [1, 2, 3]
 

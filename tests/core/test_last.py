@@ -46,8 +46,8 @@ def test_last_propagates_iterator_error(flp_type) -> None:
 
 
 def test_last_uses_indexing_without_predicate() -> None:
-    data = flp.lst([1, 2, 3])
-    data.data = NoIterList(data.data)
+    data = flp.lst([])
+    data._FlpList__list.data = NoIterList([1, 2, 3])
 
     assert data.last() == 3
 

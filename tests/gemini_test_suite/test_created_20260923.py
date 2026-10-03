@@ -575,7 +575,7 @@ class TestFlpListSpecifics:
         orig = FlpList([1, 2, 3])
         copy_lst = orig.to_list()
 
-        copy_lst.append(4)
+        copy_lst.add(4)
         assert orig == [1, 2, 3]
         assert copy_lst == [1, 2, 3, 4]
 
@@ -589,18 +589,6 @@ class TestFlpListSpecifics:
     def test_count(self, arg: tuple, expected: int):
         flp = FlpList([1, 2, 2, 3, 4])
         assert flp.count(*arg) == expected
-
-
-    @pytest.mark.parametrize(
-        "item, expected",
-        [
-            (2, 2),
-            ("non_existent", 0),
-        ],
-    )
-    def test_count_item(self, item: Any, expected: int):
-        flp = FlpList([1, 2, 2, 3, 4])
-        assert flp.count_item(item) == expected
 
 
     def test_guarded_empty_methods_on_flp_list(self):
@@ -635,7 +623,7 @@ class TestFlpListSpecifics:
         assert flp.where(lambda x: x > 3).to_list() == [4, 5]
         assert flp.select(lambda x: x * 10).to_list() == [10, 20, 30, 40, 50]
         assert flp.take(2).to_list() == [1, 2]
-        assert flp.append_linq(6).to_list() == [1, 2, 3, 4, 5, 6]
+        assert flp.append(6).to_list() == [1, 2, 3, 4, 5, 6]
         assert flp.prepend(0).to_list() == [0, 1, 2, 3, 4, 5]
         assert flp.sum() == 15
         assert flp.average() == 3.0

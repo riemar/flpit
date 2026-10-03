@@ -16,7 +16,7 @@ def test_flplist_to_list_returns_shallow_independent_copy() -> None:
 
 def test_flplist_append_linq_is_lazy_and_does_not_mutate() -> None:
     original = FlpList([1, 2])
-    query = original.append_linq(3)
+    query = original.append(3)
     assert isinstance(query, flp.FlpIt)
     assert original == [1, 2]
     assert list(query) == [1, 2, 3]

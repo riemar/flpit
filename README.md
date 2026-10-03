@@ -8,11 +8,23 @@
 > Where Python's language or type system requires a different API contract, the contract is adapted accordingly. 
 > The implementation is actively developed, and semantic deviations may still exist.
 
+> **⚠️ Breaking Change — `FlpList` — v0.2.0**
+>
+> `FlpList` no longer derives from `collections.UserList`.
+>
+> **Retained:** Python collection behavior such as iteration, `len()`, `in`, indexing, and slicing.
+>
+> **LINQ:** `append()`, `concat()`, and other LINQ sequence operations remain available with lazy semantics.
+>
+> **`List<T>` semantics:** `add()`, `add_range()`, and other mutating operations follow the `List<T>` API where applicable.
+>
+> **Removed:** `copy()`, `+`, `*`, and other `UserList`-specific operations that are not part of the `FlpList` API.
+
 ## ⚡ Key Features
 
-* **⚡ Lazy Evaluation (`FlpIt`):** Deferred, streaming execution where the underlying operation permits it. `FlpIt` wraps a standard Python `Iterable[T]`.
-* **📦 Materialized Container (`FlpList`):** Eager, mutable container backed by `collections.UserList`.
-* **🎯 LINQ Semantics:** Operators such as `.any()`, `.first()`, `.single()`, `.order_by()`, and `.then_by()` follow .NET LINQ semantics.
+* **⚡ Lazy Evaluation (`FlpIt`):** Deferred, streaming execution wrapping any standard Python `Iterable[T]`.
+* **📦 Materialized Container (`FlpList`):** Eager collection implementing Python's `Collection` protocol (with indexing and slicing), retaining familiar collection access while providing .NET `List<T>`-style semantics and fluent LINQ query operations.
+* **🎯 LINQ Semantics:** Familiar operators like `.any()`, `.first()`, `.single()`, `.order_by()`, and `.then_by()` with predictable, composable behavior.
 * **🔀 Independent Query Pipelines:** Derived queries are independent and never mutate or retroactively affect separately created queries.
 * **🧠 Lazy Internal Materialization:** Some operators, such as ordering and grouping, require internal materialization during deferred execution, while the query itself remains lazy.
 * **🔄 Source Enumeration Semantics** — FlpIt preserves the enumeration characteristics of its source. A query over a re-enumerable source can be enumerated repeatedly; a one-shot source such as a Python generator remains one-shot. FlpIt does not clone or rewind arbitrary Python iterators.
@@ -166,25 +178,30 @@ list(query)  # [0, 1, 2]
 list(query)  # []
 ```
 
-## Intentional Deviation from Python List Contracts (`.count()`)
+## Intentional Semantic Deviation: `count()`
 
-To faithfully provide standard .NET LINQ semantics, `FlpList` deliberately uses LINQ-style count() semantics instead of Python list.count(value) semantics of Python's standard `list.count(value)`.
+`FlpList` is a LINQ-oriented collection. Its query methods follow LINQ semantics even when those semantics differ from Python's built-in collection methods.
 
-* **Vanilla Python `list.count(value)`** counts occurrences of a specific *value*.
-* **FlpIt `FlpList.count()`** counts all elements.
-* **FlpIt `FlpList.count(predicate)`** counts elements matching the predicate.
+In Python, `list.count(value)` counts occurrences of a specific value:
 
-```python
-# Pure LINQ semantics instead of standard list behavior
-total_evens = eager_list.count(lambda x: x % 2 == 0)
+```
+[1, 2, 2, 3].count(2)  # 2
 ```
 
-Because `FlpList` is an explicit, fluent wrapper designed to enforce LINQ behavior, this signature change is a deliberate design choice. If you need the native Python behavior to count occurrences of a specific item value, use the explicitly provided fallback method:
+In LINQ, `Count()` returns the total number of elements, or elements matching a predicate:
 
-```python
-# Use the fallback for traditional Python value-counting
-occurrences = eager_list.count_item(4)
 ```
+FlpList([1, 2, 2, 3]).count()                 # 4
+FlpList([1, 2, 2, 3]).count(lambda x: x > 1)  # 3
+```
+
+`FlpList.count()` deliberately follows the LINQ meaning. Python-style value counting remains available through normal Python operations when needed:
+
+```
+list(FlpList([1, 2, 2, 3])).count(2)  # 2
+```
+
+This behavior is a core part of `FlpList`'s LINQ-oriented contract, not an incomplete `list` implementation.
 
 ## 🔗 Independent Query Pipelines
 
@@ -240,14 +257,22 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 `group_by()` produces a query of groupings rather than terminating the pipeline:
 
 ```python
-groups = query.group_by(lambda x: x % 3)
+from typing import NamedTuple
+
+class GroupResult(NamedTuple):
+    remainder: int
+    values: list[int]
 
 result = (
-    groups(...)
-    .where(...)
-    .select(...)
+    flp.it(range(1, 11))
+    .group_by(lambda x: x % 2)
+    .select(lambda group: GroupResult(
+        remainder=group.key,
+        values=list(group),
+    ))
     .to_list()
 )
+
 ```
 
 Terminal operators instead evaluate the query and return a result rather than another query:
@@ -320,17 +345,18 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ================================================================
 | Test Module File                               |  Test Cases |
 ----------------------------------------------------------------
-| tests/nettests/test_all.py                     |          80 |
-| tests/nettests/test_any.py                     |          90 |
-| tests/nettests/test_average.py                 |         572 |
-| tests/nettests/test_count.py                   |          37 |
-| tests/nettests/test_last.py                    |          29 |
-| tests/nettests/test_order_by.py                |         100 |
-| tests/nettests/test_order_descending_by.py     |          45 |
-| tests/nettests/test_sum.py                     |         134 |
-| tests/nettests/test_take.py                    |          39 |
-| tests/nettests/test_then_by.py                 |          40 |
-| tests/nettests/test_then_descending_by.py      |          34 |
+| tests/nettests/                                |             |
+| ├── test_all.py                                |          80 |
+| ├── test_any.py                                |          90 |
+| ├── test_average.py                            |         572 |
+| ├── test_count.py                              |          37 |
+| ├── test_last.py                               |          29 |
+| ├── test_order_by.py                           |         100 |
+| ├── test_order_descending_by.py                |          45 |
+| ├── test_sum.py                                |         134 |
+| ├── test_take.py                               |          39 |
+| ├── test_then_by.py                            |          40 |
+| └── test_then_descending_by.py                 |          34 |
 ----------------------------------------------------------------
 | GRAND TOTALS                                   |        1200 |
 ================================================================

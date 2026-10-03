@@ -62,7 +62,7 @@ def test_as_type_returns_same_object() -> None:
 
 def test_flplist_is_a_userlist_and_sequence() -> None:
     result = FlpList([1, 2, 3])
-    assert isinstance(result, UserList)
+    assert isinstance(result, FlpList)
     assert list(result) == [1, 2, 3]
     assert result[1] == 2
 

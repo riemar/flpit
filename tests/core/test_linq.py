@@ -24,6 +24,7 @@ class Cat():
     pass
 
 class TestAdd:
+
     def test_linq_query_append_and_prepend_deferred_evaluation(self):
         """Test that append and prepend on FlpIt yield elements lazily without mutating the source."""
         original_data = [2, 3, 4]
@@ -45,7 +46,7 @@ class TestAdd:
 
         # Call prepend and append
         prepended_query = numbers.prepend(0)
-        appended_query = numbers.append_linq(40)
+        appended_query = numbers.append(40)
 
         # Verify return types are FlpIt instances
         assert isinstance(prepended_query, FlpIt)
@@ -53,11 +54,11 @@ class TestAdd:
 
         # Verify the underlying FlpList state is not mutated
         assert len(numbers) == 3
-        assert numbers.data == [10, 20, 30]
+        assert numbers == [10, 20, 30]
 
         # Verify materialized sequence results
-        assert prepended_query.to_list().data == [0, 10, 20, 30]
-        assert appended_query.to_list().data == [10, 20, 30, 40]
+        assert prepended_query.to_list() == [0, 10, 20, 30]
+        assert appended_query.to_list() == [10, 20, 30, 40]
 
 
     def test_append_and_prepend_chaining_with_linq_operators(self):
@@ -73,7 +74,7 @@ class TestAdd:
         )
 
         # Expected odd numbers: 1, 7 -> multiplied by 10: 10, 70
-        assert result.data == [10, 70]
+        assert result == [10, 70]
 
 
     def test_append_and_prepend_on_empty_sequence(self):
@@ -83,8 +84,8 @@ class TestAdd:
         appended = empty_query.append(100).to_list()
         prepended = empty_query.prepend(200).to_list()
 
-        assert appended.data == [100]
-        assert prepended.data == [200]
+        assert appended == [100]
+        assert prepended == [200]
 
     def test_concat_combines_sequences_in_order(self):
         result = FlpIt([1, 2, 3]).concat([4, 5, 6])
@@ -138,9 +139,6 @@ class TestAdd:
         # Scenario A: No arguments returns total element count
         assert list_with_nones.count() == 5
 
-        # Scenario B: Searching for None explicitly returns exact occurrences of None
-        assert list_with_nones.count_item(None) == 2
-
 
 def test_count_with_predicates_and_values():
     """Test count functionality with LINQ predicates vs exact value matching."""
@@ -149,10 +147,6 @@ def test_count_with_predicates_and_values():
     # Scenario A: Matching via LINQ predicate (Callable)
     is_even: Callable[[int], bool] = lambda x: x % 2 == 0
     assert numbers.count(is_even) == 3
-
-    # Scenario B: Exact native value lookup
-    assert numbers.count_item(4) == 1
-    assert numbers.count_item(99) == 0
 
 
 def test_where():
