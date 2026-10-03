@@ -4,6 +4,7 @@
 > **One card (`.md` file) = one increment = one branch = one PR.**
 > Cards are ordered by priority via their numeric prefix; the ID (e.g. `L01`) is stable even if a card is re-prioritised.
 
+- Repositories: upstream **`riemar/flp`** (private; confirmed as the fork's GitHub `parent`; canonical: PyPI publishing, public plugin marketplace, benchmark pages); this board is developed on the fork `AndreaCuneo/flp` and proposed upstream by PR. Cards reference upstream for anything user-facing.
 - Created: 2026-10-03, after analysing `main @ 2c88fa4` and an interview with the maintainer (decision log below).
 - Upstream test oracle snapshots used for sizing:
   - `dotnet/runtime` `main @ 6f1d9331b9b477df73982a0fabedefe27f36d8a3` (`src/libraries/System.Linq/tests`)

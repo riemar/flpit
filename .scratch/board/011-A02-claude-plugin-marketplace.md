@@ -16,10 +16,12 @@ pr:
 ## 1. Goal
 Make the A01 skill installable in two commands, versioned together with the library (D12):
 ```bash
-claude plugin marketplace add andreacuneo/flp
+claude plugin marketplace add riemar/flp
 claude plugin install flpit@flp
 ```
-(in-session: `/plugin marketplace add andreacuneo/flp`, then `/plugin install flpit@flp`). Contributors working *in* this repo get the plugin suggested automatically.
+(in-session: `/plugin marketplace add riemar/flp`, then `/plugin install flpit@flp`). Contributors working *in* this repo get the plugin suggested automatically.
+
+**Repositories.** The canonical home is the upstream **[`riemar/flp`](https://github.com/riemar/flp)** (PyPI `flpit` is published from there, F04). [`AndreaCuneo/flp`](https://github.com/AndreaCuneo/flp) is a private fork (GitHub `parent`/`source` = `riemar/flp`, verified via the API) used for development and review: work lands on the fork first, then is proposed upstream by PR. All user-facing references (install commands, `homepage`, `repository`, marketplace `owner`) therefore point to **upstream**; the fork is only used for pre-merge testing (§4).
 
 ## 2. Scope
 **In**
@@ -41,7 +43,7 @@ plugins/flpit/
 ```json
 {
   "name": "flp",
-  "owner": { "name": "Andrea Cuneo", "url": "https://github.com/andreacuneo" },
+  "owner": { "name": "riemar", "url": "https://github.com/riemar" },
   "description": "Plugins for flpit, fluent LINQ for Python",
   "plugins": [
     {
@@ -62,9 +64,9 @@ plugins/flpit/
   "displayName": "flpit: fluent LINQ for Python",
   "version": "0.3.0",
   "description": "Skill for discovering and efficiently using the flpit library.",
-  "author": { "name": "Andrea Cuneo" },
-  "homepage": "https://github.com/andreacuneo/flp",
-  "repository": "https://github.com/andreacuneo/flp",
+  "author": { "name": "riemar", "url": "https://github.com/riemar" },
+  "homepage": "https://github.com/riemar/flp",
+  "repository": "https://github.com/riemar/flp",
   "license": "MIT",
   "keywords": ["python", "linq", "morelinq", "itertools", "lazy"]
 }
@@ -98,7 +100,7 @@ No API key is needed for validation. Evals stay in the manual `plugin-eval.yml` 
 ## 4. Tests
 - CI `plugin` job green; negative check: remove `name` from plugin.json → validate fails.
 - Manual install test from a scratch directory:
-  1. `claude plugin marketplace add andreacuneo/flp` (after merge) or `claude plugin marketplace add ./` (from the branch)
+  1. Before the upstream merge: `claude plugin marketplace add ./` (local checkout) or `claude plugin marketplace add AndreaCuneo/flp@<branch>` (private fork: needs git credentials with access to the fork). After the upstream merge: `claude plugin marketplace add riemar/flp`.
   2. `claude plugin install flpit@flp`
   3. New session: ask "translate this C# LINQ query to Python", and check the skill is invoked (visible in the transcript) and references are read on demand.
   4. `claude plugin update flpit` after a version bump picks up the change.
@@ -134,5 +136,8 @@ tmp=$(mktemp -d) && cd "$tmp" && claude plugin marketplace add /home/user/flp &&
 - [ ] RELEASING.md step
 
 ## 11. Risks / open questions
+- **Fork vs upstream**: if this card is merged on the fork before upstream, the marketplace on the fork works only for people with fork access (it is private). The public install path exists only once upstream `riemar/flp` carries `.claude-plugin/marketplace.json` on its default branch. Marketplace `name` stays `flp` in both, so `flpit@flp` is identical; users should not add both marketplaces (duplicate marketplace name).
+- **Upstream is private** (as of 2026-10-03): `claude plugin marketplace add riemar/flp` works only for users whose git credentials can read the repo. Public distribution of the plugin requires either making `riemar/flp` public, or publishing the marketplace from a separate public repo (marketplace `source` of type `github` pointing at it). Decide before announcing the install command in the README.
+- Confirm with the upstream maintainer the `owner`/`author` identity to publish (GitHub handle `riemar` is used as a placeholder for a display name).
 - Plugin/marketplace schemas evolve quickly. Validation runs with a pinned CLI version that Dependabot (npm ecosystem, add to dependabot.yml) bumps.
 - If users want the skill without Claude Code, the `skills/flpit/` folder is self-contained and can be copied or zipped as is.

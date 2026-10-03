@@ -95,7 +95,7 @@ jobs:
 ```
 - The ratio series is the primary signal; absolute timings (`tool: pytest` on `bench.json`) are pushed as a second, informational series.
 - Fork PRs: the token is read-only, so the comment step degrades to job-summary only (`continue-on-error` on the action for forks).
-- One-time setup: create the orphan `gh-pages` branch; enable Pages from `gh-pages` (charts at `https://andreacuneo.github.io/flp/dev/bench/`).
+- One-time setup: create the orphan `gh-pages` branch; enable Pages from `gh-pages` (charts at `https://riemar.github.io/flp/dev/bench/`). `auto-push` is additionally guarded by `github.repository == 'riemar/flp'`, so the fork never writes benchmark history; on the fork the job still runs and writes the job summary. Note: `riemar/flp` is currently private, and GitHub Pages on private repos requires a paid plan (and the site may be public). If Pages is unavailable, keep the history on the `gh-pages` branch only (charts viewable by cloning) and rely on the job-summary ratio tables.
 
 ## 4. Tests
 - `tests/unit/test_bench_kit.py`: `triplet` produces 3×len(sizes) params with the right ids and groups; `bench_ratio.py` on a fixture JSON produces the expected table and JSON (golden files).

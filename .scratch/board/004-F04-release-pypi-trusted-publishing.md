@@ -84,7 +84,7 @@ jobs:
         with: { name: dist, path: dist/, if-no-files-found: error }
 
   publish:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && github.repository == 'riemar/flp'   # forks never publish
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -140,7 +140,7 @@ jobs:
 The rest of the job is unchanged. Both paths are documented in `RELEASING.md`.
 
 ### 3.4 One-time maintainer setup (`RELEASING.md`)
-1. **PyPI** → project `flpit` → *Publishing* → add a GitHub Trusted Publisher: owner `andreacuneo`, repo `flp`, workflow `release.yml`, environment `pypi`. Remove any old API tokens used for 0.1.x uploads.
+1. **PyPI** → project `flpit` → *Publishing* → add a GitHub Trusted Publisher: owner **`riemar`** (the upstream; never the fork `AndreaCuneo/flp`), repo `flp`, workflow `release.yml`, environment `pypi`. Remove any old API tokens used for 0.1.x uploads.
 2. **GitHub** → Settings → Environments → `pypi`: required reviewer = maintainer; "Prevent self-review" off (single maintainer); deployment branches and tags: **tags matching `v*` only**.
 3. **GitHub** → Rulesets → tags `v*`: restrict creation/deletion to maintainers; block force-updates.
 4. **Releasing**: move `[Unreleased]` notes in CHANGELOG to `[X.Y.Z] - date`, merge, create the GitHub Release with tag `vX.Y.Z` on `main` → approve the `pypi` deployment → done. Then bump `pyproject` to the next `.dev0`.
@@ -164,7 +164,7 @@ n/a
 
 ## 8. Expected outcomes
 - No long-lived PyPI secrets in the repo or org.
-- Every file on PyPI for ≥ 0.2.0 shows "Provenance: Verified, GitHub Actions, andreacuneo/flp, release.yml" on its PyPI file page.
+- Every file on PyPI for ≥ 0.2.0 shows "Provenance: Verified, GitHub Actions, riemar/flp, release.yml" on its PyPI file page.
 - Every dist also has a GitHub attestation, and the files are attached to the GitHub Release.
 - A release cannot happen without (a) green CI on the tagged commit, (b) a valid PEP 440 tag, (c) a human approval.
 
@@ -172,9 +172,9 @@ n/a
 ```bash
 # after a release vX.Y.Z
 V=X.Y.Z
-gh release download v$V -R andreacuneo/flp -D /tmp/rel
-gh attestation verify /tmp/rel/flpit-$V-py3-none-any.whl -R andreacuneo/flp     # GitHub provenance
-uvx pypi-attestations verify pypi --repository https://github.com/andreacuneo/flp \
+gh release download v$V -R riemar/flp -D /tmp/rel
+gh attestation verify /tmp/rel/flpit-$V-py3-none-any.whl -R riemar/flp     # GitHub provenance
+uvx pypi-attestations verify pypi --repository https://github.com/riemar/flp \
     pypi:flpit-$V-py3-none-any.whl                                               # PEP 740 on PyPI
 curl -fsS -H 'Accept: application/vnd.pypi.integrity.v1+json' \
     https://pypi.org/integrity/flpit/$V/flpit-$V-py3-none-any.whl/provenance | jq .
