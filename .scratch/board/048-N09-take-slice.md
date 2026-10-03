@@ -105,7 +105,7 @@ def _take_range_from_end(q, a, stop):            # shared with take_last / skip_
 ```
 - `zip(it, counter)` pulls from `it` first, so `next(counter)` after exhaustion is exactly `n` (no Python-level loop for the buffering pass).
 - Time O(n) worst case; memory O(|start|) or O(|stop|) for negative bounds, O(1) otherwise.
-- `_count_if_cheap()` (private): `len(src)` if the underlying source is `Sized`, else `None`. Introduced here because N09 ships before N10; N10 extends it (count-preserving operators) and exposes it as `try_get_non_enumerated_count()`.
+- `_count_if_cheap()` (private): `len(src)` if the underlying source is `Sized`, else `None`. Introduced here because N09 ships before N10; N10 extends it (count-preserving operators) and exposes it as `try_get_non_enumerated_count()`. It generalises L10's private `_sized_source()` (exact set/dict/deque types); merge the two here rather than keeping parallel helpers. L04's `_indexable()` (Sequence fast path) stays separate: it answers "can I index?", not "do I know the count?".
 - L04 `take_last(n)` is `_take_range_from_end(q, -n, None)` and L05 `skip_last(n)` is `(0, -n)`; refactor them onto this helper if their benchmarks do not regress.
 - **FlpList fast path**: none (the count path already streams the backing list with `islice`). Measure `iter(data[lo:hi])` against `islice` for a large `lo`; adopt only with a > 20 % gain and identical behaviour.
 

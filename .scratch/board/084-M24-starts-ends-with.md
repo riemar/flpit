@@ -37,7 +37,7 @@ def ends_with(self, second: Iterable[TItem]) -> bool: ...
 - **Equality**: L06's contract (`_equality.items_equal`: `a is b or a == b`, Python container semantics). NaN and cross-type numerics follow the README "Equality semantics" deviation.
 - `starts_with` order of work (matches MoreLINQ): get the iterator of `self`, then iterate `second`; for each `b` pull one `a` from `self`; return False at the first mismatch or when `self` runs out; True when `second` is exhausted. So at most `len(second)` elements of `self` and `k + 1` elements of `second` are pulled when the first mismatch is at index `k`.
 - `ends_with` order: if `second`'s count is unknown, materialise `second` first; `n == 0` → True **without iterating `self`** (.NET `TakeLast(0)` returns empty without enumerating); otherwise drain `self` into `deque(maxlen=n)` and compare.
-- Known counts (N10 rule: exact built-ins and FlpList, never iterated): when both counts are known and `len(second) > len(self)`, both return False without iterating anything (MoreLINQ's `ICollection` check).
+- Known counts: `self` via N10's `_count_if_cheap()`; `second` counts as known only when it is a FlpList or a `list`/`tuple`/`range`/`str` (side-effect-free iteration; any other `second` is a plain iterable for this rule). When both are known and `len(second) > len(self)`, both return False without iterating anything (MoreLINQ's `ICollection` check). If `self`'s count was derived through `select` etc., the skipped selector calls are the same documented deviation as in M23.
 - Empty cases: both empty → True; `second` empty → True; only `self` empty → False.
 - Validation (eager): `second is None` → `ArgumentNoneError("second")`.
 - None elements compare by the equality rule (`None is None`).
@@ -48,7 +48,7 @@ def ends_with(self, second: Iterable[TItem]) -> bool: ...
 ```python
 def starts_with(self, second):
     _require_not_none(second, "second")
-    n1, n2 = self._known_count(), _known_count_of(second)          # N10 helpers
+    n1, n2 = self._count_if_cheap(), _builtin_len(second)          # N10 helper; _builtin_len: len for FlpList/list/tuple/range/str else None
     if n1 is not None and n2 is not None:
         if n2 > n1:
             return False
@@ -64,12 +64,12 @@ def starts_with(self, second):
 
 def ends_with(self, second):
     _require_not_none(second, "second")
-    n2 = _known_count_of(second)
+    n2 = _builtin_len(second)
     other = second if n2 is not None else list(second)            # MoreLINQ materialises second first
     n2 = len(other)
     if n2 == 0:
         return True
-    n1 = self._known_count()
+    n1 = self._count_if_cheap()
     if n1 is not None and n2 > n1:
         return False
     seq = self._indexable()
@@ -167,4 +167,4 @@ DoD-std, plus: equality goes through L06's rule (inlined form covered by a test 
 
 ## 11. Risks / open questions
 - Cross-card: L14 `sequence_equal` should use the same equality rule and the same "no comparer, compose with `select`" decision, so that `a.sequence_equal(b)`, `a.starts_with(b)` and `a.ends_with(b)` agree on every pair of inputs. Flag to the L14 owner.
-- If N10's `_known_count` / L04's `_indexable` helpers have different names when they land, follow them; the shortcut rules are what matters.
+- If N10's `_count_if_cheap` / L04's `_indexable` helpers have different names when they land, follow them; the shortcut rules are what matters.

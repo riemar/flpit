@@ -139,5 +139,5 @@ DoD-std, plus:
 
 ## 11. Risks / open questions
 - pyrefly support for PEP 695 generic `NamedTuple`: if strict mode rejects it, fall back to `class Indexed(NamedTuple, Generic[T])` (3.11+ syntax). Spike before implementing.
-- L25 (`join`, priority 036) ships before this card. If it already returns plain tuples for its tuple overload, N04 switches it to `JoinPair` (compatible change: equality, unpacking and indexing are unchanged). Better: L25 creates `tuples.py` with `JoinPair` directly, following this convention.
+- **Conflict with L25**: L25 (`join`, priority 036, ships first) specifies plain `(outer, inner)` tuples and defers named fields to N04–N06. N04 switches it to `JoinPair` (compatible: equality, unpacking and indexing unchanged). Cleaner: settle this decision before L25 is implemented and let L25 create `tuples.py` with `JoinPair` directly.
 - NamedTuple overhead may surprise users of very hot loops; documented, and `select_indexed(lambda x, i: (i, x))` (L16) stays as the plain-tuple alternative.

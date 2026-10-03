@@ -62,9 +62,9 @@ def full_join(self, inner, outer_key_selector, inner_key_selector, result_select
     src = self._source()
     make = _make_pair if result_selector is _SENTINEL else (lambda pair: result_selector(*pair))
     def _generator():
-        lookup = _build_lookup(inner, inner_key_selector)         # L20 builder, None keys KEPT (to_lookup mode)
+        lookup = _build_lookup(inner, inner_key_selector)         # L20 builder, skip_none_keys=False: None group KEPT
         get = lookup.get
-        matched: set[int] = set()                                  # id() of matched group lists
+        matched: set[int] = set()                                  # id() of matched Grouping objects
         for item in src:
             key = outer_key_selector(item)
             group = None if key is None else get(key)
@@ -79,8 +79,8 @@ def full_join(self, inner, outer_key_selector, inner_key_selector, result_select
                     for m in group: yield make((None, m))
     return FlpIt(_FactoryIterable(_generator))
 ```
-- Uses L20's builder in the mode that keeps `None` keys (the `to_lookup` mode), not `_lookup_for_join`; explicit `key is None` check on the outer side because the `None` group exists in the lookup.
-- Matched groups tracked by `id()` of the group list (lists stay alive in `lookup`, so ids are stable), mirroring .NET's `HashSet<Grouping>`; avoids rehashing keys. Tail skipped entirely when every group matched.
+- Uses L20's `_build_lookup` with its default `skip_none_keys=False` (the `to_lookup` mode, like .NET `Lookup.Create`), not the join mode; explicit `key is None` check on the outer side because the `None` group exists in the lookup.
+- Matched groups tracked by `id()` of the `Grouping` (groupings stay alive in `lookup`, so ids are stable), mirroring .NET's `HashSet<Grouping>`; avoids rehashing keys. Tail skipped entirely when every group matched.
 - In the final code the result-selector path calls `result_selector(o, i)` directly (two specialised loops) instead of the `make(*pair)` indirection shown above; the sketch only shows the ordering logic.
 - Time O(|outer| + |inner| + |output|); memory O(|inner| + matched groups).
 - **FlpList fast path**: none.

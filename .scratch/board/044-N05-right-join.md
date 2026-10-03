@@ -65,7 +65,7 @@ def right_join(self, inner, outer_key_selector, inner_key_selector, result_selec
         first = next(it, _MISSING)
         if first is _MISSING:
             return
-        get = _lookup_for_join(src, outer_key_selector).get       # None keys skipped
+        get = _build_lookup(src, outer_key_selector, skip_none_keys=True).get   # L20 builder
         for item in chain((first,), it):
             matches = get(inner_key_selector(item))
             if matches is None:

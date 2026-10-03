@@ -152,5 +152,5 @@ uv run python -c "from flpit import flp; print(dict(flp.it([1,2,3,4]).aggregate_
 DoD-std, plus the argument-order deviation and the shared-seed warning documented (docstring and README).
 
 ## 11. Risks / open questions
-- Argument order (func, seed) vs .NET (seed, func): chosen for consistency with flpit's `aggregate`. If L28 changes `aggregate` to .NET order, this card follows it before merge; the two must not diverge.
+- Argument order (func, seed) vs .NET (seed, func): chosen for consistency with flpit's `aggregate`, which L28 keeps func-first (`aggregate(func, seed, result_selector)`, matching `functools.reduce`). If that ever changes, both must change together.
 - `seed_selector` keyword-only makes the .NET positional form `AggregateBy(k, s => ..., f)` impossible to transcribe literally; the translation map shows the keyword form.

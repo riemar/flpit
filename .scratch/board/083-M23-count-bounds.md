@@ -45,7 +45,7 @@ def count_between(self, min_count: int, max_count: int) -> bool: ...
   | `at_most(n)` | `min(n + 1, len)`, plus the end probe when `len <= n` | `len <= n` |
   | `exactly(n)` | `min(n + 1, len)`, plus the end probe when `len <= n` | `len == n` |
   | `count_between(a, b)` | `min(b + 1, len)`, plus the end probe when `len <= b` | `a <= len <= b` |
-- Known count: when N10's non-enumerated count is available (FlpList, and FlpIt over `list`/`tuple`/`range`/`str`/`dict`/`set` per N10's rule), the answer uses `len` and the source is **not iterated**. This mirrors MoreLINQ's `ICollection<T>.Count` path and is observationally equivalent for those built-ins (no iteration side effects). Tests cover a `list` source and the `non_collection` fixture.
+- Known count: when N10's `_count_if_cheap()` returns an int (FlpList, FlpIt over a `Sized` source, and counts N10 derives through count-preserving operators such as `select`, `order_by`, `append`), the answer uses it and the source is **not iterated**. This mirrors MoreLINQ's `ICollection<T>.Count` path. One deliberate consequence: on `flp.it(a_list).select(f).at_least(3)` the selector `f` is never called, which matches .NET's own `Count()` on a `Select` over a list but not MoreLINQ, which only shortcuts real collections (README deviation; difftest EXPECTED_DIFFERENCE for `collection` sources piped through `select`). Tests cover a `list` source and the `non_collection` fixture.
 - Validation (eager, before touching the source; `_require_index` first, so `None` → `ArgumentNoneError`, `1.5` → `TypeError`):
   - `count < 0` → `ArgumentOutOfRangeError("count")`, message `Count cannot be negative. (Parameter 'count')`.
   - `min_count < 0` → `Minimum count cannot be negative. (Parameter 'min_count')`.
@@ -57,7 +57,7 @@ def count_between(self, min_count: int, max_count: int) -> bool: ...
 ### 3.3 Implementation sketch
 ```python
 def _count_up_to(self, limit: int) -> int:                    # private, shared by the four ops
-    known = self._known_count()                                # N10 helper: int | None, never iterates
+    known = self._count_if_cheap()                             # N10 helper: int | None, never iterates
     if known is not None:
         return known
     n = 0
@@ -80,7 +80,7 @@ def count_between(self, min_count, max_count):
     return min_count <= self._count_up_to(max_count + 1) <= max_count
 ```
 - O(min(limit, n)) time, O(1) memory. `islice` stops pulling at `limit` exactly (no extra `next()`), which is what produces the pull bounds in the table.
-- **FlpList fast path:** not a separate override; `_known_count()` already returns `len(data)` in O(1) for FlpList.
+- **FlpList fast path:** not a separate override; `_count_if_cheap()` already returns `len(data)` in O(1) for FlpList.
 - If F05's `_require_non_negative` does not accept a custom message, extend it with an optional `message` argument here (MoreLINQ wording differs from .NET's generic one).
 
 ### 3.4 Registry entries
@@ -109,7 +109,7 @@ card = "M23"
 - **Own unit tests** (`tests/unit/morelinq/test_count_bounds.py`, both `flp_type`s plus a raw-generator FlpIt):
   - Truth tables: lengths 0..4 × counts 0..4 for each op; `count_between` with `a == b`, `a < b`, `a = 0`.
   - **Pull counts** on an instrumented infinite source (`counting_source(itertools.count())`): `at_least(3)` pulls 3; `at_most(3)` pulls 4 and returns False; `exactly(3)` pulls 4; `count_between(1, 3)` pulls 4. On a 2-element source, `at_most(3)` pulls 2 and sees the end.
-  - Known-count path: FlpList and `flp.it([..])` never call `__iter__` (a `list` subclass whose `__iter__` raises proves it; N10 decides whether subclasses qualify, the test follows N10's rule).
+  - Known-count path: FlpList and `flp.it([..])` never call `__iter__` (a `Sized` class whose `__iter__` raises proves it); `flp.it(list).select(f).at_least(2)` calls `f` zero times (pins the deviation).
   - Validation: negative values, `max_count < min_count`, `None`, `1.5`; raised before any pull; messages exact.
   - Exception at position ≥ limit is not reached; exception at position < limit propagates.
   - One-shot remainder: `it = iter(range(10)); flp.it(it).at_least(3)` then `next(it) == 3`.
@@ -124,6 +124,7 @@ card = "M23"
 - Probes: result, `trace` (number of `src.move_next` must equal the table bound), exception timing (`at: "call"`).
 - Param-name mapping for messages: `min_count ↔ min`, `max_count ↔ max` (spec field `param_names`).
 - Expected: MATCH, except `count = 2**31-1` on non-collection sources for `at_most`/`exactly`/`count_between(max)`: `EXPECTED_DIFFERENCE` (reason: "OTHER: MoreLINQ int overflow in count + 1").
+- Also `EXPECTED_DIFFERENCE` for `collection` sources piped through `select(count_calls)` before the count op (reason: "OTHER: flpit derives the count without calling the selector, like .NET Count(); MoreLINQ enumerates").
 
 ## 6. Benchmarks
 `tests/benchmarks/test_bench_count_bounds.py`, sizes 1e3 / 1e5, `k = n // 2`, source a generator function (so the known-count path is not taken):
@@ -163,5 +164,6 @@ uv run python -c "from flpit import flp; flp.it([]).count_between(3, 2)"        
 DoD-std, plus: pull-count table reproduced in tests; README deviation for the overflow case.
 
 ## 11. Risks / open questions
-- Depends on N10 for `_known_count()`. If N10 slips, implement the helper locally with N10's intended rule (exact built-in types only) and let N10 adopt it.
+- Depends on N10 for `_count_if_cheap()`. If N10 slips, implement a local stand-in (`len` of FlpList or of a `Sized` direct source) and switch to N10's helper when it lands.
+- The `select`-skipping consequence is a judgement call (.NET `Count()` parity over MoreLINQ parity). If the maintainer prefers strict MoreLINQ parity, restrict the shortcut to FlpList and direct `Sized` sources (one line in `_count_up_to`).
 - Parameter rename `min_count`/`max_count` breaks keyword-call parity with MoreLINQ (`CountBetween(min: 1, max: 2)`); positional calls are unaffected. Revisit only if the maintainer prefers literal names over the ruff rule.

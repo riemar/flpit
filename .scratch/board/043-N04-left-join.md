@@ -17,7 +17,7 @@ pr:
 `LeftJoin` (.NET 10) replaces the notorious `GroupJoin(...).SelectMany(g => g.DefaultIfEmpty(), ...)` pattern with one call: every outer element, paired with each matching inner element or with "nothing". It is the most requested join after the inner `join` (L25) and lays the shared groundwork (the `JoinPair` result type and the join-lookup helper) for `right_join` (N05) and `full_join` (N06).
 
 ## 2. Scope
-**In:** `left_join` on `_LinqOps`, tuple form and result-selector form; `JoinPair[O, I]` NamedTuple in `src/flpit/core/tuples.py` (N01 convention), exported from `flpit`; if L25 shipped its tuple overload with plain tuples, switch it to `JoinPair` here (compatible change).
+**In:** `left_join` on `_LinqOps`, tuple form and result-selector form; `JoinPair[O, I]` NamedTuple in `src/flpit/core/tuples.py` (N01 convention), exported from `flpit`; switch L25 `join`'s tuple overload from plain tuples (as L25 specifies) to `JoinPair` (compatible change: equality, unpacking, indexing unchanged; the static type narrows from `tuple[O, I]` to its subclass).
 **Out:** comparer overloads (D3: normalise keys in both selectors). A `default=` keyword for the missing side (Python extension; use the result selector). Composite-key helpers (keys are any hashable, tuples work).
 
 ## 3. Detailed design
@@ -78,7 +78,7 @@ def left_join(self, inner, outer_key_selector, inner_key_selector, result_select
         first = next(it, _MISSING)
         if first is _MISSING:
             return
-        get = _lookup_for_join(inner, inner_key_selector).get     # dict[key, list]; None keys skipped
+        get = _build_lookup(inner, inner_key_selector, skip_none_keys=True).get   # L20; dict[key, Grouping]
         for item in chain((first,), it):
             matches = get(outer_key_selector(item))
             if matches is None:
@@ -89,7 +89,7 @@ def left_join(self, inner, outer_key_selector, inner_key_selector, result_select
                 for m in matches: yield result_selector(item, m)
     return FlpIt(_FactoryIterable(_generator))
 ```
-- `_lookup_for_join` is **L20's lookup builder** (dict of lists in first-occurrence key order, `None` keys skipped), the same helper L25 `join` and L26 `group_join` use. If L20 named it differently, use that; no second implementation.
+- `_build_lookup(..., skip_none_keys=True)` is **L20's lookup builder** (`src/flpit/core/_lookup.py`; dict of `Grouping`s in first-occurrence key order, `None` keys skipped), the same call L25 `join` and L26 `group_join` make. No second implementation.
 - Because `None` keys are never stored, `get(None)` returns `None`: no explicit `key is None` branch in the hot loop.
 - The result-selector branch is hoisted out of the inner loops; if profiling shows the per-outer `is _SENTINEL` test matters, split into two generator functions.
 - Time O(|outer| + |inner| + |output|); memory O(|inner|).
@@ -123,7 +123,7 @@ notes = "Missing inner is None; None keys never match; JoinPair(outer, inner)."
 - **Typing**: `assert_type(flp.it([1]).left_join(["a"], str, str), FlpIt[JoinPair[int, str | None]])`; result-selector form infers `TResult`.
 
 ## 5. Differential harness
-`difftest/specs/left_join.toml`: outer/inner: empty, singleton, ints with duplicates, strings incl. `null`; key selectors: identity, `x % 3`, "null for negatives". Probes: values, enumeration order log (proves inner untouched for empty outer), selector call counts. The C# side declares element types as nullable/reference (`int?`, `string`) so `default` is `null` and compares to `None`; with that, all MATCH. If the pinned .NET 10 GA SDK lacks the tuple overload, the oracle maps it to the result-selector overload with `(o, i) => (o, i)` (identical by definition).
+`difftest/specs/left_join.toml`: outer/inner: empty, singleton, ints with duplicates, strings incl. `null`; key selectors: identity, `x % 3`, "null for negatives". Probes: values, enumeration order log (proves inner untouched for empty outer), selector call counts. The C# side declares element types as nullable/reference (`int?`, `string`) so `default` is `null` and compares to `None`; with that, all MATCH. The tuple-returning overloads are .NET 11 (runtime `main`) only, like L25's `Join` tuple form; instead of marking them `UNCOMPARABLE` (L25's choice), the oracle runs the .NET 10 result-selector overload with `(o, i) => (o, i)`, which is what the .NET 11 tuple overload does by definition (see `FullJoin.cs`). Align L25 to the same approach.
 
 ## 6. Benchmarks
 `tests/benchmarks/test_bench_left_join.py`, sizes 1e3 and 1e5 (outer = inner = size, inner keys `x // 2` so half the outer keys match twice, half never):
@@ -158,5 +158,5 @@ uv run python -c "from flpit import flp; print(flp.it([1, 2]).left_join([2], lam
 DoD-std, plus: `JoinPair` exported; L25's tuple overload returns `JoinPair` (or confirmed already does); the join-lookup helper is shared, not duplicated.
 
 ## 11. Risks / open questions
-- Dependency on L20/L25 helper naming: this card must reuse, not fork, the lookup builder. If L20 is late, N04 introduces `_lookup_for_join` in `flpit/core/_join.py` and L20 adopts it.
+- L25 specifies plain `(outer, inner)` tuples for `join` and defers named fields "together with N04–N06"; this card is that decision point (N01 convention: `JoinPair`). If the maintainer prefers plain tuples for all joins instead, change N01's table and this card's typing; the implementation is unaffected.
 - `None` doubling as "missing" and "a real None element" is inherent to the Python mapping; revisit only if users ask for `default=`.
