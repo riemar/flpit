@@ -61,6 +61,7 @@ New TypeVar `TElement` (shared with L24).
 
 ### 3.3 Implementation sketch
 ```python
+src = self._source()                                  # F05
 def _generator():
     if element_selector is _SENTINEL:
         for key, run in groupby(src, key_selector):

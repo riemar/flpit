@@ -66,7 +66,7 @@ def segment_with_previous(self, predicate):
     return FlpIt(_FactoryIterable(_generator))
 ```
 - `segment` and `segment_indexed` get their own tight loops (no wrapper lambda per element): the 1-arg form drops `enumerate` and `previous`. O(n) time, O(longest segment) memory.
-- `FlpList(list)` wraps without a second copy once F05's `FlpList._wrap` (no-copy constructor) exists; otherwise one copy per segment (still O(n) overall).
+- `FlpList(list)` copies the segment once (its backing `UserList` copies); still O(n) overall. If F05 adds a no-copy internal constructor, use it here.
 - **FlpList fast path**: none; the loop is already linear and cannot skip predicate calls.
 - itertools: `groupby` with a stateful key could express it but is slower and less clear; not used.
 
