@@ -64,9 +64,13 @@ class PredicateNoneError(TypeError):
     def __init__(self):
         super().__init__("Value cannot be None. (Argument 'predicate')")
 
+class CollectionNoneError(TypeError):
+    def __init__(self):
+        super().__init__("Value cannot be None. (Argument 'collection')")
+
 class SelectorNoneError(TypeError):
     def __init__(self):
-        super().__init__("Value cannot be null. (Parameter 'keySelector')")
+        super().__init__("Value cannot be None. (Parameter 'keySelector')")
 
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -780,7 +784,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
         """
         self.__list.data.append(item)
 
-    def add_range(self, items: Iterable[TItem]) -> None:
+    def add_range(self, collection: Iterable[TItem]) -> None:
         """
         | Adds an Iterable sequence or stream.
         Optimizes paths based on input type without destroying volatile generators.
@@ -789,7 +793,131 @@ class FlpList(Collection[TItem], Generic[TItem]):
         - type checks
         - manual of_type(...) filter if you don't trust your checks
         """
-        self.__list.data.extend(items)
+        if collection is None:
+            raise CollectionNoneError()
+
+        if isinstance(collection, UserList):
+            self.__list.data.extend(collection.data)
+        elif isinstance(collection, FlpList):
+            self.__list.data.extend(collection.__list.data)
+        else:
+            self.__list.data.extend(collection)
+
+    def clear(self) -> None:
+        self.__list.data.clear()
+
+    def contains(self, item: TItem) -> bool:
+        return item in self.__list.data
+
+    def exists(self, predicate: Callable[[TItem], bool]) -> bool:
+        return any(predicate(item) for item in self.__list.data)
+
+    def find(self, predicate: Callable[[TItem], bool]) -> TItem | None:
+        if predicate is None:
+            raise PredicateNoneError()
+
+        for item in self.__list.data:
+            if predicate(item):
+                return item
+
+        return None
+
+    def find_all(self, predicate: Callable[[TItem], bool]) -> FlpList[TItem]:
+        if predicate is None:
+            raise PredicateNoneError()
+
+        return FlpList(item for item in self.__list.data if predicate(item))
+
+    def insert(self, index: int, item: TItem) -> None:
+        if index < 0 or index > len(self.__list.data):
+            raise IndexError(f"Index {index} is out of range.")
+
+        self.__list.data.insert(index, item)
+
+    def insert_range(self, index: int, collection: Iterable[TItem]) -> None:
+        if collection is None:
+            raise CollectionNoneError()
+
+        if index < 0 or index > len(self.__list.data):
+            raise IndexError(f"Index {index} is out of range.")
+
+        self.__list.data[index:index] = list(collection)
+
+    def remove(self, item: TItem) -> bool:
+        try:
+            self.__list.data.remove(item)
+            return True
+        except ValueError:
+            return False
+
+    def remove_all(self, predicate: Callable[[TItem], bool]) -> int:
+        if predicate is None:
+            raise PredicateNoneError()
+
+        original_length = len(self.__list.data)
+
+        self.__list.data[:] = [
+            item
+            for item in self.__list.data
+            if not predicate(item)
+        ]
+
+        return original_length - len(self.__list.data)
+
+    def remove_at(self, index: int) -> None:
+        if index < 0 or index > len(self.__list.data):
+            raise IndexError(f"Index {index} is out of range.")
+
+        del self.__list.data[index]
+
+    def remove_range(self, index: int, count: int) -> None:
+        size = len(self.__list.data)
+
+        if index < 0 or index > size:
+            raise IndexError("index")
+
+        if count < 0:
+            raise IndexError("count")
+
+        if count > size - index:
+            raise IndexError("The range is invalid.")
+
+        del self.__list.data[index : index + count]
+
+    @overload
+    def reverse(self) -> None: ...
+
+    @overload
+    def reverse(self, index: int, count: int) -> None: ...
+
+    def reverse(self, index: int = 0, count: int | None = None) -> None:
+        if count is None:
+            self.__list.data.reverse()
+            return
+
+        size = len(self.__list.data)
+
+        # Apply your List<T>-compatible argument validation here.
+        if index < 0 or index > size:
+            raise IndexError("Non-negative number required.")
+
+        if count < 0:
+            raise IndexError("Non-negative number required.")
+
+        if index + count > size:
+            raise IndexError(
+                "Offset and length were out of bounds for the array or "
+                "count is greater than the number of elements from index "
+                "to the end of the source collection."
+            )
+
+        self.__list.data[index:index + count] = reversed(
+            self.__list.data[index:index + count]
+        )
+
+    # =====================================================================
+    # 4. IEnumerable add-ons
+    # =====================================================================
 
     @overload
     def any(self) -> bool: ...

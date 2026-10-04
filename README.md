@@ -14,7 +14,7 @@
 >
 > **Retained:** Python collection behavior such as iteration, `len()`, `in`, indexing, and slicing.
 >
-> **LINQ:** `append()`, `concat()`, and other LINQ sequence operations remain available with lazy semantics.
+> **LINQ:** `append()`, `concat()`, and other LINQ operations remain available with lazy semantics.
 >
 > **`List<T>` semantics:** `add()`, `add_range()`, and other mutating operations follow the `List<T>` API where applicable.
 >
@@ -350,6 +350,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | ├── test_any.py                                |          90 |
 | ├── test_average.py                            |         572 |
 | ├── test_count.py                              |          37 |
+| ├── test_generic_list.py                       |          95 |
 | ├── test_last.py                               |          29 |
 | ├── test_order_by.py                           |         100 |
 | ├── test_order_descending_by.py                |          45 |
@@ -358,6 +359,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | ├── test_then_by.py                            |          40 |
 | └── test_then_descending_by.py                 |          34 |
 ----------------------------------------------------------------
-| GRAND TOTALS                                   |        1200 |
+| GRAND TOTALS                                   |        1295 |
 ================================================================
 ```
