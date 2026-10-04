@@ -29,7 +29,7 @@ Also add generic contract tests that every registered operator gets for free (de
 - `scripts/nettest_report.py` (from F02): adds `--check-complete` (every upstream test name present in the port; no `TODO: port` left), a per-category skip table, and README-table regeneration (folded into `gen_docs.py` targets)
 - `.github/workflows/upstream-drift.yml`: weekly cron; for each `UPSTREAM.toml` entry, diffs the pinned SHA against `main` for that file; opens/updates one issue "Upstream LINQ tests changed: <files>" with the diff summary
 - `tests/contracts/test_operator_contracts.py`: registry-driven invariants (below)
-- Retrofit the existing 11 nettest files: add header SHA + UPSTREAM.toml entries, convert ad-hoc skips to categories
+- Retrofit the existing 12 nettest files (incl. `test_generic_list.py` from `main @ eea2097`, ported from `List<T>` tests): add header SHA + UPSTREAM.toml entries, convert ad-hoc skips to categories
 - Fix the duplicate `test_it_Int` definition in `tests/nettests/test_count.py` (the FlpIt variant is shadowed and never runs); add ruff `F811` to catch redefinitions
 - `requires_op("name")` marker in `tests/nettests/_skip.py`: skips a ported test with `REQUIRES_OP: <name> (card <ID>)` until the operator is in the registry as `implemented`, then runs automatically (cross-card upstream tests, e.g. ContainsTests blocks needing union/shuffle)
 - README deviation "Generators are finished after an exception": .NET tests that continue enumerating after a thrown exception are skipped with category `OTHER: python-generator-terminates-on-exception` (affects every streaming operator; first hit in L15)

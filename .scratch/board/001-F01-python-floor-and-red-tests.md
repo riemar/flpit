@@ -45,6 +45,8 @@ markers = ["benchmark: performance benchmarks", "slow: long functional tests (ru
 ### 3.3 Version bump
 `0.2.0.dev1` → `0.2.0.dev2` is **not** needed: F04 derives the version from tags. Leave the version as is.
 
+Re-baselined on `main @ eea2097` (2026-10-04): 1911 passed, 162 skipped, the same 3 failures; `requires-python` is still `>=3.11` there, so this card is unchanged.
+
 ## 4. Tests
 - The full suite on 3.12, 3.13 and 3.14 passes with 0 failures (`uv run -p 3.1x pytest`).
 - `pytest -p no:randomly`-independent: run the namespace test alone and in the full suite and confirm it passes both ways.

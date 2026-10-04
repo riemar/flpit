@@ -68,6 +68,7 @@ Never `import flp` (deprecated namespace).
 5. `order_by/group_by/reverse/...` buffer the whole input at enumeration; put `where` before them.
 6. `*_or_default(..., default=...)` instead of try/except around `first()`.
 7. Comparers don't exist; use `*_by(key)` variants.
+   `FlpList` also has `List<T>` methods that mutate (`add`, `insert`, `remove*`, `clear`, and `reverse()`, which reverses **in place** and returns `None`). For lazy LINQ on a list use `lst.as_enumerable().reverse()`.
 8. Indexed callbacks use `_indexed` methods: `where_indexed(lambda x, i: ...)`.
 ## Looking things up (load on demand)
 - Operator signatures: grep `references/operators.md` for `### <name>`.

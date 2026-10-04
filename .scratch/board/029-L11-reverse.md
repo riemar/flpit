@@ -14,11 +14,11 @@ pr:
 # L11: `reverse`
 
 ## 1. Goal
-`Reverse()` keeps "newest first" and "walk back from the end" inside the pipeline. Python has `reversed()`, but it only works on sequences and breaks the fluent chain. The card also settles the naming clash with `list.reverse()` (in-place, returns `None`), which `FlpList` users may expect.
+`Reverse()` keeps "newest first" and "walk back from the end" inside the pipeline. Python has `reversed()`, but it only works on sequences and breaks the fluent chain. The card also settles the naming clash with `FlpList.reverse()`, which since `main @ eea2097` is the in-place `List<T>.Reverse()` (D28).
 
 ## 2. Scope
-**In:** `reverse()` on `_LinqOps` (`FlpIt`, `FlpList`, `OrderedIt`, `Grouping`); `reversed()` fast path for immutable sequences; README deviation entry for the name clash.
-**Out:** an in-place `FlpList.reverse` (never: LINQ operators do not mutate FlpList, README 3.1). `.NET 10 Reverse(this T[])` overload: it exists only to win C# overload resolution over `MemoryExtensions.Reverse(Span)`; Python has no such ambiguity.
+**In:** LINQ `reverse()` on `FlpIt` (hence `OrderedIt`, `Grouping`), **not** on `_LinqOps`, because `FlpList.reverse()` / `reverse(index, count)` is `List<T>.Reverse` (in place, returns `None`; already on `main`, D28). `FlpList.as_enumerable()` (.NET `AsEnumerable()`), which returns a deferred `FlpIt` view over the list so `lst.as_enumerable().reverse()` reaches the LINQ operator, exactly as in C#. `reversed()` fast path for immutable sequences. README entry explaining the two `reverse` methods.
+**Out:** changing `FlpList.reverse` (owned by the `List<T>` API, D28). `.NET 10 Reverse(this T[])` overload: it exists only to win C# overload resolution over `MemoryExtensions.Reverse(Span)`; Python has no such ambiguity.
 
 ## 3. Detailed design
 ### 3.1 Signatures
@@ -36,7 +36,7 @@ def reverse(self) -> FlpIt[TItem]: ...
 - Re-enumeration re-reads the source (re-iterable source → same result; one-shot → empty the second time).
 - Empty source → empty; `None` elements kept.
 - On `OrderedIt`: returns `FlpIt`. Note for docs: `order_by(k).reverse()` is **not** `order_by_descending(k)`: with equal keys, `reverse` flips their original order, `order_by_descending` keeps it (stable).
-- **Name clash (README § "Intentional Semantic Deviations", next to `count()`):** `FlpList.reverse()` follows LINQ: it returns a deferred `FlpIt` and **does not** reverse in place (Python `list.reverse()` mutates and returns `None`). `FlpList` is not a `list`. The builtin `reversed(flp_list)` keeps working through the sequence protocol (`__len__` + `__getitem__`).
+- **Two `reverse` methods (D28, mirrors C# member lookup):** `FlpIt.reverse()` is LINQ (deferred, returns `FlpIt`); `FlpList.reverse()` is `List<T>.Reverse()` (mutates, returns `None`). On a list, the LINQ form is `lst.as_enumerable().reverse()` (or `flp.it(lst).reverse()`). Type checkers flag misuse because `FlpList.reverse` returns `None`. The builtin `reversed(flp_list)` keeps working through the sequence protocol.
 - Exceptions from the source propagate on the first `next()`.
 
 ### 3.3 Implementation sketch
@@ -53,7 +53,7 @@ def reverse(self):
 ```
 - Generic: O(n) time, O(n) memory, all C-level (`list()` + in-place `reverse`).
 - Immutable sequences (`tuple`, `range`, `str`): `reversed()` is O(1) memory; no snapshot is needed because they cannot change.
-- **`list` / `FlpList` sources take the generic path on purpose**: a live `reversed(list)` would observe mutation during enumeration, violating the snapshot rule; `list(data)` is a memcpy-speed copy, so a "fast path" would buy nothing. No FlpList override. The PR records the measurement (`data[::-1]` vs `list(data)` + `reverse()`).
+- **`list` / `FlpList` sources take the generic path on purpose**: a live `reversed(list)` would observe mutation during enumeration, violating the snapshot rule; `list(data)` is a memcpy-speed copy, so a "fast path" would buy nothing. `FlpList` is reached through `as_enumerable()`. The PR records the measurement (`data[::-1]` vs `list(data)` + `reverse()`).
 
 ### 3.4 Registry entry
 ```toml

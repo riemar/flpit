@@ -28,12 +28,13 @@ Before ~80 operators are added, remove the structural duplication between `FlpIt
   - `_require_index(n, param)` → `operator.index(n)` (rejects float/str with `TypeError`)
   - `_require_non_negative(n, param)` / `_require_positive(n, param)` → `ArgumentOutOfRangeError`
 - Exceptions module `flpit/core/errors.py` (re-exported from `flpit.core.linq` and `flpit` for compatibility):
-  - `ArgumentNoneError(TypeError)` with `.param_name`, message `Value cannot be null. (Parameter '<name>')` (.NET wording)
-  - `SourceNoneError`, `PredicateNoneError`, `SelectorNoneError` become subclasses of `ArgumentNoneError` (existing `isinstance`/`except` code keeps working); `SelectorNoneError` gets the real parameter name instead of always `keySelector`.
+  - `ArgumentNoneError(TypeError)` with `.param_name`, message `Value cannot be None. (Parameter '<name>')` (the .NET wording with `null` → `None`, the convention `main` adopted in `eea2097`); `SourceNoneError`'s `(Argument 'source')` is normalised to `(Parameter 'source')`
+  - `SourceNoneError`, `PredicateNoneError`, `SelectorNoneError`, `CollectionNoneError` (added on `main` in `eea2097`) become subclasses of `ArgumentNoneError` (existing `isinstance`/`except` code keeps working); `SelectorNoneError` gets the real parameter name instead of always `keySelector`.
   - `ArgumentOutOfRangeError(ValueError)` (used by `chunk(0)` today: currently a bare `ValueError`, so this is compatible)
   - `DuplicateKeyError(ValueError)` (reserved for L18)
 - **Eager argument validation** on all existing deferred operators (`where`, `select`, `select_many`, `distinct_by`, `zip`, `concat`, `group_by`, `order_by*`, `then_by*`, `cast`, `of_type`): `None` callables/sources now raise at call time, not at first enumeration (matches .NET `ArgumentNullException` timing; rules.md "Callbacks & Exceptions" unaffected, since callbacks still run lazily).
 - Public-API guard tests (see §4).
+- **`FlpList` `List<T>` API stays on `FlpList`** (D28: `add`, `add_range`, `insert`, `insert_range`, `remove`, `remove_all`, `remove_at`, `remove_range`, `clear`, `contains`, `exists`, `find`, `find_all`, `reverse`; added on `main` in `eea2097`). These are not moved into `_LinqOps`. `contains` doubles as the fast-path override of LINQ `contains` (L06, same semantics). LINQ `reverse` (L11) is defined on `FlpIt` only, so the mixin never conflicts with `List<T>.Reverse()`'s `None` return type. The parity test's allow-list covers these `FlpList`-only methods.
 - **Small validation bug fixes pulled forward (D23)**: `aggregate(None, seed)` → `ArgumentNoneError("func")` (today returns `seed` on empty input); `min_by(None)`/`max_by(None)` → `ArgumentNoneError("key_selector")` (today silently behave like `min()`/`max()`); `chunk(2.5)` → `TypeError` via `_require_index` (today accepted). Each gets a regression test in `tests/unit/test_argument_validation.py`.
 - `_require_bool(value, param)` helper (used later by M27/M28).
 

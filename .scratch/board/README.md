@@ -5,7 +5,7 @@
 > Cards are ordered by priority via their numeric prefix; the ID (e.g. `L01`) is stable even if a card is re-prioritised.
 
 - Repositories: upstream **`riemar/flp`** (private; confirmed as the fork's GitHub `parent`; canonical: PyPI publishing, public plugin marketplace, benchmark pages); this board is developed on the fork `AndreaCuneo/flp` and proposed upstream by PR. Cards reference upstream for anything user-facing.
-- Created: 2026-10-03, after analysing `main @ 2c88fa4` and an interview with the maintainer (decision log below).
+- Created: 2026-10-03, after analysing `main @ 2c88fa4`; rebased and re-evaluated on `main @ eea2097` (2026-10-04, see D28) and an interview with the maintainer (decision log below).
 - Upstream test oracle snapshots used for sizing:
   - `dotnet/runtime` `main @ 6f1d9331b9b477df73982a0fabedefe27f36d8a3` (`src/libraries/System.Linq/tests`)
   - `morelinq/MoreLINQ` `master @ d217ab1e8eac68247650c27e977b767dd66bcab0`. Used for API and semantics reference only; its tests are **not** copied (decision D7).
@@ -23,7 +23,7 @@
 | Argument validation | Inconsistent: `take`/`chunk` validate eagerly, `where(None)` fails lazily, `last(None)` raises `PredicateNoneError`, `SelectorNoneError` message names `keySelector` for every selector. | F05 |
 | Operators present | `append, prepend, concat, any, all, where, select, select_many, take, cast, of_type, distinct, distinct_by, zip, chunk, order_by(+_descending), then_by(+_descending), group_by, aggregate, last, min, min_by, max, max_by, average/avg, sum, count, element_at, first, first_or_default, single, to_list`, plus factories `flp.it, flp.lst, flp.range, flp.repeat`. | — |
 | .NET gaps | 40+ `System.Linq` methods missing (skip family, contains, reverse, *_or_default, set ops, joins, lookups, dictionaries, .NET 9/10 ops...). | Phase 1–2 |
-| Ported .NET tests | 11 files (all, any, average, count, last, order_by, order_by_descending, sum, take, then_by, then_by_descending). Many implemented ops have **no ported tests** (where, select, select_many, first, single, distinct, zip, chunk, group_by, min/max, aggregate, cast, of_type, append/prepend, concat, range, repeat, to_list). | Phase 1/2 upgrades + Phase B backfill |
+| Ported .NET tests | 12 files (generic_list (`List<T>`, added in `eea2097`), all, any, average, count, last, order_by, order_by_descending, sum, take, then_by, then_by_descending). Many implemented ops have **no ported tests** (where, select, select_many, first, single, distinct, zip, chunk, group_by, min/max, aggregate, cast, of_type, append/prepend, concat, range, repeat, to_list). | Phase 1/2 upgrades + Phase B backfill |
 | Tests layout | Ad-hoc suites (`gemini_test_suite`, `luna_test_suite`, `core` with empty files, a script `perf_run_1.py`). | F02 |
 | Docs | README only; docstrings are uneven (some one-liners, some none on FlpList). | F06 + every card |
 | Benchmarks | `pytest-benchmark` installed; one ordering benchmark; benchmarks deselected by default (`-m 'not benchmark'`). | F07 + every card |
@@ -63,6 +63,7 @@
 | D25 | **`result_selector` is keyword-only** whenever a positional callable would be ambiguous (group_by, group_adjacent, split, zip_longest, equi_zip, cartesian, 3-way zip). Existing `zip(second, result_selector)` keeps positional for compatibility and also accepts the keyword. | L24, N08, M08, M09, M14–M16 |
 | D26 | **Equality rule** for value comparisons (`contains`, `sequence_equal`, `starts_with`, `ends_with`, set ops): `a is b or a == b` (so `nan` objects match themselves, like .NET `EqualityComparer.Default`), implemented once in `_equality.py` (L06). | L06, L14, L21–L23, M24 |
 | D27 | **Argument order `func` before `seed`** for `aggregate`, `aggregate_by`, `scan`, `pre_scan` (existing flpit API) even though .NET puts `seed` first; `seed_selector` is keyword-only. | L28, N03, M03, M04 |
+| D28 | **`FlpList` keeps the `List<T>` instance API** (from `main @ eea2097`: `add/add_range/insert/insert_range/remove/remove_all/remove_at/remove_range/clear/contains/exists/find/find_all/reverse`). Where a `List<T>` method shares a LINQ name, the `List<T>` semantics win on `FlpList` (as C# member lookup does); the LINQ operator is reached with `as_enumerable()`. Only `reverse` differs in behaviour (in place, returns `None`). | L11 (LINQ `reverse` on `FlpIt` only, `as_enumerable()`), F05 (parity allow-list, `CollectionNoneError`), B10 (exception polish), A01 (skill rule). |
 
 ### Open questions: status
 1. `Except`: resolved as **`except_`** + `except_by`, no alias (L23).
@@ -244,53 +245,54 @@ The numeric file prefix **is** the execution order; IDs are stable. "Extra deps"
 |---|---|---|---|---|
 | 059 | B03 | [cast](059-B03-cast.md) | S | — |
 | 060 | B07 | [flp.range](060-B07-range.md) | S | — |
+| 061 | B10 | [FlpList List<T> API polish (exceptions, validation, docs)](061-B10-flplist-list-api-polish.md) | S | — |
 
 ### Phase 3: Curated MoreLINQ (high value)
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 061 | M01 | [pairwise](061-M01-pairwise.md) | S | — |
-| 062 | M02 | [window / window_left / window_right](062-M02-window.md) | M | — |
-| 063 | M03 | [scan / scan_right](063-M03-scan.md) | S | — |
-| 064 | M04 | [pre_scan](064-M04-pre-scan.md) | S | — |
-| 065 | M05 | [lag](065-M05-lag.md) | S | — |
-| 066 | M06 | [lead](066-M06-lead.md) | S | — |
-| 067 | M07 | [segment](067-M07-segment.md) | S | — |
-| 068 | M08 | [split](068-M08-split.md) | S | — |
-| 069 | M09 | [group_adjacent](069-M09-group-adjacent.md) | M | — |
-| 070 | M10 | [run_length_encode](070-M10-run-length-encode.md) | S | — |
-| 071 | M11 | [fill_forward / fill_backward](071-M11-fill-forward-backward.md) | S | — |
-| 072 | M12 | [pad / pad_start](072-M12-pad.md) | S | — |
-| 073 | M13 | [interleave](073-M13-interleave.md) | S | — |
-| 074 | M14 | [zip_longest](074-M14-zip-longest.md) | S | — |
-| 075 | M15 | [equi_zip](075-M15-equi-zip.md) | S | M14 |
-| 076 | M16 | [cartesian](076-M16-cartesian.md) | S | M14 |
-| 077 | M17 | [flatten](077-M17-flatten.md) | M | — |
-| 078 | M18 | [traverse_depth_first / traverse_breadth_first](078-M18-traverse.md) | S | — |
-| 079 | M19 | [maxima / minima](079-M19-maxima-minima.md) | S | — |
-| 080 | M20 | [tag_first_last](080-M20-tag-first-last.md) | S | — |
-| 081 | M21 | [take_every](081-M21-take-every.md) | S | — |
-| 082 | M22 | [take_until / skip_until](082-M22-take-until-skip-until.md) | S | L02, L03 |
-| 083 | M23 | [at_least / at_most / exactly / count_between](083-M23-count-bounds.md) | S | N10 |
-| 084 | M24 | [starts_with / ends_with](084-M24-starts-ends-with.md) | S | L04, L06, N10 |
-| 085 | M25 | [to_delimited_string](085-M25-to-delimited-string.md) | S | — |
-| 086 | M26 | [for_each / consume](086-M26-for-each-consume.md) | S | — |
+| 062 | M01 | [pairwise](062-M01-pairwise.md) | S | — |
+| 063 | M02 | [window / window_left / window_right](063-M02-window.md) | M | — |
+| 064 | M03 | [scan / scan_right](064-M03-scan.md) | S | — |
+| 065 | M04 | [pre_scan](065-M04-pre-scan.md) | S | — |
+| 066 | M05 | [lag](066-M05-lag.md) | S | — |
+| 067 | M06 | [lead](067-M06-lead.md) | S | — |
+| 068 | M07 | [segment](068-M07-segment.md) | S | — |
+| 069 | M08 | [split](069-M08-split.md) | S | — |
+| 070 | M09 | [group_adjacent](070-M09-group-adjacent.md) | M | — |
+| 071 | M10 | [run_length_encode](071-M10-run-length-encode.md) | S | — |
+| 072 | M11 | [fill_forward / fill_backward](072-M11-fill-forward-backward.md) | S | — |
+| 073 | M12 | [pad / pad_start](073-M12-pad.md) | S | — |
+| 074 | M13 | [interleave](074-M13-interleave.md) | S | — |
+| 075 | M14 | [zip_longest](075-M14-zip-longest.md) | S | — |
+| 076 | M15 | [equi_zip](076-M15-equi-zip.md) | S | M14 |
+| 077 | M16 | [cartesian](077-M16-cartesian.md) | S | M14 |
+| 078 | M17 | [flatten](078-M17-flatten.md) | M | — |
+| 079 | M18 | [traverse_depth_first / traverse_breadth_first](079-M18-traverse.md) | S | — |
+| 080 | M19 | [maxima / minima](080-M19-maxima-minima.md) | S | — |
+| 081 | M20 | [tag_first_last](081-M20-tag-first-last.md) | S | — |
+| 082 | M21 | [take_every](082-M21-take-every.md) | S | — |
+| 083 | M22 | [take_until / skip_until](083-M22-take-until-skip-until.md) | S | L02, L03 |
+| 084 | M23 | [at_least / at_most / exactly / count_between](084-M23-count-bounds.md) | S | N10 |
+| 085 | M24 | [starts_with / ends_with](085-M24-starts-ends-with.md) | S | L04, L06, N10 |
+| 086 | M25 | [to_delimited_string](086-M25-to-delimited-string.md) | S | — |
+| 087 | M26 | [for_each / consume](087-M26-for-each-consume.md) | S | — |
 
 ### Phase 4: Niche MoreLINQ
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 087 | M27 | [rank / rank_by](087-M27-rank.md) | S | — |
-| 088 | M28 | [partial_sort / partial_sort_by](088-M28-partial-sort.md) | M | — |
-| 089 | M29 | [permutations](089-M29-permutations.md) | S | B09 |
-| 090 | M30 | [subsets](090-M30-subsets.md) | S | B09, M29 |
-| 091 | M31 | [fold](091-M31-fold.md) | S | — |
+| 088 | M27 | [rank / rank_by](088-M27-rank.md) | S | — |
+| 089 | M28 | [partial_sort / partial_sort_by](089-M28-partial-sort.md) | M | — |
+| 090 | M29 | [permutations](090-M29-permutations.md) | S | B09 |
+| 091 | M30 | [subsets](091-M30-subsets.md) | S | B09, M29 |
+| 092 | M31 | [fold](092-M31-fold.md) | S | — |
 
 ### Future / epics
 
 | # | ID | Card | Effort | Extra deps |
 |---|---|---|---|---|
-| 092 | X01 | [Differential harness: compositions, property-based generation, full coverage](092-X01-difftest-expansion.md) | L | F03 |
+| 093 | X01 | [Differential harness: compositions, property-based generation, full coverage](093-X01-difftest-expansion.md) | L | F03 |
 
 ### Dependency sketch
 ```
