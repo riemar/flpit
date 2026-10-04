@@ -30,7 +30,7 @@ Before ~80 operators are added, remove the structural duplication between `FlpIt
 - Exceptions module `flpit/core/errors.py` (re-exported from `flpit.core.linq` and `flpit` for compatibility):
   - `ArgumentNoneError(TypeError)` with `.param_name`, message `Value cannot be None. (Parameter '<name>')` (the .NET wording with `null` → `None`, the convention `main` adopted in `eea2097`); `SourceNoneError`'s `(Argument 'source')` is normalised to `(Parameter 'source')`
   - `SourceNoneError`, `PredicateNoneError`, `SelectorNoneError`, `CollectionNoneError` (added on `main` in `eea2097`) become subclasses of `ArgumentNoneError` (existing `isinstance`/`except` code keeps working); `SelectorNoneError` gets the real parameter name instead of always `keySelector`.
-  - `ArgumentOutOfRangeError(ValueError)` (used by `chunk(0)` today: currently a bare `ValueError`, so this is compatible)
+  - `ArgumentOutOfRangeError(ValueError, IndexError)` (maintainer decision for B10/D29: compatible with both today's `chunk(0)` `ValueError` and the `List<T>` methods' `IndexError` on `main`)
   - `DuplicateKeyError(ValueError)` (reserved for L18)
 - **Eager argument validation** on all existing deferred operators (`where`, `select`, `select_many`, `distinct_by`, `zip`, `concat`, `group_by`, `order_by*`, `then_by*`, `cast`, `of_type`): `None` callables/sources now raise at call time, not at first enumeration (matches .NET `ArgumentNullException` timing; rules.md "Callbacks & Exceptions" unaffected, since callbacks still run lazily).
 - Public-API guard tests (see §4).

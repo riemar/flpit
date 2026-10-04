@@ -19,7 +19,7 @@ pr:
 ## 2. Scope
 **In**
 - Exceptions aligned with `List<T>` and the F05 taxonomy:
-  - argument range errors (`index`, `count`, invalid range) → `ArgumentOutOfRangeError` with .NET parameter names and messages (`Index was out of range. Must be non-negative and less than the size of the collection. (Parameter 'index')`, etc.). Decide whether `ArgumentOutOfRangeError` also subclasses `IndexError` so existing `except IndexError` code keeps working (proposed: yes, `class ArgumentOutOfRangeError(ValueError, IndexError)`).
+  - argument range errors (`index`, `count`, invalid range) → `ArgumentOutOfRangeError` with .NET parameter names and messages (`Index was out of range. Must be non-negative and less than the size of the collection. (Parameter 'index')`, etc.). **Decided (maintainer, 2026-10-04): `ArgumentOutOfRangeError` also subclasses `IndexError`**, i.e. `class ArgumentOutOfRangeError(ValueError, IndexError)`, so existing `except IndexError` code (including riemar's `List<T>` tests on `main`) keeps working.
   - `None` callables/collections → `ArgumentNoneError` subclasses (`PredicateNoneError`, `CollectionNoneError`, `ArgumentNoneError("match")`).
 - Validation bugs found while re-evaluating on 2026-10-04:
   - `remove_at(len)` passes the guard (`index > len` instead of `>=`) and fails with Python's raw `IndexError: list assignment index out of range`.
@@ -79,8 +79,8 @@ uv run python -c "from flpit import flp; flp.lst([1]).exists(None)"         # Pr
 ```
 
 ## 10. Definition of Done
-DoD-std, plus the `List<T>` member table in README and the `ArgumentOutOfRangeError` base-class decision recorded.
+DoD-std, plus the `List<T>` member table in README, and a test asserting `issubclass(ArgumentOutOfRangeError, IndexError)` and `issubclass(ArgumentOutOfRangeError, ValueError)`.
 
 ## 11. Risks / open questions
-- Making `ArgumentOutOfRangeError` subclass `IndexError` as well as `ValueError` is unusual but keeps compatibility with `main`'s current `IndexError`. Alternative: keep `IndexError` only for `List<T>` members.
+- Resolved: `ArgumentOutOfRangeError(ValueError, IndexError)`. Multiple inheritance from two built-in exceptions is valid because both share `Exception` with a compatible layout. F05 defines the class this way from the start.
 - Coordinate with riemar, who authored the `List<T>` API, before changing its exception types.
