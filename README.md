@@ -349,16 +349,18 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | ├── test_all.py                                |          80 |
 | ├── test_any.py                                |          90 |
 | ├── test_average.py                            |         572 |
+| ├── test_concat.py                             |          64 |
 | ├── test_count.py                              |          37 |
 | ├── test_generic_list.py                       |          95 |
 | ├── test_last.py                               |          29 |
 | ├── test_order_by.py                           |         100 |
 | ├── test_order_descending_by.py                |          45 |
+| ├── test_skip.py                               |          75 |
 | ├── test_sum.py                                |         134 |
 | ├── test_take.py                               |          39 |
 | ├── test_then_by.py                            |          40 |
 | └── test_then_descending_by.py                 |          34 |
 ----------------------------------------------------------------
-| GRAND TOTALS                                   |        1295 |
+| GRAND TOTALS                                   |        1434 |
 ================================================================
 ```

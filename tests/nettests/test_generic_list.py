@@ -14,9 +14,12 @@ instantiations. In Python, those distinctions are represented by flp.lst and
 flp.it respectively; Python's runtime does not require separate copies for
 each generic type argument.
 """
+from flpit import ArgumentOutOfBoundsError
+from flpit import ArgumentNonNegError
+from flpit import ArgumentError
 from flpit.core.linq import CollectionNoneError
 import pytest
-from flpit import FlpList
+from flpit import FlpList, ArgumentOutOfRangeError
 
 VALID_COLLECTION_SIZES = [0, 1, 10, 100]
 INT_MIN = -2147483648
@@ -379,7 +382,7 @@ def test_InsertValidations():
     bad_indices = [len(items) + 1, len(items) + 2, INT_MAX, -1, -2, INT_MIN]
 
     for bad_idx in bad_indices:
-        with pytest.raises(IndexError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.insert(bad_idx, items[0])
 
 def test_InsertRange_Valid():
@@ -392,9 +395,9 @@ def test_InsertRange_Valid():
 def test_InsertRange_InvalidParameters():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3])
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.insert_range(10, [4, 5])
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.insert_range(-1, [4, 5])
     with pytest.raises(CollectionNoneError):
         lst.insert_range(0, None)
@@ -422,7 +425,7 @@ def test_RemoveAt_InvalidIndex():
     lst.add_range([1, 2, 3])
     bad_indices = [-1, 3, 10]
     for idx in bad_indices:
-        with pytest.raises(IndexError):
+        with pytest.raises(ArgumentError):
             lst.remove_at(idx)
 
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
@@ -472,11 +475,11 @@ def test_Remove_Range(list_length, index, count):
 
 def test_RemoveRange_InvalidParameters():
     lst = generic_list_factory(10)
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentNonNegError):
         lst.remove_range(-1, 5)
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentNonNegError):
         lst.remove_range(0, -1)
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfBoundsError):
         lst.remove_range(8, 5) # index + count > list length
 
 
@@ -543,7 +546,7 @@ def test_Reverse_NegativeParameters(list_length):
     ]
 
     for idx, cnt in invalid_parameters:
-        with pytest.raises(IndexError):
+        with pytest.raises(ArgumentError):
             lst.reverse(idx, cnt)
 
 

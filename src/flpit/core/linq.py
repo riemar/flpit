@@ -39,38 +39,70 @@ class _Sentinel:
 _SENTINEL = _Sentinel()
 _MISSING = object()
 
+# =============================================================================
+# Invalid Operation Errors
+# =============================================================================
+class InvalidOperationError(ValueError):
+    pass
 
-class EmptySequenceError(ValueError):
+class EmptySequenceError(InvalidOperationError):
     def __init__(self):
         super().__init__("Sequence contains no elements")
 
-class NoMatchError(ValueError):
+class NoMatchError(InvalidOperationError):
     def __init__(self):
         super().__init__("Sequence contains no matching elements")
 
-class MultipleMatchesError(ValueError):
+class MultipleMatchesError(InvalidOperationError):
     def __init__(self):
         super().__init__("Sequence contains more than one matching element")
 
-class MultipleElementsError(ValueError):
+class MultipleElementsError(InvalidOperationError):
     def __init__(self):
         super().__init__("Sequence contains more than one element")
 
-class SourceNoneError(TypeError):
-    def __init__(self):
-        super().__init__("Value cannot be None. (Argument 'source')")
 
-class PredicateNoneError(TypeError):
-    def __init__(self):
-        super().__init__("Value cannot be None. (Argument 'predicate')")
+# =============================================================================
+# Argument Errors
+# =============================================================================
+class ArgumentError(TypeError):
+    pass
 
-class CollectionNoneError(TypeError):
-    def __init__(self):
-        super().__init__("Value cannot be None. (Argument 'collection')")
+class ArgumentNullError(ArgumentError):
+    def __init__(self, argument: str):
+        super().__init__(f"Value cannot be None. (Argument '{argument}')")
 
-class SelectorNoneError(TypeError):
+class SourceNoneError(ArgumentNullError):
     def __init__(self):
-        super().__init__("Value cannot be None. (Parameter 'keySelector')")
+        super().__init__("source")
+
+class PredicateNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("predicate")
+
+class CollectionNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("collection")
+
+class SelectorNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("keySelector")
+
+class SecondNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("second")
+
+class ArgumentOutOfRangeError(ArgumentError):
+    def __init__(self, argument: str, pattern:str="Index was out of range. Must be non-negative and less than the size of the collection."):
+        super().__init__(f"{pattern} (Parameter '{argument}')")
+
+class ArgumentNonNegError(ArgumentOutOfRangeError):
+    def __init__(self, argument:str):
+        super().__init__(argument, "Non-negative number required.")
+
+class ArgumentOutOfBoundsError(ArgumentError):
+    def __init__(self):
+        super().__init__("Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.")
 
 
 def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -191,6 +223,9 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return builtins.all(map(predicate, self))
 
     def concat(self, second: Iterable[TItem]) -> "FlpIt[TItem]":
+        if second is None:
+            raise SecondNoneError()
+
         def _generator() -> Iterator[TItem]:
             yield from self
             yield from second
@@ -229,6 +264,18 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         def _generator() -> Iterator[TResult]:
             for item in self:
                 yield from selector(item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def skip(self, count: int) -> "FlpIt[TItem]":
+        """
+        |Bypasses a specified number of elements from the start.
+        """
+        if count <= 0:
+            return self
+
+        def _generator() -> Iterator[TItem]:
+            yield from islice(iter(self), count, None)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -528,11 +575,13 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     def element_at(self, index: int) -> TItem:
         """Returns the element at a specified index in a sequence."""
         if index < 0:
-            raise IndexError("Index out of range")
+            raise ArgumentOutOfRangeError("index")
+
         for i, item in enumerate(self):
             if i == index:
                 return item
-        raise IndexError("Index out of range")
+
+        raise ArgumentOutOfRangeError("index")
 
     def first(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the first element matching a predicate, or raises ValueError."""
@@ -830,7 +879,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
 
     def insert(self, index: int, item: TItem) -> None:
         if index < 0 or index > len(self.__list.data):
-            raise IndexError(f"Index {index} is out of range.")
+            raise ArgumentOutOfRangeError("index")
 
         self.__list.data.insert(index, item)
 
@@ -839,7 +888,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
             raise CollectionNoneError()
 
         if index < 0 or index > len(self.__list.data):
-            raise IndexError(f"Index {index} is out of range.")
+            raise ArgumentOutOfRangeError("index")
 
         self.__list.data[index:index] = list(collection)
 
@@ -865,8 +914,8 @@ class FlpList(Collection[TItem], Generic[TItem]):
         return original_length - len(self.__list.data)
 
     def remove_at(self, index: int) -> None:
-        if index < 0 or index > len(self.__list.data):
-            raise IndexError(f"Index {index} is out of range.")
+        if index < 0 or index >= len(self.__list.data):
+            raise ArgumentOutOfRangeError("index")
 
         del self.__list.data[index]
 
@@ -874,13 +923,13 @@ class FlpList(Collection[TItem], Generic[TItem]):
         size = len(self.__list.data)
 
         if index < 0 or index > size:
-            raise IndexError("index")
+            raise ArgumentNonNegError("index")
 
         if count < 0:
-            raise IndexError("count")
+            raise ArgumentNonNegError("count")
 
         if count > size - index:
-            raise IndexError("The range is invalid.")
+            raise ArgumentOutOfBoundsError()
 
         del self.__list.data[index : index + count]
 
@@ -899,17 +948,13 @@ class FlpList(Collection[TItem], Generic[TItem]):
 
         # Apply your List<T>-compatible argument validation here.
         if index < 0 or index > size:
-            raise IndexError("Non-negative number required.")
+            raise ArgumentNonNegError("index")
 
         if count < 0:
-            raise IndexError("Non-negative number required.")
+            raise ArgumentNonNegError("count")
 
         if index + count > size:
-            raise IndexError(
-                "Offset and length were out of bounds for the array or "
-                "count is greater than the number of elements from index "
-                "to the end of the source collection."
-            )
+            raise ArgumentOutOfBoundsError()
 
         self.__list.data[index:index + count] = reversed(
             self.__list.data[index:index + count]
@@ -948,6 +993,9 @@ class FlpList(Collection[TItem], Generic[TItem]):
         """Prepends an element to the sequence lazily, returning a FlpIt without mutating this list."""
         return FlpIt(self.__list.data).prepend(element)
 
+    def concat(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).concat(second)
+
     # noinspection unused-parameter
     def as_type(self, target_type: Type[TResult]) -> FlpList[TResult]:
         return self  # type: ignore[return-value]
@@ -962,6 +1010,9 @@ class FlpList(Collection[TItem], Generic[TItem]):
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).select_many(selector)
+
+    def skip(self, count: int) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).skip(count)
 
     def take(self, count: int) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).take(count)
@@ -1076,7 +1127,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
 
     def element_at(self, index: int) -> TItem:
         if index < 0 or index >= len(self.__list.data):
-            raise IndexError("Index out of range")
+            raise ArgumentOutOfRangeError("index")
         return self.__list.data[index]
 
     def first(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:

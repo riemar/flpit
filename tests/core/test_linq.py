@@ -4,7 +4,8 @@ import pytest
 from typing import Callable
 
 
-from flpit import flp, FlpIt, FlpList
+from flpit import flp, FlpIt, FlpList, ArgumentOutOfRangeError
+
 
 @dataclass
 class MyCustomType:
@@ -24,6 +25,8 @@ class Cat():
     pass
 
 class TestAdd:
+    def test_whatever(self):
+        lst = flp.lst([1,2,3])
 
     def test_linq_query_append_and_prepend_deferred_evaluation(self):
         """Test that append and prepend on FlpIt yield elements lazily without mutating the source."""
@@ -264,10 +267,10 @@ def test_element_at():
     assert data.element_at(0) == "a"
     assert data.element_at(2) == "c"
 
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfRangeError):
         data.element_at(3)
 
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfRangeError):
         data.element_at(-1)
 
 

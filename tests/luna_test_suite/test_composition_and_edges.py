@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import math
-
 import pytest
 
-
-from flpit import flp, FlpList
+from flpit import flp, FlpList, ArgumentOutOfRangeError
 
 
 @pytest.mark.parametrize(
@@ -129,7 +127,7 @@ def test_sum_selector_can_return_ints_from_objects() -> None:
 
 
 def test_element_at_does_not_accept_negative_index() -> None:
-    with pytest.raises(IndexError):
+    with pytest.raises(ArgumentOutOfRangeError):
         flp.it([1, 2, 3]).element_at(-1)
 
 

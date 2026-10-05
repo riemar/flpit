@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from flpit import flp, FlpList, OrderedIt, EmptySequenceError
+from flpit import flp, FlpList, OrderedIt, EmptySequenceError, ArgumentOutOfRangeError
 
 
 def test_flplist_to_list_returns_shallow_independent_copy() -> None:
@@ -170,9 +170,9 @@ def test_flplist_count_exact_callable_value_is_ambiguous_and_currently_treated_a
 def test_flplist_element_at() -> None:
     values = FlpList([10, 20, 30])
     assert values.element_at(1) == 20
-    with pytest.raises(IndexError, match="Index out of range"):
+    with pytest.raises(ArgumentOutOfRangeError):
         values.element_at(3)
-    with pytest.raises(IndexError, match="Index out of range"):
+    with pytest.raises(ArgumentOutOfRangeError):
         values.element_at(-1)
 
 

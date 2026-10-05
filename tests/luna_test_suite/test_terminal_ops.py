@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import math
-
 import pytest
 
-
-from flpit import flp, EmptySequenceError, NoMatchError, MultipleMatchesError, MultipleElementsError
-
+from flpit import flp, EmptySequenceError, NoMatchError, MultipleMatchesError, MultipleElementsError, ArgumentOutOfRangeError
 
 @pytest.mark.parametrize(
     "values, expected",
@@ -123,7 +120,7 @@ def test_element_at(index, expected) -> None:
 
 @pytest.mark.parametrize("index", [-1, 3, 999])
 def test_element_at_out_of_range(index) -> None:
-    with pytest.raises(IndexError, match="Index out of range"):
+    with pytest.raises(ArgumentOutOfRangeError):
         flp.it([10, 20, 30]).element_at(index)
 
 

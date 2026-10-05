@@ -17,6 +17,27 @@ def pytest_configure(config):
 def flp_type(request):
     return request.param
 
+def create_sources(flp_type):
+    def _create_sources(source):
+        data = list(source)
+
+        class PureIterable:
+            """Reines Iterable ohne __len__ oder __getitem__."""
+
+            def __init__(self, items):
+                self._items = items
+
+            def __iter__(self):
+                return iter(self._items)
+
+        return [
+            flp_type(data),
+            flp_type(PureIterable(data)),
+            # flp_type(x for x in data), // ./NET does have one-shots in their tests
+        ]
+
+    return _create_sources
+
 
 ##############################################
 

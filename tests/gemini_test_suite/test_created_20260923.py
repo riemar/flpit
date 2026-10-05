@@ -12,6 +12,7 @@ from flpit import (
     EmptySequenceError,
     NoMatchError,
     MultipleMatchesError,
+    ArgumentOutOfRangeError,
     FlpIt,
     FlpList,
     Grouping,
@@ -397,7 +398,7 @@ class TestFlpItAggregations:
         ],
     )
     def test_element_at_failure_raises_index_error(self, data: list, index: int):
-        with pytest.raises(IndexError, match="Index out of range"):
+        with pytest.raises(ArgumentOutOfRangeError):
             FlpIt(data).element_at(index)
 
     @pytest.mark.parametrize(
@@ -611,10 +612,10 @@ class TestFlpListSpecifics:
         assert flp.element_at(0) == 100
         assert flp.element_at(1) == 200
 
-        with pytest.raises(IndexError, match="Index out of range"):
+        with pytest.raises(ArgumentOutOfRangeError):
             flp.element_at(-1)
 
-        with pytest.raises(IndexError, match="Index out of range"):
+        with pytest.raises(ArgumentOutOfRangeError):
             flp.element_at(2)
 
     def test_flp_list_linq_delegation(self):
