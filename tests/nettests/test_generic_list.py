@@ -481,6 +481,8 @@ def test_RemoveRange_InvalidParameters():
         lst.remove_range(0, -1)
     with pytest.raises(ArgumentOutOfBoundsError):
         lst.remove_range(8, 5) # index + count > list length
+    with pytest.raises(ArgumentOutOfBoundsError):
+        lst.remove_range(12, 5) # index + count > list length
 
 
 # ==========================================

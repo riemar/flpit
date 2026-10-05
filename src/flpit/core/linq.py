@@ -922,7 +922,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def remove_range(self, index: int, count: int) -> None:
         size = len(self.__list.data)
 
-        if index < 0 or index > size:
+        if index < 0:
             raise ArgumentNonNegError("index")
 
         if count < 0:
