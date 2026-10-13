@@ -1,22 +1,64 @@
-from dataclasses import fields
-from typing import Annotated, Any, TypeVar, get_args, get_origin, get_type_hints
+from typing import Annotated
+import dataclasses
+import re
+import sys
+import types
+import typing
+
+import threading
+from dataclasses import MISSING, dataclass
+from functools import lru_cache
+from typing import Any, ForwardRef, get_args, get_origin, get_type_hints
+from hashlib import blake2s
+
 import msgspec
 
-T = TypeVar("T")
+from enum import StrEnum
+
+class JsonNamingPolicy(StrEnum):
+    lower_case = "lower"
+    upper_case = "upper"
+    camel_case = "camel"
+    pascal_case = "pascal"
+    kebap_case = "kebab"
+
+
+@dataclass(slots=True, frozen=True)
+class JsonSerializerOptions:
+    naming_policy: JsonNamingPolicy = JsonNamingPolicy.camel_case
+    write_indented: bool = False
+    native:bool=False
+    """
+    | Set to true for the native speed of msgspec
+    
+    !! only set to true if you know what you are doing !!
+    You'll receive the msgspec.msgstruct object that will try to do it's best to behave like your dataclass.
+    But remember !! "It's NOT your dataclass" !!
+    """
+
+    @property
+    def fingerprint(self) -> str:
+        """
+        Identifies a unique jso instance for building a struct
+        !! All parts of a jso that don't influence the defstruct MUST be ignored!
+        """
+        settings = self.naming_policy.value
+        return blake2s(settings.encode(), digest_size=6).hexdigest()
 
 # ---------------------------------------------------------------------------
 # Metadata Annotation Markers
 # ---------------------------------------------------------------------------
+
 class JsonIgnore:
-    def __class_getitem__(cls, item: type[T]) -> Any:
+    def __class_getitem__[T](cls, item: type[T]) -> Any:
         return Annotated[item, cls]
 
 class JsonInclude:
-    def __class_getitem__(cls, item: type[T]) -> Any:
+    def __class_getitem__[T](cls, item: type[T]) -> Any:
         return Annotated[item, cls]
 
 class JsonProperty:
-    def __class_getitem__(cls, item: tuple[type[T], str]) -> Any:
+    def __class_getitem__[T](cls, item: tuple[type[T], str]) -> Any:
         target_type, json_name = item
         return Annotated[target_type, cls(json_name)]
 
@@ -27,78 +69,359 @@ JIgnore = JsonIgnore
 JInclude = JsonInclude
 JProp = JsonProperty
 
+# ---------------------------------------------------------------------
+# Generated type metadata
+# ---------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# High-Performance Compiler Engine
-# ---------------------------------------------------------------------------
-class NativeEngine:
-    def __init__(self) -> None:
-        self._outbound_structs: dict[type, type] = {}
+@dataclass(slots=True, eq=False)
+class _WireType:
+    source: type
+    """The source type to build a msgspec.struct for"""
+    hints: dict[str, Any]
+    namespace: types.ModuleType
+    """the name space we are targeting"""
+    struct: type | None = None
 
-    def _parse_annotation(self, hint: Any, name: str) -> tuple[Any, str | None, bool, bool]:
-        if get_origin(hint) is not Annotated:
-            should_include = not name.startswith("_")
-            return hint, None, should_include, False
+    @property
+    def module_name(self: _WireType) -> str:
+        return self.namespace.__name__
 
-        args = get_args(hint)
-        base_type = args[0]
-        metadata = args[1:]
+    @property
+    def class_name(self: _WireType) -> str:
+        return self.source.__name__
 
-        has_ignore = any(item is JsonIgnore for item in metadata)
-        has_include = any(item is JsonInclude for item in metadata)
-        aliases = [item.name for item in metadata if isinstance(item, JsonProperty)]
-        alias = aliases[-1] if aliases else None
+    @property
+    def ref_name(self: _WireType) -> str:
+        identity = (
+            f"{self.source.__module__}_{self.source.__qualname__}"
+        )
+        return "_ref_" + re.sub(r"\W", "_", identity)
 
-        explicit_include = has_include or (alias is not None)
-        should_include = explicit_include if name.startswith("_") else not has_ignore
 
-        return base_type, alias, should_include, has_ignore
+# ---------------------------------------------------------------------
+# Module and annotation utilities
+# ---------------------------------------------------------------------
 
-    def register(self, cls: type) -> None:
-        if cls in self._outbound_structs:
-            return
+def _generated_module(source: type) -> types.ModuleType:
+    """Generates the required module definition for our runtime only dynamic msgspec.struct"""
+    name = f"flpit.json._generated.{source.__module__}"
 
-        # Read class-level hints for memory fields
-        class_hints = get_type_hints(cls, include_extras=True)
-        struct_fields = []
+    module = sys.modules.get(name)
+    if module is None:
+        module = types.ModuleType(name)
+        sys.modules[name] = module
 
-        # 1. Process regular dataclass fields
-        for f in fields(cls):
-            if not f.init:
+    return module
+
+
+def _is_dataclass_type(tp: Any) -> bool:
+    return isinstance(tp, type) and dataclasses.is_dataclass(tp)
+
+
+def _nested_dataclasses(tp: Any):
+    """Yield dataclass types referenced by an annotation."""
+    if _is_dataclass_type(tp):
+        yield tp
+        return
+
+    if isinstance(tp, (list, tuple)):
+        for item in tp:
+            yield from _nested_dataclasses(item)
+        return
+
+    origin = get_origin(tp)
+
+    if origin is typing.Annotated:
+        yield from _nested_dataclasses(get_args(tp)[0])
+        return
+
+    if origin is typing.Literal:
+        return
+
+    for arg in get_args(tp):
+        yield from _nested_dataclasses(arg)
+
+
+def _rewrite_type(
+        tp: Any,
+        owner: _WireType,
+        graph: dict[type, _WireType],
+        *,
+        resolve: bool = False,
+) -> Any:
+    """Replace source dataclasses with generated Structs or ForwardRefs."""
+    if tp is getattr(typing, "Self", None):
+        info = owner
+        return info.struct if resolve else ForwardRef(info.ref_name)
+
+    if _is_dataclass_type(tp):
+        info = graph[tp]
+        return info.struct if resolve else ForwardRef(info.ref_name)
+
+    if isinstance(tp, list):
+        return [
+            _rewrite_type(item, owner, graph, resolve=resolve)
+            for item in tp
+        ]
+
+    if isinstance(tp, tuple):
+        return tuple(
+            _rewrite_type(item, owner, graph, resolve=resolve)
+            for item in tp
+        )
+
+    origin = get_origin(tp)
+
+    if origin is None or origin is typing.Literal:
+        return tp
+
+    args = get_args(tp)
+
+    if origin is typing.Annotated:
+        base = _rewrite_type(
+            args[0], owner, graph, resolve=resolve
+        )
+        return typing.Annotated[(base, *args[1:])]
+
+    rewritten: tuple[Any, ...] = tuple(
+        _rewrite_type(arg, owner, graph, resolve=resolve)
+        for arg in args
+    )
+
+    if origin in (typing.Union, types.UnionType):
+        union: Any = typing.Union # with all the magic here, there's no way to make typing really happy
+        return union[rewritten]
+
+    params = rewritten[0] if len(rewritten) == 1 else rewritten
+
+    try:
+        return origin[params]
+    except (TypeError, AttributeError) as exc:
+        copier = getattr(tp, "copy_with", None)
+        if copier is not None:
+            return copier(rewritten)
+
+        raise TypeError(
+            f"Cannot rewrite annotation {tp!r}"
+        ) from exc
+
+
+# ---------------------------------------------------------------------
+# Graph discovery
+# ---------------------------------------------------------------------
+
+def _discover_graph(
+        roots: tuple[type, ...],
+) -> dict[type, _WireType]:
+    """Discover reachable dataclasses and resolve their annotations."""
+    graph: dict[type, _WireType] = {}
+    pending = list(roots)
+
+    while pending:
+        source = pending.pop()
+
+        if source in graph:
+            continue
+
+        info = _WireType(
+            source=source,
+            hints=get_type_hints(source, include_extras=True),
+            namespace=_generated_module(source),
+        )
+        graph[source] = info
+
+        for field in dataclasses.fields(source):
+            if not field.init:
                 continue
 
-            hint = class_hints.get(f.name, f.type)
-            base_type, alias, should_include, has_ignore = self._parse_annotation(hint, f.name)
+            pending.extend(
+                _nested_dataclasses(info.hints[field.name])
+            )
 
-            if should_include and not has_ignore:
-                field_kwargs = {"default": None}
-                if alias:
-                    field_kwargs["name"] = alias
-                struct_fields.append((f.name, base_type, msgspec.field(**field_kwargs)))
+    return graph
 
-        # 2. Process properties by inspecting class attributes safely
-        for attr_name in dir(cls):
-            attr = getattr(cls, attr_name, None)
-            if isinstance(attr, property) and attr.fget is not None:
-                # Extract the type hints directly from the property's getter function
-                prop_hints = get_type_hints(attr.fget, include_extras=True)
-                return_hint = prop_hints.get("return", Any)
+def _allows_none(tp: Any) -> bool:
+    if get_origin(tp) is typing.Annotated:
+        tp = get_args(tp)[0]
 
-                base_type, alias, should_include, has_ignore = self._parse_annotation(return_hint, attr_name)
+    return type(None) in get_args(tp)
 
-                if should_include and not has_ignore:
-                    field_kwargs = {"default": None}
-                    if alias:
-                        field_kwargs["name"] = alias
-                    struct_fields.append((attr_name, base_type, msgspec.field(**field_kwargs)))
+# ---------------------------------------------------------------------
+# Struct construction
+# ---------------------------------------------------------------------
 
-        self._outbound_structs[cls] = msgspec.defstruct(f"Out_{cls.__name__}", struct_fields, rename="camel")
+def _struct_fields(
+        info: _WireType,
+        graph: dict[type, _WireType],
+) -> list[tuple[Any, ...]]:
+    definitions: list[tuple[Any, ...]] = []
 
-    def encode(self, obj: Any) -> bytes:
-        cls = type(obj)
-        self.register(cls)
-        wire_obj = msgspec.convert(obj, self._outbound_structs[cls], from_attributes=True)
-        return msgspec.json.encode(wire_obj)
+    for field in dataclasses.fields(info.source):
+        if not field.init:
+            continue
 
-    def decode(self, data: bytes, type: type[T]) -> T:
-        return msgspec.json.decode(data, type=type, strict=False)
+        annotation = _rewrite_type(
+            info.hints[field.name],
+            info,
+            graph,
+        )
+
+        if field.default is not MISSING:
+            spec = (field.name, annotation, field.default)
+
+        elif field.default_factory is not MISSING:
+            spec = (
+                field.name,
+                annotation,
+                msgspec.field(
+                    default_factory=field.default_factory
+                ),
+            )
+
+        # for now... no enforcing of explicit null in json
+        elif _allows_none(info.hints[field.name]):
+            spec = (field.name, annotation, None)
+
+        else:
+            spec = (field.name, annotation)
+
+        definitions.append(spec)
+
+    return definitions
+
+
+def _register_forward_refs(
+        graph: dict[type, _WireType],
+) -> None:
+    """Expose every graph reference in each participating module."""
+    namespaces = []
+
+    for info in graph.values():
+        if not any(info.namespace is ns for ns in namespaces):
+            namespaces.append(info.namespace)
+
+    for namespace in namespaces:
+        for info in graph.values():
+            setattr(namespace, info.ref_name, info.struct)
+
+def _behavior_namespace(source: type) -> dict[str, Any]:
+    return {
+        name: value
+        for name, value in vars(source).items()
+        if (
+                not name.startswith("__")
+                and callable(value)
+        )
+    # pyrefly: ignore [implicit-any-lambda]
+    } | {  "__class__": property(lambda self, cls=source: cls) }
+
+def _build_graph(
+        roots: tuple[type, ...],
+        jso: JsonSerializerOptions,
+) -> dict[type, _WireType]:
+    graph = _discover_graph(roots)
+
+    for wt in graph.values():
+        wt.struct = msgspec.defstruct(
+            wt.class_name,
+            _struct_fields(wt, graph),
+            module=wt.module_name,
+            namespace=_behavior_namespace(wt.source),
+            rename=jso.naming_policy.value,
+            kw_only=True,
+            omit_defaults=True, # don't render nulls
+            forbid_unknown_fields=False, # ensure ignoring unknow fields!
+        )
+
+    _register_forward_refs(graph)
+
+    for wt in graph.values():
+        msgspec.inspect.type_info(wt.struct)
+
+    # Publish the readable generated class names.
+    for wt in graph.values():
+        setattr(wt.namespace, wt.class_name, wt.struct)
+
+    return graph
+
+
+# ---------------------------------------------------------------------
+# Cache and public API
+# ---------------------------------------------------------------------
+
+# we must only build new when the
+_jso_registry: dict[str, JsonSerializerOptions] = {}
+_registry_lock = threading.Lock()
+
+@lru_cache(maxsize=None)
+def _wrapped_lru(roots: tuple[type, ...], jso_id: str):
+    with _registry_lock:
+        jso = _jso_registry[jso_id]
+    return _build_graph(roots, jso)
+
+def _cached_graph(roots:tuple[object, ...], jso: JsonSerializerOptions):
+    with _registry_lock:
+        _jso_registry[jso.fingerprint] = jso
+
+    return _wrapped_lru(roots, jso.fingerprint)
+
+def wire_type_for(
+        target_type: type,
+        jso: JsonSerializerOptions,
+):
+    roots = tuple(_nested_dataclasses(target_type))
+
+    if not roots:
+        raise TypeError(
+            "Only @dataclass are supported!, "
+            f"got {target_type!r}"
+        )
+
+    # Normalize the root set so User and list[User] share the graph.
+    graph_roots = tuple(sorted(set(roots), key=id))
+
+    graph = _cached_graph(
+        graph_roots,
+        jso,
+    )
+
+    return _rewrite_type(
+        target_type,
+        graph[roots[0]],
+        graph,
+        resolve=True,
+    )
+
+
+def decode_dataclass(
+        data: bytes | str,
+        target: type,
+        jso: JsonSerializerOptions|None=None
+):
+    if jso is None:
+        jso = JsonSerializerOptions()
+
+    wire_type = wire_type_for(target, jso)
+    parsed = msgspec.json.decode(data, type=wire_type)
+
+    if jso.native:
+        return parsed
+
+    return msgspec.convert(
+        parsed,
+        target,
+        from_attributes=True,
+    )
+
+def encode_dataclass[T](
+        data: Any,
+        target: type[T],
+        jso: JsonSerializerOptions|None=None
+) -> bytes:
+    if jso is None:
+        jso = JsonSerializerOptions()
+
+    wire_type = wire_type_for(target, jso)
+    wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
+    return msgspec.json.encode(wire_obj)
+

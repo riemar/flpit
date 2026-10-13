@@ -24,11 +24,7 @@ FLOAT_MAX = 3.4028235e38
 DECIMAL_MIN = Decimal('-79228162514264337593543950335')
 DECIMAL_MAX = Decimal('79228162514264337593543950335')
 
-# Attempt to import flp if available globally, otherwise rely on the fixture where possible.
-try:
-    import flp
-except ImportError:
-    pass # Assume flp might be injected or globally available in the test runner environment
+from flpit import flp
 
 def _is_nan(val) -> bool:
     if isinstance(val, Decimal):

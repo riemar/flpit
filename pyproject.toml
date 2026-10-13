@@ -1,9 +1,9 @@
 [project]
 name = "flpit"
-version = "0.2.1.dev1"
+version = "0.2.1.dev2"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 keywords = ["linq", "fluent", "iterable", "pipeline", "lazy-evaluation", "pyrefly", "type-safe", "generators"]
 classifiers = [

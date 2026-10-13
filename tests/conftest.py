@@ -2,6 +2,18 @@ from flpit import flp
 from typing import Iterable, Any, Generic, TypeVar, Iterator
 
 import pytest
+import logging
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Configures live logging stream for pytest and PyCharm execution."""
+    config.option.log_cli = True
+    config.option.log_cli_format = "%(message)s"
+
+@pytest.fixture
+def tlog(request: pytest.FixtureRequest) -> logging.Logger:
+    """Injects a logger named after the current test function node."""
+    return logging.getLogger("")
+
 
 T = TypeVar("T")
 

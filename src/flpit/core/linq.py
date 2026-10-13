@@ -1,5 +1,3 @@
-from __future__ import annotations
-from typing import SupportsIndex
 import decimal
 from decimal import Decimal, Overflow, Inexact
 
@@ -15,15 +13,22 @@ from typing import (
     Iterable,
     Iterator,
     Collection,
+    SupportsIndex,
     List,
     Set,
     Type,
     TypeVar,
+    ClassVar,
     Union,
     override,
     overload,
     cast as typing_cast,
+    GenericAlias
 )
+
+from flpit.json import JsonSerializerOptions, decode_dataclass, encode_dataclass
+from flpit.generic import _GenericMeta
+
 TItem = TypeVar("TItem")
 TResult = TypeVar("TResult")
 TKey = TypeVar("TKey")
@@ -144,7 +149,7 @@ class _FactoryIterable(Iterable[TItem], Generic[TItem]):
         return self._factory()
 
 
-class FlpIt(Iterable[TItem], Generic[TItem]):
+class FlpIt(Iterable[TItem], Generic[TItem], metaclass=_GenericMeta):
     """
     | Fluent Iterable
     Lazy evaluation wrapper around an iterable, inspired by .NET LINQ's
@@ -246,8 +251,8 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             for item in self:
                 if predicate(item):
                     yield item
-
-        return typing_cast(FlpIt[TItem], FlpIt(_FactoryIterable(_generator)))
+        item_type = self._get_serialization_type()
+        return typing_cast(FlpIt[TItem], FlpIt[item_type](_FactoryIterable(_generator)))
 
     def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         """Projects each element into a new form."""
@@ -620,7 +625,17 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
-        return FlpList(self)
+        item_type = self._get_serialization_type()
+        return FlpList[item_type](self)
+
+    def _get_serialization_type(self) -> type:
+        cls = self.__class__
+        if not isinstance(cls, _GenericMeta) or not hasattr(cls, "__type_args__"):
+            return Any # just for now until everything is adjusted
+
+        item_type = cls.__type_args__[0]
+        return item_type
+
 
 from functools import partial
 
@@ -726,11 +741,13 @@ class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
         return self.key == other.key and self.to_list() == other.to_list()
 
 
-class FlpList(Collection[TItem], Generic[TItem]):
+class FlpList(Collection[TItem], Generic[TItem], metaclass=_GenericMeta):
     """
     | Fluent List
     A materialized list extending UserList that yields lazy FlpIt instances for query operations.
     """
+    __type_args__: ClassVar[tuple[Any, ...]]
+
     def __init__(self, source: Iterable[TItem] | _Sentinel=_SENTINEL):
         if source is None:
             raise SourceNoneError()
@@ -1001,7 +1018,8 @@ class FlpList(Collection[TItem], Generic[TItem]):
         return self  # type: ignore[return-value]
 
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
-        return FlpIt(self.__list.data).where(predicate)
+        item, _ = self._get_serialization_type(self.__class__)
+        return FlpIt[item](self.__list.data).where(predicate)
 
     def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).select(selector)
@@ -1179,3 +1197,31 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
         return FlpList(self.__list.data.copy())
+
+    # =====================================================================
+    # 5. json serialization
+    # =====================================================================
+
+    @classmethod
+    def from_json(cls, data: str | bytes, jso: JsonSerializerOptions|None=None) -> FlpList[TItem]:
+        item_type, target = cls._get_serialization_type(cls)
+        # when the inspection shuts up the runtime is broken, so we shut the inspection up
+        # noinspection type-hints
+        return FlpList[item_type](decode_dataclass(data, target, jso))
+
+    def to_json_bytes(self, jso: JsonSerializerOptions|None=None) -> bytes:
+        _, target = self._get_serialization_type(self.__class__)
+        return encode_dataclass(self.__list.data, target, jso)
+
+    def to_json(self, jso: JsonSerializerOptions|None=None) -> str:
+        return self.to_json_bytes(jso).decode(encoding="utf-8")
+
+    @staticmethod
+    def _get_serialization_type(cls: type) -> tuple[type, type]:
+        if not isinstance(cls, _GenericMeta) or not hasattr(cls, "__type_args__"):
+            return Any, Any
+
+        item_type = cls.__type_args__[0]
+        target = typing_cast(type, GenericAlias(list, item_type))
+        return item_type, target
+
