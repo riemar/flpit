@@ -40,8 +40,8 @@ json_bytes = b'''
 ]
 '''
 
-def test_roundtrip(tlog):
-    data = FlpList.from_json(json_bytes, Member)
+def test_roundtrip(flp_type, tlog):
+    data = flp_type.from_json(json_bytes, Member)
 
     tlog.info(data)
 
@@ -52,8 +52,8 @@ def test_roundtrip(tlog):
     assert serialized == expected
 
 
-def test_roundtrip_filtered(tlog):
-    data = FlpList.from_json(json_bytes, Member).where(lambda x: x.id > 1).to_list()
+def test_roundtrip_filtered(flp_type, tlog):
+    data = flp_type.from_json(json_bytes, Member).where(lambda x: x.id > 1).to_list()
 
     tlog.info(data)
 

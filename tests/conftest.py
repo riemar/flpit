@@ -1,4 +1,4 @@
-from flpit import flp
+from flpit import FlpIt, FlpList
 from typing import Iterable, Any, Generic, TypeVar, Iterator
 
 import pytest
@@ -23,7 +23,7 @@ def pytest_configure(config):
     config.option.log_cli_level = "INFO"
 
 @pytest.fixture(
-    params=[flp.it, flp.lst],
+    params=[FlpIt, FlpList],
     ids=["FlpIt", "FlpList"],
 )
 def flp_type(request):

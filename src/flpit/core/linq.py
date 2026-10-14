@@ -1,3 +1,4 @@
+from flpit.io import StringWriter
 import decimal
 from decimal import Decimal, Overflow, Inexact
 
@@ -26,7 +27,8 @@ from typing import (
     GenericAlias
 )
 
-from flpit.json import JsonSerializerOptions, decode_dataclass, encode_dataclass
+from flpit.io import MemoryByteWriter
+from flpit.json import JsonConvert, JsonSerializerOptions
 
 TItem = TypeVar("TItem")
 TResult = TypeVar("TResult")
@@ -625,6 +627,24 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         """Explicitly materializes the query into a FlpList."""
         return FlpList[TItem](self)
 
+    # =====================================================================
+    # 5. json serialization
+    # =====================================================================
+
+    @classmethod
+    def from_json[T](cls, data: str | bytes, item_type: type[T], jso: JsonSerializerOptions|None=None) -> FlpIt[T]:
+        return FlpIt[T](JsonConvert.deserialize(data, list[item_type], jso))
+
+    def to_json_bytes[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> bytes:
+        writer = MemoryByteWriter()
+        JsonConvert.serialize_to(self, item_type, writer, jso)
+        return writer.getvalue()
+
+    def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
+        writer = StringWriter()
+        JsonConvert.serialize_to(self, item_type, writer, jso)
+        return writer.getvalue()
+
 
 from functools import partial
 
@@ -1192,12 +1212,12 @@ class FlpList(Collection[TItem], Generic[TItem]):
 
     @classmethod
     def from_json[T](cls, data: str | bytes, item_type: type[T], jso: JsonSerializerOptions|None=None) -> FlpList[T]:
-        return FlpList[T](decode_dataclass(data, list[item_type], jso))
+        return FlpList[T](JsonConvert.deserialize(data, list[item_type], jso))
 
     def to_json_bytes[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> bytes:
-        return encode_dataclass(self.__list.data, list[item_type], jso)
+        return JsonConvert.serialize_bytes(self.__list.data, list[item_type], jso)
 
     def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
-        return self.to_json_bytes(item_type, jso).decode(encoding="utf-8")
+        return JsonConvert.serialize(self.__list.data, list[item_type], jso)
 
 

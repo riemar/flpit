@@ -1,33 +1,46 @@
-from typing import Annotated
+from collections.abc import Iterable
 import dataclasses
 import re
 import sys
+import threading
 import types
 import typing
-
-import threading
 from dataclasses import MISSING, dataclass
+from enum import StrEnum
 from functools import lru_cache
-from typing import Any, ForwardRef, get_args, get_origin, get_type_hints
 from hashlib import blake2s
+from typing import Annotated, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable, cast as typing_cast
 
 import msgspec
 
-from enum import StrEnum
+from flpit.io import ByteWriter, TextWriter
+
 
 class JsonNamingPolicy(StrEnum):
-    lower_case = "lower"
-    upper_case = "upper"
-    camel_case = "camel"
-    pascal_case = "pascal"
-    kebap_case = "kebab"
+    lower = "lower" # pyrefly: ignore [bad-override-mutable-attribute]
+    upper = "upper" # pyrefly: ignore [bad-override-mutable-attribute]
+    camel = "camel"
+    pascal = "pascal"
+    kebap = "kebab"
+
+
+class JsonDefaultHandling(StrEnum):
+    include = "include"
+    exclude = "exclude"
+
+class JsonUnknownFieldHandling(StrEnum):
+    allow = "allow"
+    disallow = "disallow"
 
 
 @dataclass(slots=True, frozen=True)
 class JsonSerializerOptions:
-    naming_policy: JsonNamingPolicy = JsonNamingPolicy.camel_case
-    write_indented: bool = False
-    native:bool=False
+    naming_policy: JsonNamingPolicy = JsonNamingPolicy.camel
+    default_handling: JsonDefaultHandling = JsonDefaultHandling.exclude
+    unknown_field_handling: JsonUnknownFieldHandling = JsonUnknownFieldHandling.allow
+
+    # write_indented: bool = False # will be supported later
+    native: bool = False
     """
     | Set to true for the native speed of msgspec
     
@@ -42,8 +55,11 @@ class JsonSerializerOptions:
         Identifies a unique jso instance for building a struct
         !! All parts of a jso that don't influence the defstruct MUST be ignored!
         """
-        settings = self.naming_policy.value
-        return blake2s(settings.encode(), digest_size=6).hexdigest()
+        settings = (f"jpn-{self.naming_policy.value}:"
+                   f"dh-{self.default_handling}:"
+                   f"ufh-{self.unknown_field_handling}:"
+                   ).encode("utf-8")
+        return blake2s(settings, digest_size=6).hexdigest()
 
 # ---------------------------------------------------------------------------
 # Metadata Annotation Markers
@@ -99,8 +115,45 @@ class _WireType:
 
 
 # ---------------------------------------------------------------------
-# Module and annotation utilities
+# Never imagined this would be required to have a proper lib behavior
 # ---------------------------------------------------------------------
+
+def _apply_naming_policy(name: str, policy: JsonNamingPolicy) -> str:
+    """
+    Splits any attribute name (snake_case, PascalCase, UPPER_CASE)
+    into individual tokens and formats them according to the target policy.
+    """
+    # 1. Check if there is a leading underscore and save it
+    prefix = "_" if name.startswith("_") else ""
+    clean_name = name.lstrip("_")
+
+    # 2. Tokenize only the clean part of the string
+    tokens = [t for t in re.split(r'_(?=[a-zA-Z])|(?<=[a-z])(?=[A-Z])', clean_name) if t]
+    if not tokens:
+        return name
+
+    if policy == JsonNamingPolicy.lower:
+        result = "".join(t.lower() for t in tokens)
+
+    if policy == JsonNamingPolicy.upper:
+        result = "".join(t.upper() for t in tokens)
+
+    if policy == JsonNamingPolicy.pascal:
+        result = "".join(t.capitalize() for t in tokens)
+
+    if policy == JsonNamingPolicy.kebap:
+        result = "-".join(t.lower() for t in tokens)
+
+    if policy == JsonNamingPolicy.camel:
+        # Lowercase the first token completely, capitalize all subsequent tokens
+        result = tokens[0].lower() + "".join(t.capitalize() for t in tokens[1:])
+
+    else:
+        result = clean_name
+
+    return prefix + result
+
+
 
 def _generated_module(source: type) -> types.ModuleType:
     """Generates the required module definition for our runtime only dynamic msgspec.struct"""
@@ -116,6 +169,47 @@ def _generated_module(source: type) -> types.ModuleType:
 
 def _is_dataclass_type(tp: Any) -> bool:
     return isinstance(tp, type) and dataclasses.is_dataclass(tp)
+
+
+def _field_directives(
+        annotation: Any,
+) -> tuple[Any, bool, bool, str | None]:
+    """Extract JIgnore, JInclude, and JProp directives from a field annotation."""
+
+    if get_origin(annotation) is not typing.Annotated:
+        return annotation, False, False, None
+
+    args = get_args(annotation)
+    base_type = args[0]
+    metadata = args[1:]
+    ignored = any(item is JsonIgnore for item in metadata)
+    included = any(item is JsonInclude for item in metadata)
+    json_name = next(
+        (item.name for item in metadata if isinstance(item, JsonProperty)),
+        None,
+    )
+    remaining = tuple(
+        item
+        for item in metadata
+        if item is not JsonIgnore
+        and item is not JsonInclude
+        and not isinstance(item, JsonProperty)
+    )
+
+    if remaining:
+        base_type = Annotated[(base_type, *remaining)]
+
+    return base_type, ignored, included, json_name
+
+
+def _get_property_directive(prop_func: Callable[[Any, Any], None] | Callable[[Any], Any] | None):
+    if prop_func is not None:
+        getter_hints = get_type_hints(prop_func, include_extras=True)
+        source_annotation = getter_hints.get("return", Any)
+    else:
+        source_annotation = Any
+
+    return  _field_directives(source_annotation)
 
 
 def _nested_dataclasses(tp: Any):
@@ -210,6 +304,7 @@ def _rewrite_type(
 # Graph discovery
 # ---------------------------------------------------------------------
 
+
 def _discover_graph(
         roots: tuple[type, ...],
 ) -> dict[type, _WireType]:
@@ -231,14 +326,16 @@ def _discover_graph(
         graph[source] = info
 
         for field in dataclasses.fields(source):
-            if not field.init:
+            annotation, ignored, included, _ = _field_directives(
+                info.hints[field.name]
+            )
+            if ignored:
                 continue
 
-            pending.extend(
-                _nested_dataclasses(info.hints[field.name])
-            )
+            pending.extend(_nested_dataclasses(annotation))
 
     return graph
+
 
 def _allows_none(tp: Any) -> bool:
     if get_origin(tp) is typing.Annotated:
@@ -250,42 +347,80 @@ def _allows_none(tp: Any) -> bool:
 # Struct construction
 # ---------------------------------------------------------------------
 
+
 def _struct_fields(
         info: _WireType,
         graph: dict[type, _WireType],
+        jso: JsonSerializerOptions,
 ) -> list[tuple[Any, ...]]:
     definitions: list[tuple[Any, ...]] = []
+    dataclass_fields = {f.name for f in dataclasses.fields(info.source)}
 
+    # 1. Process regular fields (regardless of init=True or init=False)
     for field in dataclasses.fields(info.source):
-        if not field.init:
+        source_annotation = info.hints[field.name]
+        annotation, ignored, included, json_name = _field_directives(source_annotation)
+
+        if ignored:
             continue
 
-        annotation = _rewrite_type(
-            info.hints[field.name],
-            info,
-            graph,
-        )
+        # If the field starts with an underscore, it MUST have JInclude or JProp attached!
+        if field.name.startswith("_") and not (included or json_name is not None):
+            continue
 
+        annotation = _rewrite_type(annotation, info, graph)
+        wire_name = json_name if json_name is not None else _apply_naming_policy(field.name, jso.naming_policy)
+
+        # Resolve structural field default values cleanly
         if field.default is not MISSING:
-            spec = (field.name, annotation, field.default)
-
+            default_val = field.default
+            has_default = True
         elif field.default_factory is not MISSING:
-            spec = (
-                field.name,
-                annotation,
-                msgspec.field(
-                    default_factory=field.default_factory
-                ),
-            )
-
-        # for now... no enforcing of explicit null in json
-        elif _allows_none(info.hints[field.name]):
-            spec = (field.name, annotation, None)
-
+            default_val = msgspec.field(default_factory=field.default_factory)
+            has_default = True
+        elif _allows_none(annotation):
+            default_val = None
+            has_default = True
         else:
-            spec = (field.name, annotation)
+            default_val = MISSING
+            has_default = False
 
+        field_options: dict[str, Any] = {"name": wire_name}
+        if has_default:
+            if field.default_factory is not MISSING:
+                field_options["default_factory"] = field.default_factory
+            else:
+                field_options["default"] = default_val
+
+        spec = (field.name, annotation, msgspec.field(**field_options))
         definitions.append(spec)
+
+    # 2. Process properties automatically
+    for name, value in vars(info.source).items():
+        if isinstance(value, property) and name not in dataclass_fields:
+            # Extract the type annotation directly from the getter function signature
+            if value.fset is not None:
+                _, _, included, json_name = _get_property_directive(value.fset)
+
+                if included or json_name is not None:
+                    raise ValueError(
+                        f"{info.source.__qualname__}.{name}: "
+                        "fplit.json with msgspec backend doesn't support "
+                        "JProp/JInclude on property setters"
+                    )
+
+            annotation, ignored, included, json_name = _get_property_directive(value.fget)
+
+            if not included and json_name is None:
+                continue
+
+            annotation = _rewrite_type(annotation, info, graph)
+            wire_name = json_name if json_name is not None else _apply_naming_policy(name, jso.naming_policy)
+
+            # Map the field into the C-struct. Default to None so the inbound parser never complains.
+            spec = (name, annotation, msgspec.field(name=wire_name, default=None))
+            definitions.append(spec)
+
 
     return definitions
 
@@ -304,44 +439,59 @@ def _register_forward_refs(
         for info in graph.values():
             setattr(namespace, info.ref_name, info.struct)
 
+
 def _behavior_namespace(source: type) -> dict[str, Any]:
     return {
         name: value
         for name, value in vars(source).items()
         if (
                 not name.startswith("__")
-                and callable(value)
+                and (callable(value) or isinstance(value, property))
         )
-    # pyrefly: ignore [implicit-any-lambda]
+        # pyrefly: ignore [implicit-any-lambda]
     } | {  "__class__": property(lambda self, cls=source: cls) }
+
+
+def _create_structs(
+        graph: dict[type, _WireType],
+        jso: JsonSerializerOptions,
+) -> None:
+    """Create the generated msgspec structs for every node in the graph."""
+    for wt in graph.values():
+        fields = _struct_fields(wt, graph, jso)
+        wt.struct = msgspec.defstruct(
+            wt.class_name,
+            fields,
+            module=wt.module_name,
+            namespace=_behavior_namespace(wt.source),
+            rename=None,
+            kw_only=False,
+            omit_defaults=jso.default_handling.value == JsonDefaultHandling.exclude,
+            forbid_unknown_fields=jso.unknown_field_handling.value == JsonUnknownFieldHandling.disallow,
+        )
+
+
+def _validate_structs(graph: dict[type, _WireType]) -> None:
+    """Force msgspec to inspect each generated struct after refs are registered."""
+    for wt in graph.values():
+        msgspec.inspect.type_info(wt.struct)
+
+
+def _publish_structs(graph: dict[type, _WireType]) -> None:
+    # Publish the readable generated class names.
+    for wt in graph.values():
+        setattr(wt.namespace, wt.class_name, wt.struct)
+
 
 def _build_graph(
         roots: tuple[type, ...],
         jso: JsonSerializerOptions,
 ) -> dict[type, _WireType]:
     graph = _discover_graph(roots)
-
-    for wt in graph.values():
-        wt.struct = msgspec.defstruct(
-            wt.class_name,
-            _struct_fields(wt, graph),
-            module=wt.module_name,
-            namespace=_behavior_namespace(wt.source),
-            rename=jso.naming_policy.value,
-            kw_only=True,
-            omit_defaults=True, # don't render nulls
-            forbid_unknown_fields=False, # ensure ignoring unknow fields!
-        )
-
+    _create_structs(graph, jso)
     _register_forward_refs(graph)
-
-    for wt in graph.values():
-        msgspec.inspect.type_info(wt.struct)
-
-    # Publish the readable generated class names.
-    for wt in graph.values():
-        setattr(wt.namespace, wt.class_name, wt.struct)
-
+    _validate_structs(graph)
+    _publish_structs(graph)
     return graph
 
 
@@ -353,22 +503,17 @@ def _build_graph(
 _jso_registry: dict[str, JsonSerializerOptions] = {}
 _registry_lock = threading.Lock()
 
+
 @lru_cache(maxsize=None)
 def _wrapped_lru(roots: tuple[type, ...], jso_id: str):
     with _registry_lock:
         jso = _jso_registry[jso_id]
+
     return _build_graph(roots, jso)
 
-def _cached_graph(roots:tuple[object, ...], jso: JsonSerializerOptions):
-    with _registry_lock:
-        _jso_registry[jso.fingerprint] = jso
 
-    return _wrapped_lru(roots, jso.fingerprint)
-
-def wire_type_for(
-        target_type: type,
-        jso: JsonSerializerOptions,
-):
+@lru_cache(maxsize=None)
+def _cached_wire_type(target_type: object, jso_id: str):
     roots = tuple(_nested_dataclasses(target_type))
 
     if not roots:
@@ -377,13 +522,8 @@ def wire_type_for(
             f"got {target_type!r}"
         )
 
-    # Normalize the root set so User and list[User] share the graph.
     graph_roots = tuple(sorted(set(roots), key=id))
-
-    graph = _cached_graph(
-        graph_roots,
-        jso,
-    )
+    graph = _wrapped_lru(graph_roots, jso_id)
 
     return _rewrite_type(
         target_type,
@@ -393,35 +533,100 @@ def wire_type_for(
     )
 
 
-def decode_dataclass(
-        data: bytes | str,
-        target: type,
-        jso: JsonSerializerOptions|None=None
-):
-    if jso is None:
-        jso = JsonSerializerOptions()
+def wire_type_for(target_type: type, jso: JsonSerializerOptions) -> type:
+    jso_id = jso.fingerprint
 
-    wire_type = wire_type_for(target, jso)
-    parsed = msgspec.json.decode(data, type=wire_type)
+    with _registry_lock:
+        _jso_registry[jso_id] = jso
 
-    if jso.native:
-        return parsed
+    return _cached_wire_type(target_type, jso_id)
 
-    return msgspec.convert(
-        parsed,
-        target,
-        from_attributes=True,
-    )
 
-def encode_dataclass[T](
-        data: Any,
-        target: type[T],
-        jso: JsonSerializerOptions|None=None
-) -> bytes:
-    if jso is None:
-        jso = JsonSerializerOptions()
+@lru_cache(maxsize=256)
+def _get_decoder(wire_type: Any):
+    return msgspec.json.Decoder(type=wire_type)
 
-    wire_type = wire_type_for(target, jso)
-    wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
-    return msgspec.json.encode(wire_obj)
+
+_JSON_ENCODER = msgspec.json.Encoder()
+
+
+class JsonConvert:
+
+    @staticmethod
+    def deserialize[T](
+            data: bytes | str,
+            target: type[T],
+            jso: JsonSerializerOptions | None = None
+    ) -> T:
+        if jso is None:
+            jso = JsonSerializerOptions()
+
+        wire_type = wire_type_for(target, jso)
+        parsed = _get_decoder(wire_type).decode(data)
+
+        if jso.native:
+            return parsed
+
+        result = msgspec.convert(
+            parsed,
+            target,
+            from_attributes=True,
+        )
+
+        return result
+
+    @staticmethod
+    def serialize[T](
+            data: Any,
+            target: type[T],
+            jso: JsonSerializerOptions | None = None
+    ) -> str:
+        return JsonConvert.serialize_bytes(data, target, jso).decode("utf-8")
+
+    @staticmethod
+    def serialize_bytes[T](
+            data: Any,
+            target: type[T],
+            jso: JsonSerializerOptions | None = None
+    ) -> bytes:
+        if jso is None:
+            jso = JsonSerializerOptions()
+
+        wire_type = wire_type_for(target, jso)
+        wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
+        return _JSON_ENCODER.encode(wire_obj)
+
+    @staticmethod
+    def serialize_to[T](
+            it: Iterable[T],
+            target: type[T],
+            output: ByteWriter | TextWriter,
+            jso: JsonSerializerOptions | None = None
+    ) -> None:
+        if jso is None:
+            jso = JsonSerializerOptions()
+
+        if isinstance(output, ByteWriter):
+            write = output.write
+        elif isinstance(output, TextWriter):
+            def write(data: bytes | bytearray) -> int:
+                return output.write(data.decode("utf-8"))
+        else:
+            raise TypeError("output must be ByteWriter or TextWriter")
+
+        first = True
+        wire_type = wire_type_for(target, jso)
+
+        write(b"[")
+
+        for item in iter(it):
+            if not first:
+                write(b",")
+
+            wire_obj = msgspec.convert(item, wire_type, from_attributes=True)
+            write(_JSON_ENCODER.encode(wire_obj))
+            first = False
+
+        write(b']')
+
 

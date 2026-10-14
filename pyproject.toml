@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.2.1.dev3"
+version = "0.2.1.dev4"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,7 +11,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -24,6 +23,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/riemar/flpit"
+Repository = "https://github.com/riemar/flpit"
 
 [dependency-groups]
 dev = [
