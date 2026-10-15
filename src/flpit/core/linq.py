@@ -1,6 +1,10 @@
-from flpit.io import StringWriter
+from __future__ import annotations
+
+from io import BytesIO, StringIO
+
 import decimal
 from decimal import Decimal, Overflow, Inexact
+from contextlib import AbstractContextManager
 
 import builtins
 from collections import UserList
@@ -23,11 +27,9 @@ from typing import (
     Union,
     override,
     overload,
-    cast as typing_cast,
-    GenericAlias
+    cast as typing_cast, BinaryIO,
 )
 
-from flpit.io import MemoryByteWriter
 from flpit.json import JsonConvert, JsonSerializerOptions
 
 TItem = TypeVar("TItem")
@@ -124,8 +126,7 @@ def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-# noinspection unresolved-references,protected-member
-def dotnet_context() -> decimal._ContextManager: # awesome that type was not intended
+def dotnet_context() -> AbstractContextManager[decimal.Context]:
     # 1. Create and configure pure Context object
     ctx = decimal.getcontext().copy()
     ctx.prec = max(ctx.prec, 29)
@@ -636,14 +637,22 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return FlpIt[T](JsonConvert.deserialize(data, list[item_type], jso))
 
     def to_json_bytes[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> bytes:
-        writer = MemoryByteWriter()
+        writer = BytesIO()
         JsonConvert.serialize_to(self, item_type, writer, jso)
         return writer.getvalue()
 
     def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
-        writer = StringWriter()
+        writer = StringIO()
         JsonConvert.serialize_to(self, item_type, writer, jso)
         return writer.getvalue()
+
+    def write_json[T](
+            self,
+            item_type: type[T],
+            output: BinaryIO,
+            jso: JsonSerializerOptions | None = None,
+    ) -> None:
+        JsonConvert.serialize_to(self, item_type, output, jso)
 
 
 from functools import partial
@@ -1220,4 +1229,10 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
         return JsonConvert.serialize(self.__list.data, list[item_type], jso)
 
-
+    def write_json[T](
+            self,
+            item_type: type[T],
+            output: BinaryIO,
+            jso: JsonSerializerOptions | None = None,
+    ) -> None:
+        JsonConvert.serialize_to(self, item_type, output, jso)

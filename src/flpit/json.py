@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Iterable
 import dataclasses
 import re
@@ -9,11 +11,9 @@ from dataclasses import MISSING, dataclass
 from enum import StrEnum
 from functools import lru_cache
 from hashlib import blake2s
-from typing import Annotated, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable, cast as typing_cast
+from typing import Annotated, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable
 
 import msgspec
-
-from flpit.io import ByteWriter, TextWriter
 
 
 class JsonNamingPolicy(StrEnum):
@@ -600,17 +600,23 @@ class JsonConvert:
     def serialize_to[T](
             it: Iterable[T],
             target: type[T],
-            output: ByteWriter | TextWriter,
-            jso: JsonSerializerOptions | None = None
+            output: typing.BinaryIO | typing.TextIO,
+            jso: JsonSerializerOptions | None = None,
     ) -> None:
+        import io
         if jso is None:
             jso = JsonSerializerOptions()
 
-        if isinstance(output, ByteWriter):
-            write = output.write
-        elif isinstance(output, TextWriter):
-            def write(data: bytes | bytearray) -> int:
-                return output.write(data.decode("utf-8"))
+        if isinstance(output, io.TextIOBase):
+            def write(data: bytes) -> None:
+                output.write(data.decode("utf-8"))
+
+        elif isinstance(
+                output,
+                (io.BufferedIOBase, io.RawIOBase),
+        ):
+            def write(data: bytes) -> None:
+                output.write(data)
         else:
             raise TypeError("output must be ByteWriter or TextWriter")
 

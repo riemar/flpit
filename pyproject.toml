@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.2.1.dev4"
+version = "0.2.1.dev5"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -14,6 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed"
 ]
