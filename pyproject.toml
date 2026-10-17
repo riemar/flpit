@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.2.1.dev6"
+version = "0.2.1.dev7"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,6 +34,7 @@ dev = [
     "pyright>=1.1.414",
     "pytest-benchmark>=5.3.0",
     "mypy>=2.4.0",
+    "httpx>=0.28.1",
 ]
 
 

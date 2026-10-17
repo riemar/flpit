@@ -5,7 +5,6 @@ import socket
 import threading
 import time
 
-
 import flpit.task as task_module
 from flpit.task import (
     AggregateError,
@@ -14,7 +13,10 @@ from flpit.task import (
     IO,
     OperationCanceledError,
     Task,
+    coro_task
 )
+
+from typing import Any
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -500,3 +502,34 @@ class TestTaskCancellation:
         assert not second.token.is_cancellation_requested
 
         linked.dispose()
+
+
+# =========================++++++++++================
+# ---  Test async.runner dependent (The Targets)  ---
+# =========================++++++++++================
+
+@coro_task
+async def async_mock_worker(task_id: int, duration: float) -> dict[str, Any]:
+    """An asyncio-dependent coroutine wrapped as a thread task."""
+    # Simulating a light non-blocking context inside the sandboxed loop
+    import asyncio
+    await asyncio.sleep(duration)
+    return {"id": task_id, "status": "done"}
+
+
+@coro_task
+async def async_exploding_worker(task_id: int) -> None:
+    """An async coroutine designed to fail inside its local runner."""
+    raise ValueError(f"Crash simulated on task #{task_id}")
+
+
+class TestCoroTaskDecorator:
+    def test_coro_task_decorator_execution(self):
+        """Verify that @coro_task executes an async function on a background thread pool."""
+        # Spawning the task via the flpit engine (returns a Task instance)
+        t = async_mock_worker(42, duration=0.1)
+
+        # Resolving it synchronously using .result()
+        result = t.result()
+
+        assert result == {"id": 42, "status": "done"}

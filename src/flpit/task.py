@@ -599,7 +599,7 @@ class Task(Generic[T]):
         Accepts Task instances and raw awaitables (including coroutine objects)
         positionally or in one iterable. Raw awaitables are scheduled
         automatically. The winning task is returned even if it failed or was
-        cancelled; inspect/await that task to observe
+        canceled; inspect/await that task to observe
         its outcome. Losing tasks continue running. An empty input is invalid.
         If multiple tasks are already complete at observation time, input order
         breaks the tie deterministically.
@@ -611,6 +611,22 @@ class Task(Generic[T]):
             "Task[Task[Any]]",
             cls.run(_when_any_coroutine, normalized, name=name, token=token),
         )
+
+    @staticmethod
+    async def collect(*tasks: Task[Any] | list[Task[Any]]):
+        """
+        Yields tasks as they complete. Accepts either a list or loose positional tasks.
+        """
+        # FIX: If it's a list or tuple, extract and cast the FIRST element to a mutable list
+        if len(tasks) == 1 and isinstance(tasks[0], (list, tuple)):
+            pending = list(tasks[0])  # Converts the inner container into a fresh list
+        else:
+            pending = list(tasks)     # Converts the *tasks tuple into a fresh list
+
+        while pending:
+            finished_task = await Task.when_any(pending)
+            pending.remove(finished_task)  # Safe to call, because pending is ALWAYS a list!
+            yield finished_task
 
     @classmethod
     def delay(
@@ -1575,3 +1591,20 @@ def task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
         return Task.run(async_function, *args, **kwargs)
 
     return wrapper
+
+
+def coro_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+    """
+    | Wraps an async coroutine function to be compatible with Task.run(coro)
+
+    Use with caution as this transfers execution control to an isolated asyncio loop runner.
+    """
+    import asyncio
+    @functools.wraps(async_function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with asyncio.Runner() as runner:
+            # Call the function with its arguments to generate the Coroutine object instance
+            coro = async_function(*args, **kwargs)
+            return runner.run(coro)
+
+    return task(wrapper)
