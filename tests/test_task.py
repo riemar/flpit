@@ -2,18 +2,20 @@ import pytest
 
 import inspect
 import socket
+
+import flpit.task as task_module
 import threading
 import time
 
-import flpit.task as task_module
 from flpit.task import (
-    AggregateError,
     BackgroundQueueFull,
     CancellationTokenSource,
     IO,
-    OperationCanceledError,
     Task,
-    coro_task
+    AggregateError,
+    OperationCanceledError,
+    asyncio_task,
+    twait
 )
 
 from typing import Any
@@ -508,7 +510,7 @@ class TestTaskCancellation:
 # ---  Test async.runner dependent (The Targets)  ---
 # =========================++++++++++================
 
-@coro_task
+@asyncio_task
 async def async_mock_worker(task_id: int, duration: float) -> dict[str, Any]:
     """An asyncio-dependent coroutine wrapped as a thread task."""
     # Simulating a light non-blocking context inside the sandboxed loop
@@ -517,15 +519,15 @@ async def async_mock_worker(task_id: int, duration: float) -> dict[str, Any]:
     return {"id": task_id, "status": "done"}
 
 
-@coro_task
+@asyncio_task
 async def async_exploding_worker(task_id: int) -> None:
     """An async coroutine designed to fail inside its local runner."""
     raise ValueError(f"Crash simulated on task #{task_id}")
 
 
 class TestCoroTaskDecorator:
-    def test_coro_task_decorator_execution(self):
-        """Verify that @coro_task executes an async function on a background thread pool."""
+    def test_asyncio_task_decorator_execution(self):
+        """Verify that @asyncio_task executes an async function on a background thread pool."""
         # Spawning the task via the flpit engine (returns a Task instance)
         t = async_mock_worker(42, duration=0.1)
 
@@ -533,3 +535,75 @@ class TestCoroTaskDecorator:
         result = t.result()
 
         assert result == {"id": 42, "status": "done"}
+
+
+@pytest.fixture
+def concurrency_pool():
+    """Tear down the existing active runtime to re-configure pool capacity safely."""
+    # 1. Kill the active module-level runtime context cleanly
+    Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
+
+    # 2. Broaden the gates now that the engine is stopped
+    Task.configure(max_workers=100, max_pending_background=200)
+
+    yield
+
+    # 3. Clean up our test runtime after execution finishes
+    Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
+
+    # 4. Restore the strict module environment expected by the other tests
+    Task.configure(max_workers=1, max_pending_background=1)
+
+def test_task_concurrency_race_condition_fence(concurrency_pool, tlog):
+    # Verify that writing values concurrently to distinct slots is safe
+    shared_accumulator = {}
+
+    def safe_concurrent_writer(task_id: int):
+        # Emulate the lab pattern: separate keys prevent hash table collision
+        shared_accumulator[task_id] = threading.get_ident()
+        return task_id
+
+    # Fire off high-velocity tasks to stress test internal queue assignment
+    workers = [Task.run(safe_concurrent_writer, i) for i in range(100)]
+
+    results = Task.when_all(workers).result()
+
+    assert len(results) == 100
+    assert len(shared_accumulator) == 100
+
+def test_task_unhandled_exception_marshaling_chain():
+    def throwing_worker():
+        raise ZeroDivisionError("Simulated execution failure")
+
+    # Fire an operation destined to explode inside your BackgroundWorkerPool
+    failed_task = Task.run(throwing_worker)
+
+    # Verify that your exception handler wraps the trace inside an AggregateError contract
+    with pytest.raises(ZeroDivisionError, match="Simulated execution failure"):
+        failed_task.result(timeout=1)
+
+
+def test_Task_result_rejects_blocking_on_runtime_thread() -> None:
+    async def runtime_work() -> None:
+        pending = Task.delay(10)
+
+        assert not pending.done()
+
+        with pytest.raises(
+                RuntimeError,
+                match="Task.result\\(\\) would block the runtime thread",
+        ):
+            pending.result()
+
+    Task.run(runtime_work).result(timeout=2)
+
+
+def test_twait_RejectsUseInsideAsyncFunction() -> None:
+    task = Task.run(lambda: 42)
+    assert task.result(timeout=1) == 42
+
+    async def async_caller() -> None:
+        with pytest.raises(RuntimeError, match="async"):
+            twait >> task
+
+    Task.run(async_caller).result(timeout=1)

@@ -2,7 +2,7 @@ import pytest
 
 from flpit.task import (
     Task,
-    coro_task
+    asyncio_task
 )
 
 from typing import Any
@@ -25,7 +25,7 @@ def isolate_worker_pool():
     Task.configure(max_workers=1, max_pending_background=1)
 
 
-@coro_task
+@asyncio_task
 async def async_mock_worker(task_id: int, duration: float) -> dict[str, Any]:
     """An asyncio-dependent coroutine wrapped as a thread task."""
     # Simulating a light non-blocking context inside the sandboxed loop
@@ -34,7 +34,7 @@ async def async_mock_worker(task_id: int, duration: float) -> dict[str, Any]:
     return {"id": task_id, "status": "done"}
 
 
-@coro_task
+@asyncio_task
 async def async_exploding_worker(task_id: int) -> None:
     """An async coroutine designed to fail inside its local runner."""
     raise ValueError(f"Crash simulated on task #{task_id}")

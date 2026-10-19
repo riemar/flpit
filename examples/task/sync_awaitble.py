@@ -27,7 +27,7 @@ from flpit.task import task, Task
 def compute_heavy_sync_work(task_id: int, duration: float) -> str:
     """A standard, blocking synchronous function performing a heavy operation."""
     print(f"Worker Thread: Starting sync task #{task_id}...")
-    time.sleep(duration)  # Standard blocking sleep, completely safe here
+    time.sleep(duration)  # Standard blocking sleep, completely safe here... until it isn't
     return f"Result from task #{task_id}"
 
 

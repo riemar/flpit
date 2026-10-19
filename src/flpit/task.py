@@ -1,4 +1,4 @@
-"""Task: a small asyncio-free Task/awaitable runtime.
+"""Task: a small asyncio-free task/awaitable runtime.
 
 This is a deliberately small runtime, not an asyncio compatibility layer.
 
@@ -39,8 +39,10 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import count
-from typing import Any, Callable, Coroutine, Generic, TypeVar, cast, Iterable
+from typing import Any, Callable, Coroutine, Generic, TypeVar, cast, Iterable, Final
 import functools
+
+import flpit
 
 T = TypeVar("T")
 _LOG = logging.getLogger("tinytask")
@@ -48,8 +50,25 @@ _MISSING = object()
 _WAKE = object()
 
 
-class OperationCanceledError(BaseException):
-    """Raised when cancellation is delivered to an operation or coroutine."""
+class OperationCanceledError(Exception):
+    """Raised when an operation is canceled.
+
+    ``token`` records the token associated with cancellation when one exists.
+    The exception intentionally derives from ``Exception`` so normal exception
+    handling can catch cancellation explicitly or through a broad handler.
+    """
+
+    def __init__(
+            self,
+            message: str = "The operation was canceled.",
+            token: CancellationToken | None = None,
+    ) -> None:
+        self.token = token
+        super().__init__(message)
+
+
+# Backwards-compatible spelling used by the first TinyTask prototype.
+CancelledError = OperationCanceledError
 
 
 class InvalidStateError(RuntimeError):
@@ -65,10 +84,10 @@ class RuntimeShutdownError(RuntimeError):
 
 
 class AggregateError(Exception):
-    """Raised by Task.when_all() when multiple child tasks fail.
+    """Represents multiple errors, preserving the original exceptions.
 
-    The original exceptions are available in the ``exceptions`` tuple. A single
-    child failure is re-raised directly to keep the common case ergonomic.
+    The default message follows the .NET ``AggregateException`` convention.
+    ``exceptions`` is stored as an immutable snapshot.
     """
 
     def __init__(
@@ -77,6 +96,10 @@ class AggregateError(Exception):
             message: str = "One or more errors occurred.",
     ) -> None:
         self.exceptions = tuple(exceptions)
+        if not self.exceptions:
+            raise ValueError("exceptions must contain at least one exception")
+        if not all(isinstance(error, Exception) for error in self.exceptions):
+            raise TypeError("exceptions must contain Exception instances")
         super().__init__(message)
 
 
@@ -258,11 +281,13 @@ class CancellationTokenSource:
             self._linked_registrations.clear()
         if timer is not None:
             timer.cancel()
-        cancelled = self._state.cancel()
-        # A linked source no longer needs to hold registrations after its own
-        # cancellation has fired. This is safe even when called from a link callback.
-        for registration in links:
-            registration.dispose()
+        try:
+            cancelled = self._state.cancel()
+        finally:
+            # A linked source no longer needs to hold registrations after its own
+            # cancellation has fired. Also clean these up if a callback failed.
+            for registration in links:
+                registration.dispose()
         return cancelled
 
     def cancel_after(self, seconds: float | None) -> None:
@@ -447,7 +472,7 @@ async def _delay_coroutine(runtime: "_Runtime", delay: float) -> None:
 
 
 class Task(Generic[T]):
-    """Result-bearing task managed by TinyTask's process-wide scheduler."""
+    """Result-bearing task managed by FlpIt's process-wide scheduler."""
 
     PENDING = "pending"
     SUCCEEDED = "succeeded"
@@ -478,6 +503,13 @@ class Task(Generic[T]):
         self._token = token or CancellationToken.none()
         self._token_registration: CancellationTokenRegistration | None = None
         self._pass_token = False
+        self._is_promise_task = False
+        self.async_state: Any = None
+
+    @property
+    def status(self) -> str:
+        """Current task state: pending, succeeded, failed, or cancelled."""
+        return self._state
 
     @classmethod
     def configure(
@@ -708,8 +740,13 @@ class Task(Generic[T]):
         if not self._completed.wait(timeout):
             raise TimeoutError(f"{self.name} did not complete before the timeout")
         if self._state == self.CANCELLED:
-            raise OperationCanceledError(f"{self.name} was cancelled")
+            raise self._cancellation_exception()
         return self._exception
+
+    def _cancellation_exception(self) -> OperationCanceledError:
+        if isinstance(self._exception, OperationCanceledError):
+            return self._exception
+        return OperationCanceledError(f"{self.name} was cancelled")
 
     def cancel(self) -> bool:
         """Request cancellation of this Task, independently of other token users."""
@@ -729,7 +766,7 @@ class Task(Generic[T]):
 
     def _raise_or_return(self) -> T:
         if self._state == self.CANCELLED:
-            raise OperationCanceledError(f"{self.name} was cancelled")
+            raise self._cancellation_exception()
         if self._state == self.FAILED:
             assert self._exception is not None
             raise self._exception
@@ -747,7 +784,12 @@ class Task(Generic[T]):
             return
         self._cancel_requested = True
         self._runtime._detach_wait(self)
-        if not self._running:
+        if self._is_promise_task:
+            self._finish(
+                self.CANCELLED,
+                exception=OperationCanceledError(f"{self.name} cancelled"),
+            )
+        elif not self._running:
             self._runtime._schedule(self, exc=OperationCanceledError(f"{self.name} cancelled"))
 
     def _finish(
@@ -813,6 +855,165 @@ class Task(Generic[T]):
 
     def __repr__(self) -> str:
         return f"<{self.name} state={self._state}>"
+
+
+class TaskCompletionSource(Generic[T]):
+    """Externally controlled producer for a stable, awaitable ``Task[T]``.
+
+    The source can complete its task with a result, exception, cancellation, or
+    the terminal outcome of an already-completed task. Completion methods are
+    safe to call from arbitrary threads. Exactly one terminal transition wins.
+
+    ``state`` is carried by the task as ``task.async_state`` for diagnostics and
+    callback-to-task adapters. ``set_result()`` without a value is allowed for
+    the non-generic-style use case and completes with ``None``.
+    """
+
+    def __init__(self, state: Any = None) -> None:
+        runtime = _get_runtime()
+        self._runtime = runtime
+        self._task: Task[T] = Task(runtime)
+        self._task._is_promise_task = True
+        self._task.async_state = state
+        # Promise tasks are tracked so runtime shutdown can cancel unresolved
+        # externally-completed tasks and wake any awaiters.
+        runtime._call_sync(lambda: runtime._tasks.add(self._task), internal=False)
+
+    @property
+    def task(self) -> Task[T]:
+        """The stable task controlled by this source."""
+        return self._task
+
+    @property
+    def Task(self) -> Task[T]:  # .NET-spelling alias for source-porting convenience
+        return self._task
+
+    def set_result(self, result: T = cast(T, _MISSING)) -> None:
+        if result is _MISSING:
+            result = cast(T, None)
+        if not self.try_set_result(result):
+            raise InvalidStateError("TaskCompletionSource task has already completed")
+
+    def try_set_result(self, result: T = cast(T, _MISSING)) -> bool:
+        if result is _MISSING:
+            result = cast(T, None)
+        return self._try_complete(Task.SUCCEEDED, result=result)
+
+    @staticmethod
+    def _normalize_exceptions(
+            error: Exception | Iterable[Exception],
+    ) -> tuple[Exception, ...] | Exception:
+        if isinstance(error, Exception):
+            return error
+        if error is None:
+            raise TypeError("exception must not be None")
+        if isinstance(error, (str, bytes, bytearray)):
+            raise TypeError("exception must be an Exception or iterable of Exceptions")
+        try:
+            exceptions = tuple(error)
+        except TypeError as exc:
+            raise TypeError("exception must be an Exception or iterable of Exceptions") from exc
+        if not exceptions:
+            raise ValueError("exception iterable must not be empty")
+        if not all(isinstance(item, Exception) for item in exceptions):
+            raise TypeError("exception iterable must contain only Exception instances")
+        return exceptions
+
+    def set_exception(self, error: Exception | Iterable[Exception]) -> None:
+        normalized = self._normalize_exceptions(error)
+        exception = (
+            normalized
+            if isinstance(normalized, Exception)
+            else AggregateError(normalized)
+        )
+        if not self._try_complete(Task.FAILED, exception=exception):
+            raise InvalidStateError("TaskCompletionSource task has already completed")
+
+    def try_set_exception(self, error: Exception | Iterable[Exception]) -> bool:
+        normalized = self._normalize_exceptions(error)
+        exception = (
+            normalized
+            if isinstance(normalized, Exception)
+            else AggregateError(normalized)
+        )
+        return self._try_complete(Task.FAILED, exception=exception)
+
+    def set_canceled(self, token: CancellationToken | None = None) -> None:
+        self._validate_token(token)
+        cancellation = OperationCanceledError(
+            "The task was canceled.", token=token
+        )
+        if not self._try_complete(Task.CANCELLED, exception=cancellation):
+            raise InvalidStateError("TaskCompletionSource task has already completed")
+
+    def try_set_canceled(self, token: CancellationToken | None = None) -> bool:
+        self._validate_token(token)
+        cancellation = OperationCanceledError(
+            "The task was canceled.", token=token
+        )
+        return self._try_complete(Task.CANCELLED, exception=cancellation)
+
+    @staticmethod
+    def _validate_token(token: CancellationToken | None) -> None:
+        if token is not None and not isinstance(token, CancellationToken):
+            raise TypeError("token must be a CancellationToken or None")
+
+    def set_from_task(self, completed_task: flpit.task.Task[Any]) -> None:
+        self._validate_completed_task(completed_task)
+        if not self._try_copy_task(completed_task):
+            raise InvalidStateError("TaskCompletionSource task has already completed")
+
+    def try_set_from_task(self, completed_task: flpit.task.Task[Any]) -> bool:
+        self._validate_completed_task(completed_task)
+        return self._try_copy_task(completed_task)
+
+    def _validate_completed_task(self, source: "flpit.task.Task[Any] | None") -> None:
+        if source is None:
+            raise TypeError("completed_task must not be None")
+        if not isinstance(source, Task):
+            raise TypeError("completed_task must be a Task instance")
+        if not source.done():
+            raise ValueError("completed_task must already be completed")
+
+    def _try_copy_task(self, source: "flpit.task.Task[Any]") -> bool:
+        if source._state == Task.SUCCEEDED:
+            return self._try_complete(Task.SUCCEEDED, result=source._result)
+        if source._state == Task.FAILED:
+            assert source._exception is not None
+            return self._try_complete(Task.FAILED, exception=source._exception)
+        if source._state == Task.CANCELLED:
+            return self._try_complete(
+                Task.CANCELLED,
+                exception=source._cancellation_exception(),
+            )
+        # A terminal state not recognized here would indicate a runtime invariant
+        # violation rather than a normal rejected completion.
+        raise InvalidStateError(f"Cannot copy task in state {source._state!r}")
+
+    def _try_complete(
+            self,
+            state: str,
+            *,
+            result: Any = None,
+            exception: Exception | BaseException | None = None,
+    ) -> bool:
+        if self._task.done():
+            return False
+
+        def complete_on_runtime() -> bool:
+            if self._task.done():
+                return False
+            self._task._finish(state, result=result, exception=exception)
+            return True
+
+        try:
+            return bool(self._runtime._call_sync(complete_on_runtime, internal=True))
+        except RuntimeShutdownError:
+            # Shutdown may have won the race and completed this promise task as
+            # cancelled. In that case TrySet* follows the standard lost-race path.
+            if self._task.done():
+                return False
+            raise
 
 
 def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task[Any], ...]:
@@ -994,6 +1195,39 @@ class _Runtime:
                 _LOG.exception("TinyTask exception handler itself failed")
         message = str(context.get("message", "Unexpected TinyTask runtime error"))
         _LOG.error("%s", message, exc_info=(type(error), error, error.__traceback__))
+
+    def _call_sync(self, callback: Callable[[], T], *, internal: bool = False) -> T:
+        """Run a small state mutation on the scheduler thread and return its value.
+
+        External completion APIs use this so callbacks/awaiters are manipulated
+        only by the scheduler thread while callers retain synchronous Set/TrySet
+        semantics. The operation fails rather than hanging if the runtime stops.
+        """
+        self._ensure_started()
+        if self.is_runtime_thread():
+            return callback()
+
+        completed = threading.Event()
+        outcome: dict[str, Any] = {}
+
+        def invoke() -> None:
+            try:
+                outcome["value"] = callback()
+            except BaseException as error:
+                outcome["error"] = error
+            finally:
+                completed.set()
+
+        self._post(invoke, internal=internal)
+        while not completed.wait(0.05):
+            thread = self._thread
+            if thread is None or not thread.is_alive():
+                raise RuntimeShutdownError(
+                    "TinyTask runtime stopped before the scheduled operation ran"
+                )
+        if "error" in outcome:
+            raise outcome["error"]
+        return cast(T, outcome.get("value"))
 
     def _post(self, callback: Callable[[], None], *, internal: bool = False) -> None:
         self._ensure_started()
@@ -1412,12 +1646,16 @@ class _Runtime:
             self._schedule(task)
 
     def _next_timeout(self) -> float | None:
+        max_selector_wait = 24 * 60 * 60  # 24 hours, in seconds
+
         while self._timers:
             deadline, _, task, operation = self._timers[0]
             if task.done() or task._waiting_on is not operation:
                 heapq.heappop(self._timers)
             else:
-                return max(0.0, deadline - time.monotonic())
+                remaining = max(0.0, deadline - time.monotonic())
+                return min(remaining, max_selector_wait)
+
         return None
 
     def _begin_shutdown(self) -> None:
@@ -1586,6 +1824,9 @@ def _shutdown_at_exit() -> None:
 atexit.register(_shutdown_at_exit)
 
 def task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+    """
+    | Wraps sync functions and non-asyncio dependent coroutines to eagerly executed await-able tasks
+    """
     @functools.wraps(async_function)
     def wrapper(*args: Any, **kwargs: Any) -> Task[Any]:
         return Task.run(async_function, *args, **kwargs)
@@ -1593,9 +1834,9 @@ def task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
     return wrapper
 
 
-def coro_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+def asyncio_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
     """
-    | Wraps an async coroutine function to be compatible with Task.run(coro)
+    | Wraps async functions with a dependency on asyncio to be compatible with Task.run(coro)
 
     Use with caution as this transfers execution control to an isolated asyncio loop runner.
     """
@@ -1608,3 +1849,25 @@ def coro_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
             return runner.run(coro)
 
     return task(wrapper)
+
+
+class _SyncBridge:
+    def __rshift__(self, ttwa: Task[T]) -> Any:
+        frame = inspect.currentframe()
+        try:
+            assert frame is not None
+            caller: Any = frame.f_back
+            if caller and caller.f_code.co_flags & inspect.CO_COROUTINE:
+                raise RuntimeError("twait >> cannot be used inside async def")
+
+            return ttwa.result()
+        finally:
+            del frame
+
+
+twait: Final = _SyncBridge()
+"""
+| If you seriously want to await in a sync context make it nice
+
+twait >> Task.delay()
+"""
