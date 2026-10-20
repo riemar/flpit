@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.2.1.dev8"
+version = "0.2.1"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/riemar/flpit"
 Repository = "https://github.com/riemar/flpit"
+Issues = "https://github.com/riemar/flpit/issues"
 
 [dependency-groups]
 dev = [

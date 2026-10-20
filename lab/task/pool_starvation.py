@@ -30,7 +30,7 @@ async def main():
         _ = blocking_saboteur(i)
 
     # give the tasks a chance to strat
-    await Task.delay(0)
+    await Task.yield_now()
 
     # 2. Dispatch the victim task. It will sit in the queue because the pool is full.
     print("Spawn innocent victim (should freeze until a saboteur finishes)...")

@@ -11,12 +11,13 @@ from dataclasses import MISSING, dataclass
 from enum import StrEnum
 from functools import lru_cache
 from hashlib import blake2s
-from typing import Annotated, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable
+from typing import Annotated, TYPE_CHECKING, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable
 
 import msgspec
 
 
 class JsonNamingPolicy(StrEnum):
+    none = "None"
     lower = "lower" # pyrefly: ignore [bad-override-mutable-attribute]
     upper = "upper" # pyrefly: ignore [bad-override-mutable-attribute]
     camel = "camel"
@@ -65,25 +66,52 @@ class JsonSerializerOptions:
 # Metadata Annotation Markers
 # ---------------------------------------------------------------------------
 
-class JsonIgnore:
+class JIgnore:
+    def __class_getitem__[T](cls, item: type[T]) -> Annotated[type[T], JIgnore]:
+        return typing.cast(Annotated[type[T], JIgnore], Annotated[item, cls])
+
+class JInclude:
+    def __class_getitem__[T](cls, item: type[T]) -> Annotated[type[T], JInclude]:
+        return typing.cast(Annotated[type[T], JInclude], Annotated[item, cls])
+
+
+class JPropMeta(type):
+    def __getattr__(cls, name: str) -> Any:
+        class SpecializedJProp:
+            def __class_getitem__[T](sub_cls, item: type[T]) -> Annotated[type[T], JProp]:
+                return typing.cast(Annotated[type[T], JProp], Annotated[item, JProp(json_name=name)])
+        return SpecializedJProp
+
+class JProp:
+    __slots__ = ("json_name",)
+    json_name: str
+
+    def __init__(self, json_name: str):
+        self.json_name = json_name
+
+    # 1. This handles the standard initialization/metadata if needed
+    def __repr__(self):
+        return f"JProp(json_name={self.json_name!r})"
+
+    # 2. This intercepts JProp[str] (the type subscription first)
     def __class_getitem__[T](cls, item: type[T]) -> Any:
-        return Annotated[item, cls]
+        # We return a proxy class that remembers the type 'item' (e.g., str | None)
+        class JPropTypeProxy:
+            def __getattr__(self, name: str) -> Annotated[type[T], JProp]:
+                # 3. This intercepts .JsonPropNameToUse and returns the Annotated type
+                return typing.cast(
+                    Annotated[type[T], JProp],
+                    Annotated[item, JProp(json_name=name)]
+                )
 
-class JsonInclude:
-    def __class_getitem__[T](cls, item: type[T]) -> Any:
-        return Annotated[item, cls]
+        return JPropTypeProxy()
 
-class JsonProperty:
-    def __class_getitem__[T](cls, item: tuple[type[T], str]) -> Any:
-        target_type, json_name = item
-        return Annotated[target_type, cls(json_name)]
-
-    def __init__(self, name: str):
-        self.name = name
-
-JIgnore = JsonIgnore
-JInclude = JsonInclude
-JProp = JsonProperty
+@dataclass
+class AnnotationModel:
+    other_name: Annotated[str, JProp("WorksToo")]
+    display_name: JProp[str].meta
+    secret: JIgnore[str] = ""
+    always_emit: JInclude[int] = 0
 
 # ---------------------------------------------------------------------
 # Generated type metadata
@@ -120,36 +148,44 @@ class _WireType:
 
 def _apply_naming_policy(name: str, policy: JsonNamingPolicy) -> str:
     """
-    Splits any attribute name (snake_case, PascalCase, UPPER_CASE)
-    into individual tokens and formats them according to the target policy.
+    Tokenizes snake_case, camelCase, PascalCase, UPPER_CASE, and kebab-case
+    identifiers, then formats the tokens according to the target policy.
+    Preserves leading underscores.
     """
-    # 1. Check if there is a leading underscore and save it
-    prefix = "_" if name.startswith("_") else ""
-    clean_name = name.lstrip("_")
+    if policy == JsonNamingPolicy.none:
+        return name
 
-    # 2. Tokenize only the clean part of the string
-    tokens = [t for t in re.split(r'_(?=[a-zA-Z])|(?<=[a-z])(?=[A-Z])', clean_name) if t]
+    # Preserve all leading underscores.
+    prefix = name[: len(name) - len(name.lstrip("_"))]
+    clean_name = name[len(prefix):]
+
+    # Split on existing separators first, then tokenize each segment.
+    # This also correctly handles acronyms such as XMLParser and UPPER_CASE.
+    token_pattern = r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+"
+
+    tokens = [
+        token
+        for part in re.split(r"[_-]+", clean_name)
+        for token in re.findall(token_pattern, part)
+    ]
+
     if not tokens:
         return name
 
     if policy == JsonNamingPolicy.lower:
-        result = "".join(t.lower() for t in tokens)
-
-    if policy == JsonNamingPolicy.upper:
-        result = "".join(t.upper() for t in tokens)
-
-    if policy == JsonNamingPolicy.pascal:
-        result = "".join(t.capitalize() for t in tokens)
-
-    if policy == JsonNamingPolicy.kebap:
-        result = "-".join(t.lower() for t in tokens)
-
-    if policy == JsonNamingPolicy.camel:
-        # Lowercase the first token completely, capitalize all subsequent tokens
-        result = tokens[0].lower() + "".join(t.capitalize() for t in tokens[1:])
-
+        result = "".join(token.lower() for token in tokens)
+    elif policy == JsonNamingPolicy.upper:
+        result = "".join(token.upper() for token in tokens)
+    elif policy == JsonNamingPolicy.pascal:
+        result = "".join(token.capitalize() for token in tokens)
+    elif policy == JsonNamingPolicy.camel:
+        result = tokens[0].lower() + "".join(
+            token.capitalize() for token in tokens[1:]
+        )
+    elif policy == JsonNamingPolicy.kebap:
+        result = "-".join(token.lower() for token in tokens)
     else:
-        result = clean_name
+        raise ValueError(f"Unsupported naming policy: {policy!r}")
 
     return prefix + result
 
@@ -182,18 +218,18 @@ def _field_directives(
     args = get_args(annotation)
     base_type = args[0]
     metadata = args[1:]
-    ignored = any(item is JsonIgnore for item in metadata)
-    included = any(item is JsonInclude for item in metadata)
+    ignored = any(item is JIgnore for item in metadata)
+    included = any(item is JInclude for item in metadata)
     json_name = next(
-        (item.name for item in metadata if isinstance(item, JsonProperty)),
+        (item.json_name for item in metadata if isinstance(item, JProp)),
         None,
     )
     remaining = tuple(
         item
         for item in metadata
-        if item is not JsonIgnore
-        and item is not JsonInclude
-        and not isinstance(item, JsonProperty)
+        if item is not JIgnore
+        and item is not JInclude
+        and not isinstance(item, JProp)
     )
 
     if remaining:
@@ -550,6 +586,13 @@ def _get_decoder(wire_type: Any):
 _JSON_ENCODER = msgspec.json.Encoder()
 
 
+class JsonSerializationError(Exception):
+    pass
+
+class JsonDeserializationError(Exception):
+    pass
+
+
 class JsonConvert:
 
     @staticmethod
@@ -558,22 +601,29 @@ class JsonConvert:
             target: type[T],
             jso: JsonSerializerOptions | None = None
     ) -> T:
+        if data is None:
+            raise JsonDeserializationError("data must not be None")
+
         if jso is None:
             jso = JsonSerializerOptions()
 
         wire_type = wire_type_for(target, jso)
-        parsed = _get_decoder(wire_type).decode(data)
 
-        if jso.native:
-            return parsed
+        try:
+            parsed = _get_decoder(wire_type).decode(data)
 
-        result = msgspec.convert(
-            parsed,
-            target,
-            from_attributes=True,
-        )
+            if jso.native:
+                return parsed
 
-        return result
+            result = msgspec.convert(
+                parsed,
+                target,
+                from_attributes=True,
+            )
+
+            return result
+        except msgspec.MsgspecError as exc:
+            raise JsonDeserializationError(str(exc)) from exc
 
     @staticmethod
     def serialize[T](
@@ -581,6 +631,9 @@ class JsonConvert:
             target: type[T],
             jso: JsonSerializerOptions | None = None
     ) -> str:
+        if data is None:
+            raise JsonSerializationError("data must not be None")
+
         return JsonConvert.serialize_bytes(data, target, jso).decode("utf-8")
 
     @staticmethod
@@ -593,8 +646,11 @@ class JsonConvert:
             jso = JsonSerializerOptions()
 
         wire_type = wire_type_for(target, jso)
-        wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
-        return _JSON_ENCODER.encode(wire_obj)
+        try:
+            wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
+            return _JSON_ENCODER.encode(wire_obj)
+        except msgspec.MsgspecError as exc:
+            raise JsonSerializationError(str(exc)) from exc
 
     @staticmethod
     def serialize_to[T](

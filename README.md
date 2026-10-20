@@ -130,6 +130,52 @@ print(list(backend_engineers))
 # ['Alice']
 ```
 
+## JSON Serialization
+
+FlpIt provides typed JSON serialization and deserialization through `flpit.json.JsonConvert`, 
+backed by [`msgspec`](https://github.com/jcrist/msgspec). 
+
+It supports dataclasses, nested models, generic containers, configurable property naming, and explicit field metadata.
+
+```python
+from dataclasses import dataclass
+from typing import Annotated
+
+from flpit import FlpList
+from flpit.json import JProp, JIgnore, JsonConvert
+
+@dataclass
+class Person:
+    first_name: str
+    internal_id: Annotated[str, JProp("id")]
+    password: Annotated[str, JIgnore] = ""
+
+
+person = Person("Ada", "usr-42", "secret")
+raw = JsonConvert.serialize(person, Person)
+# {"firstName":"Ada","id":"usr-42"}
+
+people_json = """
+[
+    {"firstName": "Ada", "id": "usr-42"},
+    {"firstName": "Grace", "id": "usr-43"}
+]
+"""
+
+people: FlpList[Person] = FlpList.from_json(people_json, Person)
+```
+
+### Mapping and conversion
+
+- **Naming policies:** Configure automatic property naming with `JsonSerializerOptions`. The default is camel case.
+- **Explicit metadata:** `JProp` assigns a specific JSON property name, `JIgnore` excludes a field, and `JInclude` explicitly includes otherwise excluded underscore-prefixed fields.
+- **Serialization options:** Control default-value omission and whether unknown JSON fields are accepted or rejected.
+- **Typed collections:** Pass the complete target type, such as `list[Person]`, so nested and generic values can be decoded against the intended schema.
+
+For large outputs, `JsonConvert.serialize_to()` writes a JSON array to a file-like stream without first materializing the entire serialized document.
+
+By default, deserialization returns instances of the requested model type. Setting `native=True` opts into the generated `msgspec.Struct` representation instead, trading the original model type for the native representation and its performance characteristics.
+
 ## 🔬 LINQ Semantics, Python Runtime
 
 `flpit` deliberately separates the two:
@@ -324,6 +370,21 @@ to_list     ← terminal materialization
 ```
 
 Operations such as `order_by()` necessarily materialize their input internally to establish ordering.
+
+## ⚙️ Task Runtime
+
+FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coordinating concurrent work, with synchronous callables executed through a bounded worker pool.
+
+Key features:
+
+- **Task scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
+- **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
+- **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation, cancellation callbacks, timeouts, and linked cancellation tokens.
+- **Resource management:** Configure worker capacity and pending background-work limits, handle queue saturation explicitly, and shut down the process-wide runtime with an observable shutdown report.
+
+The runtime starts lazily and manages its own lifecycle. It is deliberately not an `asyncio` compatibility layer; cancellation of running synchronous functions is cooperative.
+
+See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/examples/task) for usage examples.
 
 ## ⚙️ Installation
 

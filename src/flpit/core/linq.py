@@ -30,6 +30,7 @@ from typing import (
     cast as typing_cast, BinaryIO,
 )
 
+import flpit.json
 from flpit.json import JsonConvert, JsonSerializerOptions
 
 TItem = TypeVar("TItem")
