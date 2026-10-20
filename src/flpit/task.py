@@ -36,11 +36,15 @@ import socket
 import threading
 import time
 from collections import deque
+from collections.abc import Generator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import count
-from typing import Any, Callable, Coroutine, Generic, TypeVar, cast, Iterable, Final
+from typing import Any, Generic, TypeVar, cast, Iterable, Final, overload
 import functools
+from functools import wraps
+from collections.abc import Awaitable, Callable, Coroutine
+
 
 import flpit
 
@@ -409,17 +413,17 @@ class _WaitIO(_Operation):
         self.mode = mode
 
 
-class _WaitTask(_Operation):
-    def __init__(self, runtime: "_Runtime", task: "Task[Any]") -> None:
+class _WaitTask[T](_Operation):
+    def __init__(self, runtime: "_Runtime", ttw: "Task[T]") -> None:
         super().__init__(runtime)
-        self.task = task
+        self.task = ttw
 
 
-class _WaitMany(_Operation):
+class _WaitMany[T](_Operation):
     """Wait for all or any of a set of tasks to complete."""
 
     def __init__(
-            self, runtime: "_Runtime", tasks: tuple["Task[Any]", ...], mode: str
+            self, runtime: "_Runtime", tasks: tuple["Task[T]", ...], mode: str
     ) -> None:
         super().__init__(runtime)
         if mode not in ("all", "any"):
@@ -559,14 +563,14 @@ class Task(Generic[T]):
     @classmethod
     def run(
             cls,
-            work: Any,
+            work: Callable[..., T],
             /,
             *args: Any,
             name: str | None = None,
             token: CancellationToken | None = None,
             pass_token: bool = False,
             **kwargs: Any,
-    ) -> "Task[Any]":
+    ) -> "Task[T]":
         """Schedule a coroutine/awaitable or ordinary callable.
 
         Ordinary functions run in the bounded worker pool. ``token`` controls
@@ -616,6 +620,8 @@ class Task(Generic[T]):
         normalized = _normalize_tasks(tasks, allow_empty=True)
         return cast(
             "Task[list[Any]]",
+            # todo: make run type compatible via Generator[Y, S, R]
+            # pyrefly: ignore [bad-argument-type]
             cls.run(_when_all_coroutine, normalized, name=name, token=token),
         )
 
@@ -641,6 +647,8 @@ class Task(Generic[T]):
         normalized = _normalize_tasks(tasks, allow_empty=False)
         return cast(
             "Task[Task[Any]]",
+            # todo: make run type compatible via Generator[Y, S, R]
+            # pyrefly: ignore [bad-argument-type]
             cls.run(_when_any_coroutine, normalized, name=name, token=token),
         )
 
@@ -758,10 +766,10 @@ class Task(Generic[T]):
             return False
         return True
 
-    def __await__(self):
+    def __await__(self) -> Generator[Any, T, T]:
         if self.done():
             return self._raise_or_return()
-        result = yield _WaitTask(self._runtime, self)
+        result = yield _WaitTask[T](self._runtime, self)
         return result
 
     def _raise_or_return(self) -> T:
@@ -1088,9 +1096,10 @@ def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task
     return tuple(normalized)
 
 
-async def _when_all_coroutine(tasks: tuple[Task[Any], ...]) -> list[Any]:
+async def _when_all_coroutine(tasks: tuple[Task[T], ...]) -> list[T]:
     await _WaitMany(_get_runtime(), tasks, "all")
     failures = tuple(task._exception for task in tasks if task._state == Task.FAILED)
+
     if len(failures) == 1:
         assert failures[0] is not None
         raise failures[0]
@@ -1101,7 +1110,7 @@ async def _when_all_coroutine(tasks: tuple[Task[Any], ...]) -> list[Any]:
     return [task._result for task in tasks]
 
 
-async def _when_any_coroutine(tasks: tuple[Task[Any], ...]) -> Task[Any]:
+async def _when_any_coroutine(tasks: tuple[Task[T], ...]) -> Task[T]:
     winner = await _WaitMany(_get_runtime(), tasks, "any")
     return cast(Task[Any], winner)
 
@@ -1823,16 +1832,37 @@ def _shutdown_at_exit() -> None:
 
 atexit.register(_shutdown_at_exit)
 
-def task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+
+@overload
+def task[**P, T](
+        function: Callable[P, Awaitable[T]]
+) -> Callable[P, Task[T]]: ...
+
+@overload
+def task[**P, T](
+        function: Callable[P, T]
+) -> Callable[P, Task[T]]: ...
+
+def task(function: Callable[..., Any]) -> Callable[..., Task[Any]]:
     """
     | Wraps sync functions and non-asyncio dependent coroutines to eagerly executed await-able tasks
     """
-    @functools.wraps(async_function)
+    @wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Task[Any]:
-        return Task.run(async_function, *args, **kwargs)
+        return Task.run(function, *args, **kwargs)
 
     return wrapper
 
+
+@overload
+def asyncio_task[**P, T](
+        async_function: Callable[P, Awaitable[T]]
+) -> Callable[P, Task[T]]: ...
+
+@overload
+def asyncio_task[**P, T](
+        async_function: Callable[P, T], /
+) -> Callable[P, Task[T]]: ...
 
 def asyncio_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
     """
@@ -1852,7 +1882,7 @@ def asyncio_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]
 
 
 class _SyncBridge:
-    def __rshift__(self, ttwa: Task[T]) -> Any:
+    def __rshift__(self, ttwa: Task[T]) -> T:
         frame = inspect.currentframe()
         try:
             assert frame is not None
