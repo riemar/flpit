@@ -35,7 +35,7 @@ def test_async_composition_and_background_callable():
         await Task.delay(0.01)
         return await Task.run(lambda: 40) + 2
 
-    assert Task.run(child).result(2) == 42
+    assert Task.run(child).result() == 42
 
 
 def test_independent_and_linked_tokens():
@@ -56,14 +56,14 @@ def test_independent_and_linked_tokens():
 
         first.cancel()
         with pytest.raises(OperationCanceledError):
-            a.result(1)
+            a.result()
 
         assert not second.is_cancellation_requested
         assert not b.done()
 
         second.cancel()
         with pytest.raises(OperationCanceledError):
-            b.result(1)
+            b.result()
 
         assert linked.is_cancellation_requested
         assert first.token.is_cancellation_requested
@@ -82,7 +82,7 @@ def test_cancel_after_and_operation_token():
 
     try:
         with pytest.raises(OperationCanceledError):
-            Task.run(delayed).result(1)
+            Task.run(delayed).result()
     finally:
         source.dispose()
 
@@ -101,7 +101,7 @@ def test_socket_readiness_and_cancellation():
         task = Task.run(wait_readable)
         time.sleep(0.02)
         writer.send(b"x")
-        assert task.result(1) == b"x"
+        assert task.result() == b"x"
 
         async def wait_forever():
             await IO.wait_readable(reader, token=source.token)
@@ -110,7 +110,7 @@ def test_socket_readiness_and_cancellation():
         time.sleep(0.02)
         source.cancel()
         with pytest.raises(OperationCanceledError):
-            blocked.result(1)
+            blocked.result()
     finally:
         source.dispose()
         reader.close()
@@ -134,12 +134,12 @@ def test_background_queue_is_bounded():
 
     try:
         with pytest.raises(BackgroundQueueFull):
-            third.result(1)
+            third.result()
     finally:
         release.set()
 
-    assert first.result(2) == 1
-    assert second.result(2) == 2
+    assert first.result() == 1
+    assert second.result() == 2
 
 
 def test_passed_token_allows_cooperative_worker_stop():
@@ -161,7 +161,7 @@ def test_passed_token_allows_cooperative_worker_stop():
         assert started.wait(1)
         source.cancel()
         with pytest.raises(OperationCanceledError):
-            task.result(1)
+            task.result()
         assert exited.wait(1)
     finally:
         source.dispose()
@@ -180,12 +180,12 @@ def test_when_all_preserves_input_order_and_waits_for_every_task():
     second = Task.run(value_after, 2, 0.01)
     aggregate = Task.when_all(first, second)
 
-    assert aggregate.result(1) == [1, 2]
+    assert aggregate.result() == [1, 2]
     assert later_finished.is_set()
 
     # Passing a single iterable is also supported by the current API.
-    assert Task.when_all([Task.run(lambda: 3)]).result(1) == [3]
-    assert Task.when_all().result(1) == []
+    assert Task.when_all([Task.run(lambda: 3)]).result() == [3]
+    assert Task.when_all().result() == []
 
 
 def test_when_all_accepts_raw_coroutines_and_schedules_them():
@@ -197,7 +197,7 @@ def test_when_all_accepts_raw_coroutines_and_schedules_them():
     raw_slow = value_after(2, 0.02)
     background = Task.run(lambda: 3)
 
-    assert Task.when_all([raw_fast, raw_slow, background]).result(1) == [1, 2, 3]
+    assert Task.when_all([raw_fast, raw_slow, background]).result() == [1, 2, 3]
 
 
 def test_when_any_accepts_raw_coroutines():
@@ -207,13 +207,13 @@ def test_when_any_accepts_raw_coroutines():
 
     winner = Task.when_any(
         [value_after(1, 0.05), value_after(2, 0.01)]
-    ).result(1)
-    assert winner.result(1) == 2
+    ).result()
+    assert winner.result() == 2
 
     # Coroutine objects are one-shot; use fresh ones for another combinator.
     all_results = Task.when_all(
         [value_after(1, 0.02), value_after(2, 0.01)]
-    ).result(1)
+    ).result()
     assert all_results == [1, 2]
 
 
@@ -245,7 +245,7 @@ def test_when_all_waits_for_all_children_before_propagating_failure():
     aggregate = Task.when_all(failed, later)
 
     with pytest.raises(ValueError, match="expected test failure"):
-        aggregate.result(1)
+        aggregate.result()
     assert other_finished.is_set()
 
 
@@ -255,7 +255,7 @@ def test_when_all_exposes_multiple_failures():
 
     aggregate = Task.when_all(Task.run(fail, "one"), Task.run(fail, "two"))
     with pytest.raises(AggregateError) as caught:
-        aggregate.result(1)
+        aggregate.result()
 
     assert len(caught.value.exceptions) == 2
     assert {str(error) for error in caught.value.exceptions} == {"one", "two"}
@@ -268,11 +268,11 @@ def test_when_any_returns_first_completed_task_without_cancelling_losers():
 
     slow = Task.run(value_after, 1, 0.08)
     fast = Task.run(value_after, 2, 0.01)
-    winner = Task.when_any(slow, fast).result(1)
+    winner = Task.when_any(slow, fast).result()
 
     assert winner is fast
-    assert winner.result(1) == 2
-    assert slow.result(1) == 1
+    assert winner.result() == 2
+    assert slow.result() == 1
 
     with pytest.raises(ValueError):
         Task.when_any()
@@ -290,9 +290,9 @@ def test_cancelling_aggregate_does_not_cancel_child_tasks():
     aggregate.cancel()
 
     with pytest.raises(OperationCanceledError):
-        aggregate.result(1)
-    assert first.result(1) == 1
-    assert second.result(1) == 2
+        aggregate.result()
+    assert first.result() == 1
+    assert second.result() == 2
 
 
 def test_scheduler_callback_errors_reach_exception_handler():
@@ -328,7 +328,7 @@ def test_shutdown_runs_async_cleanup_and_reports_running_workers():
     assert report.runtime_stopped
     assert cleaned.is_set()
     with pytest.raises(OperationCanceledError):
-        task.result(1)
+        task.result()
 
     worker_started = threading.Event()
     worker_release = threading.Event()
@@ -352,7 +352,7 @@ def test_shutdown_runs_async_cleanup_and_reports_running_workers():
 
     worker_release.set()
     assert worker_finished.wait(1)
-    assert Task.run(lambda: 7).result(1) == 7  # lazy restart works
+    assert Task.run(lambda: 7).result() == 7  # lazy restart works
     Task.shutdown(grace_timeout=0.5, worker_timeout=0.5)
 
 
@@ -580,7 +580,7 @@ def test_task_unhandled_exception_marshaling_chain():
 
     # Verify that your exception handler wraps the trace inside an AggregateError contract
     with pytest.raises(ZeroDivisionError, match="Simulated execution failure"):
-        failed_task.result(timeout=1)
+        failed_task.result()
 
 
 def test_Task_result_rejects_blocking_on_runtime_thread() -> None:
@@ -595,15 +595,14 @@ def test_Task_result_rejects_blocking_on_runtime_thread() -> None:
         ):
             pending.result()
 
-    Task.run(runtime_work).result(timeout=2)
-
+    Task.run(runtime_work).result()
 
 def test_twait_RejectsUseInsideAsyncFunction() -> None:
     task = Task.run(lambda: 42)
-    assert task.result(timeout=1) == 42
+    assert task.result() == 42
 
     async def async_caller() -> None:
         with pytest.raises(RuntimeError, match="async"):
             twait >> task
 
-    Task.run(async_caller).result(timeout=1)
+    Task.run(async_caller).result()

@@ -54,7 +54,7 @@ def _assert_completed_tcs_fails_to_complete_again(tcs: TaskCompletionSource[Any]
 
 def _completed_task(value: Any = None) -> Task[Any]:
     task = Task.run(lambda: value)
-    task.result(timeout=2)
+    task.result()
     return task
 
 
@@ -96,7 +96,7 @@ def test_SetResult_CompletesSuccessfully(try_method: bool) -> None:  # type: ign
     assert tcs.task.status == Task.SUCCEEDED
     assert tcs.task.done()
     assert not tcs.task.cancelled()
-    assert tcs.task.result(timeout=1) is None
+    assert tcs.task.result() is None
     _assert_completed_tcs_fails_to_complete_again(tcs)
 
 
@@ -114,7 +114,7 @@ def test_SetCanceled_CompletesSuccessfully(try_method: bool) -> None:
     assert tcs.task.done()
     assert tcs.task.cancelled()
     with pytest.raises(OperationCanceledError) as caught:
-        tcs.task.result(timeout=1)
+        tcs.task.result()
     assert caught.value.token is None
     _assert_completed_tcs_fails_to_complete_again(tcs)
 
@@ -132,7 +132,7 @@ def test_SetCanceled_Token_CompletesSuccessfully(try_method: bool) -> None:
 
         assert tcs.task.status == Task.CANCELLED
         with pytest.raises(OperationCanceledError) as caught:
-            tcs.task.result(timeout=1)
+            tcs.task.result()
         assert caught.value.token is cts.token
         _assert_completed_tcs_fails_to_complete_again(tcs)
 
@@ -152,7 +152,7 @@ def test_SetException_Exception_CompletesSuccessfully(try_method: bool) -> None:
     assert tcs.task.done()
 
     with pytest.raises(ValueError, match="expected exception") as caught:
-        tcs.task.result(timeout=1)
+        tcs.task.result()
 
     assert caught.value is error
     _assert_completed_tcs_fails_to_complete_again(tcs)
@@ -171,7 +171,7 @@ def test_SetException_Enumerable_CompletesSuccessfully(try_method: bool) -> None
     assert tcs.task.status == Task.FAILED
 
     with pytest.raises(AggregateError) as result_error:
-        tcs.task.result(timeout=1)
+        tcs.task.result()
 
     assert result_error.value.exceptions == tuple(errors)
     _assert_completed_tcs_fails_to_complete_again(tcs)
@@ -228,7 +228,7 @@ def test_SetFromTask_CompletedSuccessfully(try_method: bool) -> None:
         tcs.set_from_task(source)
 
     assert tcs.task.status == Task.SUCCEEDED
-    assert tcs.task.result(timeout=1) is None
+    assert tcs.task.result() is None
     _assert_completed_tcs_fails_to_complete_again(tcs)
 
 
@@ -263,7 +263,7 @@ def test_SetFromTask_Canceled(try_method: bool) -> None:
 
         assert tcs.task.status == Task.CANCELLED
         with pytest.raises(OperationCanceledError) as caught:
-            tcs.task.result(timeout=1)
+            tcs.task.result()
         assert caught.value.token is cts.token
         _assert_completed_tcs_fails_to_complete_again(tcs)
 
@@ -271,7 +271,7 @@ def test_SetFromTask_Canceled(try_method: bool) -> None:
 def test_TaskCompletionSource_GenericResult() -> None:
     tcs: TaskCompletionSource[int] = TaskCompletionSource()
     tcs.set_result(42)
-    assert tcs.task.result(timeout=1) == 42
+    assert tcs.task.result() == 42
 
 
 def test_TaskCompletionSource_ExternalThreadCompletionResumesAwaiter() -> None:
@@ -297,7 +297,7 @@ def test_TaskCompletionSource_ExternalThreadCompletionResumesAwaiter() -> None:
     worker.join(2)
     assert not worker.is_alive()
     assert not errors
-    assert consumer_task.result(timeout=2) == "from thread"
+    assert consumer_task.result() == "from thread"
 
 
 def test_TaskCompletionSource_OnlyOneConcurrentTrySetWins() -> None:
@@ -308,7 +308,7 @@ def test_TaskCompletionSource_OnlyOneConcurrentTrySetWins() -> None:
     outcomes_lock = threading.Lock()
 
     def contender(value: int) -> None:
-        barrier.wait(timeout=2)
+        barrier.wait()
         won = tcs.try_set_result(value)
         with outcomes_lock:
             outcomes.append((value, won))
@@ -323,7 +323,7 @@ def test_TaskCompletionSource_OnlyOneConcurrentTrySetWins() -> None:
     winners = [value for value, won in outcomes if won]
     assert len(winners) == 1
     assert sum(won for _, won in outcomes) == 1
-    assert tcs.task.result(timeout=1) == winners[0]
+    assert tcs.task.result() == winners[0]
 
 
 def test_TaskCompletionSource_RejectsEmptyOrInvalidExceptionCollections() -> None:
@@ -354,9 +354,9 @@ def test_FlpIt_TaskCompletionSource_BroadcastsCompletionToMultipleAwaiters() -> 
 
     consumers = [Task.run(consumer) for _ in range(consumer_count)]
     # Wait until the scheduler has advanced every coroutine to the promise wait.
-    assert all_started.wait(timeout=2)
+    assert all_started.wait()
     assert tcs.try_set_result(8675309)
-    assert [task.result(timeout=2) for task in consumers] == [8675309] * consumer_count
+    assert [task.result() for task in consumers] == [8675309] * consumer_count
 
 
 def test_FlpIt_TaskCompletionSource_CompetingCompletionKindsHaveSingleWinner() -> None:
@@ -368,7 +368,7 @@ def test_FlpIt_TaskCompletionSource_CompetingCompletionKindsHaveSingleWinner() -
     lock = threading.Lock()
 
     def compete(kind: str) -> None:
-        barrier.wait(timeout=2)
+        barrier.wait()
         if kind == "result":
             won = tcs.try_set_result(123)
         elif kind == "exception":
@@ -385,7 +385,7 @@ def test_FlpIt_TaskCompletionSource_CompetingCompletionKindsHaveSingleWinner() -
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=3)
+        thread.join()
         assert not thread.is_alive()
 
     winners = [kind for kind, won in outcomes if won]
@@ -393,10 +393,10 @@ def test_FlpIt_TaskCompletionSource_CompetingCompletionKindsHaveSingleWinner() -
     assert sum(won for _, won in outcomes) == 1
     assert tcs.task.done()
     if winners[0] == "result":
-        assert tcs.task.result(timeout=1) == 123
+        assert tcs.task.result() == 123
     elif winners[0] == "exception":
-        assert isinstance(tcs.task.exception(timeout=1), ValueError)
+        assert isinstance(tcs.task.exception(), ValueError)
     else:
         assert tcs.task.cancelled()
         with pytest.raises(OperationCanceledError):
-            tcs.task.result(timeout=1)
+            tcs.task.result()

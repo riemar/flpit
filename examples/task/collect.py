@@ -38,7 +38,7 @@ async def main():
     print("Main: Collecting and processing tasks as they trickle in:\n")
 
     # 2. Stream the completed tasks natively using your clean new API
-    async for completed_task in Task.yield_now(tasks):
+    async for completed_task in Task.collect(tasks):
         result = await completed_task # await just unpacks the result .result() would be also possible
         print(f"Main: Handled -> {result}")
 

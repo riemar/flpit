@@ -25,13 +25,13 @@ def _unsupported(feature: str) -> None:
 
 def test_RunRunTests() -> None:
     """Adapted: Task.run executes synchronous callables and async functions."""
-    assert Task.run(lambda: 7).result(timeout=2) == 7
+    assert Task.run(lambda: 7).result() == 7
 
     async def async_value() -> int:
         await Task.delay(0.005)
         return 42
 
-    assert Task.run(async_value).result(timeout=2) == 42
+    assert Task.run(async_value).result() == 42
 
 
 def test_RunRunTests_Cancellation_Negative() -> None:
@@ -42,7 +42,7 @@ def test_RunRunTests_Cancellation_Negative() -> None:
     try:
         task = Task.run(lambda: invoked.append("ran"), token=source.token)
         with pytest.raises(OperationCanceledError):
-            task.result(timeout=2)
+            task.result()
         assert task.cancelled()
         assert invoked == []
     finally:
@@ -52,9 +52,9 @@ def test_RunRunTests_Cancellation_Negative() -> None:
 def test_RunRunTests_FastPathTests() -> None:
     """Adapted: Task.run can await an existing Task handle and relay its outcome."""
     completed = Task.run(lambda: 42)
-    assert completed.result(timeout=2) == 42
+    assert completed.result() == 42
     wrapper = Task.run(completed)
-    assert wrapper.result(timeout=2) == 42
+    assert wrapper.result() == 42
 
     error = ValueError("faulted source")
 
@@ -63,10 +63,10 @@ def test_RunRunTests_FastPathTests() -> None:
 
     failed = Task.run(fail)
     with pytest.raises(ValueError, match="faulted source"):
-        failed.result(timeout=2)
+        failed.result()
     relay = Task.run(failed)
     with pytest.raises(ValueError, match="faulted source") as caught:
-        relay.result(timeout=2)
+        relay.result()
     assert caught.value is error
 
 
@@ -91,7 +91,7 @@ def test_RunFromResult_FaultedTask() -> None:
 
     task = Task.run(fail)
     with pytest.raises(RuntimeError, match="uh oh") as caught:
-        task.result(timeout=2)
+        task.result()
     assert caught.value is error
 
 
@@ -110,7 +110,7 @@ def test_TaskDelay_MaxSupported_Success() -> None:
         assert not task.done()
         source.cancel()
         with pytest.raises(OperationCanceledError):
-            task.result(timeout=2)
+            task.result()
         assert task.cancelled()
     finally:
         source.dispose()
@@ -118,11 +118,11 @@ def test_TaskDelay_MaxSupported_Success() -> None:
 
 def test_RunDelayTests() -> None:
     zero = Task.delay(0)
-    zero.result(timeout=2)
+    zero.result()
     assert zero.done()
 
     delayed = Task.delay(0.01)
-    assert delayed.result(timeout=2) is None
+    assert delayed.result() is None
     assert delayed.done()
 
 
@@ -137,7 +137,7 @@ def test_RunDelayTests_NegativeCases() -> None:
         delayed = Task.delay(60, token=source.token)
         source.cancel()
         with pytest.raises(OperationCanceledError):
-            delayed.result(timeout=2)
+            delayed.result()
         assert delayed.cancelled()
     finally:
         source.dispose()
@@ -157,12 +157,12 @@ def test_RunExceptionWrappingTest() -> None:
 
     task = Task.run(fail)
     with pytest.raises(ValueError, match="inner failure") as caught:
-        task.result(timeout=2)
+        task.result()
     assert caught.value is error
 
     aggregate = Task.when_all([Task.run(fail)])
     with pytest.raises(ValueError, match="inner failure") as caught_aggregate:
-        aggregate.result(timeout=2)
+        aggregate.result()
     assert caught_aggregate.value is error
 
 

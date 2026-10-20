@@ -23,8 +23,7 @@ async def coro_independent():
 @task
 async def work():
     res = await coro_independent()
-    # await Task.delay(0.5)
-    twait >> Task.delay(0.5)
+    await Task.delay(0.5)
     return res + 3
 
 @asyncio_task

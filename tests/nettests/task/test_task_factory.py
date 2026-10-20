@@ -30,14 +30,14 @@ def test_RunTaskFactoryTests() -> None:
 
 def test_FlpIt_Task_run_basic_callable_and_coroutine_subset() -> None:
     """Local analogue for the subset that maps to FlpIt's Task.run API."""
-    assert Task.run(lambda: None).result(timeout=2) is None
-    assert Task.run(lambda: 10).result(timeout=2) == 10
+    assert Task.run(lambda: None).result() is None
+    assert Task.run(lambda: 10).result() == 10
 
     async def async_value() -> int:
         await Task.delay(0)
         return 11
 
-    assert Task.run(async_value).result(timeout=2) == 11
+    assert Task.run(async_value).result() == 11
 
 
 def test_RunTaskFactoryTests_Cancellation_Negative() -> None:
@@ -47,7 +47,7 @@ def test_RunTaskFactoryTests_Cancellation_Negative() -> None:
     try:
         task = Task.run(lambda: invoked.append(True), token=source.token)
         with pytest.raises(OperationCanceledError):
-            task.result(timeout=2)
+            task.result()
         assert task.cancelled()
         assert invoked == []
     finally:

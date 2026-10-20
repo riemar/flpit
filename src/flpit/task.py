@@ -734,19 +734,17 @@ class Task(Generic[T]):
     def cancelled(self) -> bool:
         return self._completed.is_set() and self._state == self.CANCELLED
 
-    def result(self, timeout: float | None = None) -> T:
+    def result(self) -> T:
         """Block an external thread until completion and return/raise the result."""
         if not self.done() and self._runtime.is_runtime_thread():
             raise RuntimeError("Task.result() would block the runtime thread; use 'await task'")
-        if not self._completed.wait(timeout):
-            raise TimeoutError(f"{self.name} did not complete before the timeout")
+        self._completed.wait()
         return self._raise_or_return()
 
-    def exception(self, timeout: float | None = None) -> BaseException | None:
+    def exception(self) -> BaseException | None:
         if not self.done() and self._runtime.is_runtime_thread():
             raise RuntimeError("Task.exception() would block the runtime thread")
-        if not self._completed.wait(timeout):
-            raise TimeoutError(f"{self.name} did not complete before the timeout")
+        self._completed.wait()
         if self._state == self.CANCELLED:
             raise self._cancellation_exception()
         return self._exception
