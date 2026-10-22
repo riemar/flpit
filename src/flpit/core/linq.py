@@ -14,7 +14,6 @@ from itertools import islice
 from typing import (
     Any,
     Callable,
-    Generic,
     Iterable,
     Iterator,
     Collection,
@@ -27,14 +26,14 @@ from typing import (
     Union,
     override,
     overload,
-    cast as typing_cast, BinaryIO,
+    cast as typing_cast,
+    BinaryIO,
+    Concatenate,
+    Sized
 )
 
-import flpit.json
 from flpit.json import JsonConvert, JsonSerializerOptions
 
-TItem = TypeVar("TItem")
-TResult = TypeVar("TResult")
 TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
 TAccumulate = TypeVar("TAccumulate")
@@ -114,16 +113,24 @@ class ArgumentOutOfBoundsError(ArgumentError):
         super().__init__("Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.")
 
 
-def _guard_empty(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Catches Python's native empty-sequence ValueError and re-raises LINQ-compliant error."""
+def _guard_empty[SelfT: Sized, R, **P](
+        func: Callable[Concatenate[SelfT, P], R],
+) -> Callable[Concatenate[SelfT, P], R]:
+    """Translate empty-sequence ValueError into EmptySequenceError."""
+
     @wraps(func)
-    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+    def wrapper(
+            self: SelfT,
+            *args: P.args,
+            **kwargs: P.kwargs,
+    ) -> R:
         try:
             return func(self, *args, **kwargs)
         except ValueError as e:
-            if not self._FlpList__list.data:
+            if len(self) == 0:
                 raise EmptySequenceError() from e
             raise
+
     return wrapper
 
 
@@ -137,7 +144,7 @@ def dotnet_context() -> AbstractContextManager[decimal.Context]:
     return decimal.localcontext(ctx)
 
 
-class _FactoryIterable(Iterable[TItem], Generic[TItem]):
+class _FactoryIterable[TItem](Iterable[TItem]):
     """
     Wraps a generator factory function into a clean Iterable[T].
     Ensures __iter__ produces a brand-new iterator instance on every call
@@ -152,7 +159,7 @@ class _FactoryIterable(Iterable[TItem], Generic[TItem]):
         return self._factory()
 
 
-class FlpIt(Iterable[TItem], Generic[TItem]):
+class FlpIt[TItem](Iterable[TItem]):
     """
     | Fluent Iterable
     Lazy evaluation wrapper around an iterable, inspired by .NET LINQ's
@@ -173,7 +180,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         return iter(self._iterable)
 
     # noinspection unused-parameter
-    def as_type(self, target_type: Type[TResult]) -> FlpIt[TResult]:
+    def as_type[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Zero-cost static type hint update returning self directly without checks or allocations."""
         return self  # type: ignore[return-value]
 
@@ -257,7 +264,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
         # return typing_cast(FlpIt[TItem], FlpIt[TItem](_FactoryIterable(_generator)))
         return FlpIt[TItem](_FactoryIterable(_generator))
 
-    def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
+    def select[TResult](self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         """Projects each element into a new form."""
         def _generator() -> Iterator[TResult]:
             for item in self:
@@ -265,7 +272,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-    def select_many(
+    def select_many[TResult](
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
         """Flattens sequence projections."""
@@ -310,7 +317,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-    def cast(self, target_type: Type[TResult]) -> FlpIt[TResult]:
+    def cast[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Casts elements to a specified type or raises TypeError if cast fails."""
         def _generator() -> Iterator[TResult]:
             for item in self:
@@ -322,7 +329,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
-    def of_type(self, target_type: Type[TResult]) -> FlpIt[TResult]:
+    def of_type[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Filters the elements of an Iterable based on a specified type."""
         def _generator() -> Iterator[TResult]:
             for item in self:
@@ -360,7 +367,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
     def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
 
     @overload
-    def zip(
+    def zip[TResult, TOther](
             self,
             second: Iterable[TOther],
             result_selector: Callable[[TItem, TOther], TResult],
@@ -598,7 +605,7 @@ class FlpIt(Iterable[TItem], Generic[TItem]):
             return item
         raise EmptySequenceError() if predicate is _SENTINEL else NoMatchError()
 
-    def first_or_default(
+    def first_or_default[TResult](
             self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
     ) -> Union[TItem, TResult]:
         """Returns the first element matching a predicate, or a default value."""
@@ -673,14 +680,7 @@ class _NoneOrderKey:
 
 _NONE_ORDER_KEY = _NoneOrderKey()
 
-def _none_aware_key(
-        selector: Callable[[TItem], Any],
-        item: TItem,
-) -> Any:
-    key = selector(item)
-    return _NONE_ORDER_KEY if key is None else key
-
-class OrderedIt(FlpIt[TItem]):
+class OrderedIt[TItem](FlpIt[TItem]):
     __slots__ = ("_criteria",)
 
     def __init__(
@@ -701,13 +701,21 @@ class OrderedIt(FlpIt[TItem]):
         else:
             self._criteria = _criteria + ((selector, descending),)
 
+    @staticmethod
+    def __none_aware_key(
+            selector: Callable[[TItem], Any],
+            item: TItem,
+    ) -> Any:
+        key = selector(item)
+        return _NONE_ORDER_KEY if key is None else key
+
     @override
     def __iter__(self) -> Iterator[TItem]:
         items = list(self._iterable)
 
         for selector, descending in reversed(self._criteria):
             items.sort(
-                key=partial(_none_aware_key, selector),
+                key=partial(self.__none_aware_key, selector),
                 reverse=descending,
             )
 
@@ -736,7 +744,7 @@ class OrderedIt(FlpIt[TItem]):
         )
 
 
-class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
+class Grouping[TKey, TItem](FlpIt[TItem]):
     """Represents a collection of elements sharing a common key (.NET IGrouping<TKey, TElement>)."""
     __slots__ = ("_key", )
 
@@ -760,7 +768,7 @@ class Grouping(FlpIt[TItem], Generic[TKey, TItem]):
         return self.key == other.key and self.to_list() == other.to_list()
 
 
-class FlpList(Collection[TItem], Generic[TItem]):
+class FlpList[TItem](Collection[TItem]):
     """
     | Fluent List
     A materialized list extending UserList that yields lazy FlpIt instances for query operations.
@@ -781,7 +789,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
     # =====================================================================
     # 1. THE ABC CONTRACT
     # =====================================================================
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[TItem]:
         return self.__list.__iter__()
 
     def __len__(self) -> int:
@@ -1032,17 +1040,16 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def concat(self, second: Iterable[TItem]) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).concat(second)
 
-    # noinspection unused-parameter
-    def as_type(self, target_type: Type[TResult]) -> FlpList[TResult]:
-        return self  # type: ignore[return-value]
+    def as_type[TResult](self, target_type: Type[TResult]) -> FlpList[TResult]:
+        return typing_cast(FlpList[TResult], self)
 
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
         return FlpIt[TItem](self.__list.data).where(predicate)
 
-    def select(self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
+    def select[TResult](self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).select(selector)
 
-    def select_many(
+    def select_many[TResult](
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).select_many(selector)
@@ -1053,10 +1060,10 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def take(self, count: int) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).take(count)
 
-    def cast(self, target_type: Type[TResult]) -> FlpIt[TResult]:
+    def cast[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).cast(target_type)
 
-    def of_type(self, target_type: Type[TResult]) -> FlpIt[TResult]:
+    def of_type[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).of_type(target_type)
 
     def distinct(self) -> FlpIt[TItem]:
@@ -1071,7 +1078,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
     def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
 
     @overload
-    def zip(
+    def zip[TResult, TOther](
             self,
             second: Iterable[TOther],
             result_selector: Callable[[TItem, TOther], TResult],
@@ -1204,7 +1211,7 @@ class FlpList(Collection[TItem], Generic[TItem]):
 
         raise EmptySequenceError() if predicate is _SENTINEL else NoMatchError()
 
-    def first_or_default(
+    def first_or_default[TResult](
             self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
     ) -> TItem | TResult:
         return FlpIt(self.__list.data).first_or_default(default, predicate)

@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.2.2"
+version = "0.2.3.dev1"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -55,7 +55,7 @@ include = ["src/flp", "src/flpit"]
 [tool.pyrefly]
 project-includes = ["src"]
 project-excludes = ["**/__pycache__", "tests"]
-search-path = ["src"]
+search-path = ["src", "typing"]
 preset = "strict"
 
 [tool.pytest.ini_options]
