@@ -560,17 +560,45 @@ class Task(Generic[T]):
             raise TypeError("handler must be callable or None")
         _get_runtime().set_exception_handler(handler)
 
+    @overload
     @classmethod
-    def run(
+    def run[R](
             cls,
-            work: Callable[..., T],
+            work: Callable[..., Coroutine[Any, Any, R]],
             /,
             *args: Any,
             name: str | None = None,
             token: CancellationToken | None = None,
             pass_token: bool = False,
             **kwargs: Any,
-    ) -> "Task[T]":
+    ) -> Task[R]: ...
+
+    @overload
+    @classmethod
+    def run[R](
+            cls,
+            work: Callable[..., R],
+            /,
+            *args: Any,
+            name: str | None = None,
+            token: CancellationToken | None = None,
+            pass_token: bool = False,
+            **kwargs: Any,
+    ) -> Task[R]: ...
+
+    @classmethod
+    def run(
+            cls,
+            work: Callable[..., Any],
+            /,
+            *args: Any,
+            name: str | None = None,
+            token: CancellationToken | None = None,
+            pass_token: bool = False,
+            **kwargs: Any,
+    ) -> Task[Any]:
+        # Keep your existing implementation here.
+        ...
         """Schedule a coroutine/awaitable or ordinary callable.
 
         Ordinary functions run in the bounded worker pool. ``token`` controls
@@ -602,7 +630,7 @@ class Task(Generic[T]):
     @classmethod
     def when_all(
             cls,
-            *tasks: Any,
+            *tasks: Awaitable[T],
             name: str | None = None,
             token: CancellationToken | None = None,
     ) -> "Task[list[Any]]":
@@ -620,8 +648,6 @@ class Task(Generic[T]):
         normalized = _normalize_tasks(tasks, allow_empty=True)
         return cast(
             "Task[list[Any]]",
-            # todo: make run type compatible via Generator[Y, S, R]
-            # pyrefly: ignore [bad-argument-type]
             cls.run(_when_all_coroutine, normalized, name=name, token=token),
         )
 
@@ -647,8 +673,6 @@ class Task(Generic[T]):
         normalized = _normalize_tasks(tasks, allow_empty=False)
         return cast(
             "Task[Task[Any]]",
-            # todo: make run type compatible via Generator[Y, S, R]
-            # pyrefly: ignore [bad-argument-type]
             cls.run(_when_any_coroutine, normalized, name=name, token=token),
         )
 
