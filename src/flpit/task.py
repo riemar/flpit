@@ -49,7 +49,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 import flpit
 
 T = TypeVar("T")
-_LOG = logging.getLogger("tinytask")
+_LOG = logging.getLogger("task")
 _MISSING = object()
 _WAKE = object()
 
@@ -71,7 +71,7 @@ class OperationCanceledError(Exception):
         super().__init__(message)
 
 
-# Backwards-compatible spelling used by the first TinyTask prototype.
+# Backwards-compatible spelling used by the first Task prototype.
 CancelledError = OperationCanceledError
 
 
@@ -1176,7 +1176,7 @@ class _Runtime:
         self._max_pending_background = max_pending_background
         self._pending_background: deque[tuple[Task[Any], _BackgroundCall]] = deque()
         self._background_active = 0  # scheduler-thread-owned submitted call count
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="tinytask-io")
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Thread")
         self._inflight_lock = threading.Condition()
         self._inflight_futures: set[Future[Any]] = set()
         self._current_task: Task[Any] | None = None
@@ -1205,8 +1205,8 @@ class _Runtime:
                 return
             with self._state_lock:
                 if self._closed or self._shutdown_requested:
-                    raise RuntimeShutdownError("TinyTask runtime is shutting down")
-            self._thread = threading.Thread(target=self._loop, name="TinyTask-runtime", daemon=True)
+                    raise RuntimeShutdownError("Task runtime is shutting down")
+            self._thread = threading.Thread(target=self._loop, name="Task-runtime", daemon=True)
             self._thread.start()
             self._started.wait()
 
@@ -1223,8 +1223,8 @@ class _Runtime:
                 handler({**context, "exception": error})
                 return
             except Exception:
-                _LOG.exception("TinyTask exception handler itself failed")
-        message = str(context.get("message", "Unexpected TinyTask runtime error"))
+                _LOG.exception("Task exception handler itself failed")
+        message = str(context.get("message", "Unexpected Task runtime error"))
         _LOG.error("%s", message, exc_info=(type(error), error, error.__traceback__))
 
     def _call_sync(self, callback: Callable[[], T], *, internal: bool = False) -> T:
@@ -1254,7 +1254,7 @@ class _Runtime:
             thread = self._thread
             if thread is None or not thread.is_alive():
                 raise RuntimeShutdownError(
-                    "TinyTask runtime stopped before the scheduled operation ran"
+                    "Task runtime stopped before the scheduled operation ran"
                 )
         if "error" in outcome:
             raise outcome["error"]
@@ -1265,7 +1265,7 @@ class _Runtime:
         execute_inline = False
         with self._state_lock:
             if self._closed or self._stopping or (self._shutdown_requested and not internal):
-                raise RuntimeShutdownError("TinyTask runtime is shutting down")
+                raise RuntimeShutdownError("Task runtime is shutting down")
             if self.is_runtime_thread():
                 execute_inline = True
             else:
@@ -1385,7 +1385,7 @@ class _Runtime:
         if not isinstance(yielded, _Operation):
             raise RuntimeError(
                 f"{task.name} yielded unsupported object {yielded!r}; "
-                "this runtime only supports TinyTask awaitables"
+                "this runtime only supports Task awaitables"
             )
         if yielded.runtime is not self:
             raise RuntimeError("awaitable belongs to a different runtime")
@@ -1638,7 +1638,7 @@ class _Runtime:
                 callback()
             except BaseException as error:
                 self._report_exception(
-                    {"message": "Unhandled exception in TinyTask scheduler callback", "callback": callback},
+                    {"message": "Unhandled exception in Task scheduler callback", "callback": callback},
                     error,
                 )
 
@@ -1728,7 +1728,7 @@ class _Runtime:
                     if self._stopping or self.closed:
                         break
                     self._report_exception(
-                        {"message": "Selector failed; stopping TinyTask runtime"}, error
+                        {"message": "Selector failed; stopping Task runtime"}, error
                     )
                     self._stopping = True
                     break
@@ -1740,7 +1740,7 @@ class _Runtime:
                     )
                     self._stopping = True
         except BaseException as error:
-            self._report_exception({"message": "Fatal error in TinyTask scheduler loop"}, error)
+            self._report_exception({"message": "Fatal error in Task scheduler loop"}, error)
             self._stopping = True
         finally:
             # Stop accepting work before releasing scheduler resources. The
@@ -1795,7 +1795,7 @@ class _Runtime:
         runtime_stopped = thread is None or not thread.is_alive()
         if not runtime_stopped:
             self._report_exception(
-                {"message": "TinyTask scheduler thread did not stop before timeout"},
+                {"message": "Task scheduler thread did not stop before timeout"},
                 TimeoutError("scheduler shutdown timed out"),
             )
 
@@ -1849,7 +1849,7 @@ def _shutdown_at_exit() -> None:
     try:
         Task.shutdown(grace_timeout=0.2, worker_timeout=0.2)
     except BaseException:
-        _LOG.exception("Error during TinyTask interpreter shutdown")
+        _LOG.exception("Error during Task interpreter shutdown")
 
 
 atexit.register(_shutdown_at_exit)
