@@ -236,7 +236,7 @@ class CancellationToken:
 
     def throw_if_cancellation_requested(self) -> None:
         if self.is_cancellation_requested:
-            raise OperationCanceledError("Cancellation was requested")
+            raise OperationCanceledError("Cancellation was requested", token=self)
 
     def register(self, callback: Callable[[], Any]) -> CancellationTokenRegistration:
         if not callable(callback):
@@ -393,8 +393,13 @@ class _Operation:
 
 
 class _Sleep(_Operation):
-    def __init__(self, runtime: "_Runtime", delay: float) -> None:
-        super().__init__(runtime)
+    def __init__(
+            self,
+            runtime: "_Runtime",
+            delay: float,
+            token: CancellationToken | None = None,
+    ) -> None:
+        super().__init__(runtime, token)
         self.delay = delay
         self.deadline = time.monotonic() + delay
 
@@ -471,8 +476,12 @@ async def _invoke_background(
     return result
 
 
-async def _delay_coroutine(runtime: "_Runtime", delay: float) -> None:
-    await _Sleep(runtime, delay)
+async def _delay_coroutine(
+        runtime: "_Runtime",
+        delay: float,
+        token: CancellationToken | None = None,
+) -> None:
+    await _Sleep(runtime, delay, token=token)
 
 
 class Task(Generic[T]):
@@ -487,11 +496,10 @@ class Task(Generic[T]):
             self,
             runtime: "_Runtime",
             *,
-            name: str | None = None,
             token: CancellationToken | None = None,
     ) -> None:
         self._runtime = runtime
-        self.name = name or f"Task-{id(self):x}"
+        self.name = f"Task-{id(self):x}"
         self._state = self.PENDING
         self._result: Any = None
         self._exception: BaseException | None = None
@@ -567,7 +575,6 @@ class Task(Generic[T]):
             work: Callable[..., Coroutine[Any, Any, R]],
             /,
             *args: Any,
-            name: str | None = None,
             token: CancellationToken | None = None,
             pass_token: bool = False,
             **kwargs: Any,
@@ -580,7 +587,6 @@ class Task(Generic[T]):
             work: Callable[..., R],
             /,
             *args: Any,
-            name: str | None = None,
             token: CancellationToken | None = None,
             pass_token: bool = False,
             **kwargs: Any,
@@ -592,7 +598,6 @@ class Task(Generic[T]):
             work: Callable[..., Any],
             /,
             *args: Any,
-            name: str | None = None,
             token: CancellationToken | None = None,
             pass_token: bool = False,
             **kwargs: Any,
@@ -622,7 +627,7 @@ class Task(Generic[T]):
                 work.close()
             raise ValueError("pass_token=True requires an explicit token")
         runtime = _get_runtime()
-        task = cls(runtime, name=name, token=token)
+        task = cls(runtime, token=token)
         task._pass_token = pass_token
         runtime._submit(task, work, args, kwargs)
         return task
@@ -630,9 +635,7 @@ class Task(Generic[T]):
     @classmethod
     def when_all(
             cls,
-            *tasks: Awaitable[T],
-            name: str | None = None,
-            token: CancellationToken | None = None,
+            *tasks: Awaitable[T]
     ) -> "Task[list[Any]]":
         """Complete when every supplied task completes, preserving input order.
 
@@ -643,20 +646,16 @@ class Task(Generic[T]):
         several children fail, TaskAggregateError exposes all their exceptions.
         If there are no tasks, the result is an empty list.
         """
-        if token is not None and not isinstance(token, CancellationToken):
-            raise TypeError("token must be a CancellationToken")
         normalized = _normalize_tasks(tasks, allow_empty=True)
         return cast(
             "Task[list[Any]]",
-            cls.run(_when_all_coroutine, normalized, name=name, token=token),
+            cls.run(_when_all_coroutine, normalized),
         )
 
     @classmethod
     def when_any(
             cls,
             *tasks: Any,
-            name: str | None = None,
-            token: CancellationToken | None = None,
     ) -> "Task[Task[Any]]":
         """Complete when one supplied task completes and return that task.
 
@@ -668,12 +667,10 @@ class Task(Generic[T]):
         If multiple tasks are already complete at observation time, input order
         breaks the tie deterministically.
         """
-        if token is not None and not isinstance(token, CancellationToken):
-            raise TypeError("token must be a CancellationToken")
         normalized = _normalize_tasks(tasks, allow_empty=False)
         return cast(
             "Task[Task[Any]]",
-            cls.run(_when_any_coroutine, normalized, name=name, token=token),
+            cls.run(_when_any_coroutine, normalized),
         )
 
     @staticmethod
@@ -698,7 +695,6 @@ class Task(Generic[T]):
             seconds: float,
             *,
             token: CancellationToken | None = None,
-            name: str | None = None,
     ) -> "Task[None]":
         """Return a task completed after seconds without blocking a worker."""
         if seconds < 0:
@@ -706,12 +702,12 @@ class Task(Generic[T]):
         if token is not None and not isinstance(token, CancellationToken):
             raise TypeError("token must be a CancellationToken")
         runtime = _get_runtime()
-        task: Task[None] = cls(runtime, name=name or f"Delay({seconds:g}s)", token=token)
+        task: Task[None] = cls(runtime, token=token)
         # During graceful cancellation, allow an already-running coroutine to
         # create a delay for async cleanup. External callers are still rejected.
         runtime._submit_coroutine(
             task,
-            _delay_coroutine(runtime, seconds),
+            _delay_coroutine(runtime, seconds, token),
             allow_during_shutdown=runtime.is_runtime_thread(),
         )
         return task
@@ -778,16 +774,6 @@ class Task(Generic[T]):
             return self._exception
         return OperationCanceledError(f"{self.name} was cancelled")
 
-    def cancel(self) -> bool:
-        """Request cancellation of this Task, independently of other token users."""
-        if self.done():
-            return False
-        try:
-            self._runtime._post(lambda: self._cancel_on_runtime(), internal=True)
-        except RuntimeShutdownError:
-            return False
-        return True
-
     def __await__(self) -> Generator[Any, T, T]:
         if self.done():
             return self._raise_or_return()
@@ -803,11 +789,6 @@ class Task(Generic[T]):
         if self._state != self.SUCCEEDED:
             raise InvalidStateError(f"{self.name} has not completed")
         return cast(T, self._result)
-
-    def _bind_token(self) -> None:
-        if not self._token.can_be_cancelled or self._token_registration is not None:
-            return
-        self._token_registration = self._token.register(self.cancel)
 
     def _cancel_on_runtime(self) -> None:
         if self.done():
@@ -1336,7 +1317,6 @@ class _Runtime:
             return
         task._coroutine = coroutine
         self._tasks.add(task)
-        task._bind_token()
         self._schedule(task)
 
     def _schedule(

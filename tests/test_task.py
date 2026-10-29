@@ -38,39 +38,52 @@ def test_async_composition_and_background_callable():
     assert Task.run(child).result() == 42
 
 
-def test_independent_and_linked_tokens():
+def test_independent_and_linked_tokens_cancel_waiting_tasks():
+    import threading
+
     first = CancellationTokenSource()
     second = CancellationTokenSource()
     linked = CancellationTokenSource.create_linked_token_source(
         first.token, second.token
     )
 
-    async def waiting(token):
-        await Task.delay(5, token=token)
+    ready = [threading.Event() for _ in range(3)]
+
+    async def waiting(token, delay_created):
+        delay = Task.delay(5, token=token)
+        delay_created.set()
+        await delay
         return "finished"
 
+    a = Task.run(waiting, first.token, ready[0])
+    b = Task.run(waiting, second.token, ready[1])
+    c = Task.run(waiting, linked.token, ready[2])
+
     try:
-        a = Task.run(waiting, first.token)
-        b = Task.run(waiting, second.token)
-        time.sleep(0.02)
+        assert all(event.wait(1) for event in ready)
 
         first.cancel()
+
         with pytest.raises(OperationCanceledError):
             a.result()
+        with pytest.raises(OperationCanceledError):
+            c.result()
 
+        assert linked.is_cancellation_requested
         assert not second.is_cancellation_requested
         assert not b.done()
 
         second.cancel()
+
         with pytest.raises(OperationCanceledError):
             b.result()
 
-        assert linked.is_cancellation_requested
-        assert first.token.is_cancellation_requested
     finally:
+        first.cancel()
+        second.cancel()
+        linked.dispose()
         first.dispose()
         second.dispose()
-        linked.dispose()
 
 
 def test_cancel_after_and_operation_token():
@@ -278,23 +291,6 @@ def test_when_any_returns_first_completed_task_without_cancelling_losers():
         Task.when_any()
 
 
-def test_cancelling_aggregate_does_not_cancel_child_tasks():
-    async def value_after(value: int) -> int:
-        await Task.delay(0.04)
-        return value
-
-    first = Task.run(value_after, 1)
-    second = Task.run(value_after, 2)
-    aggregate = Task.when_all(first, second)
-    time.sleep(0.01)
-    aggregate.cancel()
-
-    with pytest.raises(OperationCanceledError):
-        aggregate.result()
-    assert first.result() == 1
-    assert second.result() == 2
-
-
 def test_scheduler_callback_errors_reach_exception_handler():
     seen = []
     Task.set_exception_handler(seen.append)
@@ -355,6 +351,37 @@ def test_shutdown_runs_async_cleanup_and_reports_running_workers():
     assert Task.run(lambda: 7).result() == 7  # lazy restart works
     Task.shutdown(grace_timeout=0.5, worker_timeout=0.5)
 
+
+@pytest.mark.skip("AsyncLocal decision outstanding. will have an impact whether this assumption will be true at all")
+def test_contextvars_are_isolated_between_tasks():
+    import contextvars
+    value = contextvars.ContextVar("flpit_test_value", default="unset")
+    first_has_set_value = threading.Event()
+
+    async def first():
+        value.set("first")
+        first_has_set_value.set()
+
+        # Let another task run before this task resumes.
+        await Task.delay(0.1)
+        return value.get()
+
+    async def second():
+        value_before = value.get()
+        value.set("second")
+        await Task.delay(0.01)
+        return value_before, value.get()
+
+    first_task = Task.run(first)
+    assert first_has_set_value.wait(1), "First task did not start"
+
+    second_task = Task.run(second)
+
+    first_result = first_task.result()
+    second_result = second_task.result()
+
+    assert first_result == "first"
+    assert second_result == ("unset", "second")
 
 # =========================++++++++++
 # --- Cancellation specific tests ---
@@ -504,6 +531,45 @@ class TestTaskCancellation:
         assert not second.token.is_cancellation_requested
 
         linked.dispose()
+
+def test_task_run_cancelled_token_before_dispatch_does_not_invoke_function():
+    source = CancellationTokenSource()
+    runtime = task_module._get_runtime()
+
+    scheduler_entered = threading.Event()
+    release_scheduler = threading.Event()
+    function_invoked = threading.Event()
+
+    def block_scheduler():
+        scheduler_entered.set()
+        release_scheduler.wait()
+
+    def target():
+        function_invoked.set()
+        return "ran"
+
+    task = None
+    try:
+        # Hold the scheduler so Task.run's queued start cannot execute yet.
+        runtime._post(block_scheduler)
+        assert scheduler_entered.wait(1), "Scheduler did not reach test barrier"
+
+        task = Task.run(target, token=source.token)
+
+        # Cancel after Task.run queues the task, but before target dispatch.
+        source.cancel()
+    finally:
+        release_scheduler.set()
+
+    try:
+        assert task is not None
+        with pytest.raises(OperationCanceledError):
+            task.result()
+
+        assert task.cancelled()
+        assert not function_invoked.is_set()
+    finally:
+        source.dispose()
 
 
 # =========================++++++++++================

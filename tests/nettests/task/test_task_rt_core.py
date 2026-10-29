@@ -314,28 +314,6 @@ def test_RunTaskWaitAnyTests_Negative() -> None:
         Task.when_any([object()])
 
 
-def test_RunTaskWaitAnyTests_WithCancellationTokenTests() -> None:
-    """Adapted: cancel the aggregate wait without cancelling its children."""
-    source = CancellationTokenSource()
-
-    async def slow(value: int) -> int:
-        await Task.delay(0.05)
-        return value
-
-    first = Task.run(slow, 1)
-    second = Task.run(slow, 2)
-    try:
-        aggregate = Task.when_any(first, second, token=source.token)
-        source.cancel()
-        with pytest.raises(OperationCanceledError):
-            aggregate.result()
-        assert not first.cancelled()
-        assert not second.cancelled()
-        assert {first.result(), second.result()} == {1, 2}
-    finally:
-        source.dispose()
-
-
 def test_RunTaskWaitAllTests() -> None:
     """Adapted from WaitAll: when_all waits for all results and preserves input order."""
     async def value_after(value: int, delay: float) -> int:
