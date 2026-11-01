@@ -25,6 +25,7 @@ of work. Python cannot safely force-stop an arbitrary running thread.
 """
 from __future__ import annotations
 
+import sys
 import atexit
 import heapq
 import inspect
@@ -53,6 +54,7 @@ T = TypeVar("T")
 _LOG = logging.getLogger("task")
 _MISSING = object()
 _WAKE = object()
+_asyncio_bridge_init_lock: Final[threading.Lock] = threading.Lock()
 
 
 class OperationCanceledError(Exception):
@@ -107,6 +109,27 @@ class AggregateError(Exception):
             raise TypeError("exceptions must contain Exception instances")
         super().__init__(message)
 
+class _TaskMeta(type):
+
+    @property
+    def asyncio_interop(cls: "_TaskMeta") -> bool:
+        return (
+                getattr(cls, "__await__")
+                is getattr(cls, "_await_asyncio_interop")
+        )
+
+    @asyncio_interop.setter
+    def asyncio_interop(
+            cls: "_TaskMeta",
+            enabled: bool,
+    ) -> None:
+        implementation = getattr(
+            cls,
+            "_await_asyncio_interop"
+            if enabled
+            else "_await_pure_flpit_task",
+        )
+        setattr(cls, "__await__", implementation)
 
 @dataclass(frozen=True)
 class ShutdownReport:
@@ -424,6 +447,13 @@ class _WaitTask[T](_Operation):
         super().__init__(runtime)
         self.task = ttw
 
+    def __repr__(self) -> str:
+        return (
+            "<flpit _WaitTask: this await operation requires the "
+            "flpit scheduler; enable Task.asyncio_interop to await "
+            "flpit Task from asyncio>"
+        )
+
 
 class _WaitMany[T](_Operation):
     """Wait for all or any of a set of tasks to complete."""
@@ -507,8 +537,36 @@ async def _delay_coroutine(
 ) -> None:
     await _Sleep(runtime, delay, token=token)
 
+class _AsyncioBridge:
+    """Manages completion notifications for asyncio awaiters of a Task."""
 
-class Task(Generic[T]):
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[[], None]] = []
+        self._lock = threading.Lock()
+        self._completed = False
+
+    def add(self, callback: Callable[[], None]) -> None:
+        with self._lock:
+            if not self._completed:
+                self._callbacks.append(callback)
+                return
+
+        callback()
+
+    def complete(self) -> None:
+        with self._lock:
+            if self._completed:
+                return
+
+            self._completed = True
+            callbacks: list[Callable[[], None]] = self._callbacks.copy()
+            self._callbacks.clear()
+
+        for callback in callbacks:
+            callback()
+
+
+class Task(Generic[T], metaclass=_TaskMeta):
     """Result-bearing task managed by FlpIt's process-wide scheduler."""
 
     PENDING = "pending"
@@ -544,6 +602,7 @@ class Task(Generic[T]):
         self._pass_token = False
         self._is_promise_task = False
         self.async_state: Any = None
+        self._asyncio_bridge: _AsyncioBridge | None = None
 
     @property
     def status(self) -> str:
@@ -804,6 +863,23 @@ class Task(Generic[T]):
             raise self._cancellation_exception()
         return self._exception
 
+    def _get_asyncio_bridge(self) -> _AsyncioBridge:
+        bridge = self._asyncio_bridge
+
+        if bridge is None:
+            with _asyncio_bridge_init_lock:
+                bridge = self._asyncio_bridge
+
+                if bridge is None:
+                    bridge = _AsyncioBridge()
+                    self._asyncio_bridge = bridge
+
+        if self.done():
+            bridge.complete()
+
+        assert bridge is not None
+        return bridge
+
     def _close_coroutine(self) -> None:
         with self._coroutine_lock:
             coroutine = self._coroutine
@@ -817,9 +893,51 @@ class Task(Generic[T]):
             return self._exception
         return OperationCanceledError(f"{self.name} was cancelled")
 
-    def __await__(self) -> Generator[Any, T, T]:
+    def _await_pure_flpit_task(self) -> Generator[Any, T, T]:
         if self.done():
             return self._raise_or_return()
+        result = yield _WaitTask[T](self._runtime, self)
+        return result
+
+    __await__ = _await_pure_flpit_task
+
+    def _await_asyncio_interop(self) -> Generator[Any, T, T]:
+        if self.done():
+            return self._raise_or_return()
+
+        if "asyncio" in sys.modules:
+            import asyncio
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                future: asyncio.Future[T] = loop.create_future()
+
+                def complete_future() -> None:
+                    if future.done():
+                        return
+
+                    try:
+                        result = self._raise_or_return()
+                    except BaseException as exc:
+                        future.set_exception(exc)
+                    else:
+                        future.set_result(result)
+
+                def notify() -> None:
+                    try:
+                        loop.call_soon_threadsafe(complete_future)
+                    except RuntimeError:
+                        pass
+
+                self._get_asyncio_bridge().add(notify)
+
+                return (
+                    yield from cast(Generator[Any, T, T], future.__await__())
+                )
+
         result = yield _WaitTask[T](self._runtime, self)
         return result
 
@@ -863,6 +981,11 @@ class Task(Generic[T]):
             registration.dispose()
         self._completed.set()
         self._runtime._task_completed(self)
+
+        bridge = self._asyncio_bridge
+
+        if bridge is not None:
+            bridge.complete()
 
     def _step(self) -> None:
         if self.done():

@@ -1,3 +1,5 @@
+from functools import wraps
+
 import pytest
 
 import inspect
@@ -18,9 +20,22 @@ from flpit.task import (
     twait
 )
 
-from typing import Any
+from typing import Any, Callable
 
 from flpit.threading import AsyncLocal
+
+def interop[**P, R](test: Callable[P, R]) -> Callable[P, R]:
+    @wraps(test)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        previous = Task.asyncio_interop
+        Task.asyncio_interop = True
+
+        try:
+            return test(*args, **kwargs)
+        finally:
+            Task.asyncio_interop = previous
+
+    return wrapper
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -725,3 +740,89 @@ def test_twait_RejectsUseInsideAsyncFunction() -> None:
 
     Task.run(async_caller).result()
 
+def test_task_in_asyncio_coroutine_without_interopt() -> None:
+    import asyncio
+    async def iomain():
+        await Task.delay(1)
+
+    with pytest.raises(RuntimeError, match="enable Task.asyncio_interop to await flpit Task"):
+        asyncio.run(iomain())
+
+@interop
+def test_task_in_asyncio_coroutine() -> None:
+    import asyncio
+    async def iomain():
+        await Task.delay(1)
+
+    asyncio.run(iomain())
+
+@interop
+def test_task_exception_in_asyncio_coroutine() -> None:
+    import asyncio
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def failing_work() -> None:
+        started.set()
+        assert release.wait(2)
+        raise ValueError("expected failure")
+
+    task = Task.run(failing_work)
+    assert started.wait(1)
+
+    async def iomain() -> None:
+        loop = asyncio.get_running_loop()
+        loop.call_soon(release.set)
+        await task
+
+    with pytest.raises(ValueError, match="expected failure"):
+        asyncio.run(iomain())
+
+@interop
+def test_task_cancellation_in_asyncio_coroutine() -> None:
+    import asyncio
+
+    source = CancellationTokenSource()
+    task = Task.delay(5, token=source.token)
+
+    async def iomain() -> None:
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.01, source.cancel)
+        await task
+
+    try:
+        with pytest.raises(OperationCanceledError):
+            asyncio.run(iomain())
+    finally:
+        source.dispose()
+
+@interop
+def test_asyncio_waiter_cancellation_does_not_cancel_flpit_task() -> None:
+    import asyncio
+    from flpit.task import TaskCompletionSource
+
+    source = TaskCompletionSource()
+    task = source.task
+
+    async def iomain() -> None:
+        waiting = asyncio.Event()
+
+        async def wait_for_task() -> None:
+            waiting.set()
+            await task
+
+        waiter = asyncio.create_task(wait_for_task())
+        await waiting.wait()
+
+        waiter.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+    asyncio.run(iomain())
+
+    source.set_result(None)
+
+    assert task.result() is None
+    assert not task.cancelled()
