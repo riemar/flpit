@@ -44,7 +44,8 @@ from typing import Any, Generic, TypeVar, cast, Iterable, Final, overload
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
-
+from contextvars import Context, copy_context
+from .threading import AsyncLocal, _run_with_context
 
 import flpit
 
@@ -475,6 +476,29 @@ async def _invoke_background(
         return await result
     return result
 
+@dataclass(frozen=True)
+class _CoroutineStep:
+    yielded: Any = None
+    result: Any = None
+    error: BaseException | None = None
+    completed: bool = False
+
+def _advance_coroutine(
+        coroutine: Coroutine[Any, Any, Any],
+        value: Any,
+        exception: BaseException | None,
+) -> _CoroutineStep:
+    try:
+        if exception is not None:
+            yielded = coroutine.throw(exception)
+        else:
+            yielded = coroutine.send(value)
+    except StopIteration as stop:
+        return _CoroutineStep(result=stop.value, completed=True)
+    except BaseException as error:
+        return _CoroutineStep(error=error, completed=True)
+
+    return _CoroutineStep(yielded=yielded)
 
 async def _delay_coroutine(
         runtime: "_Runtime",
@@ -499,6 +523,7 @@ class Task(Generic[T]):
             token: CancellationToken | None = None,
     ) -> None:
         self._runtime = runtime
+        self._execution_context: Context = copy_context()
         self.name = f"Task-{id(self):x}"
         self._state = self.PENDING
         self._result: Any = None
@@ -508,6 +533,8 @@ class Task(Generic[T]):
         self._waiting_on: _Operation | None = None
         self._queued = False
         self._running = False
+        self._step_future: Future[_CoroutineStep] | None = None
+        self._coroutine_lock = threading.Lock()
         self._next_value: Any = None
         self._next_exception: BaseException | None = None
         self._cancel_requested = False
@@ -708,7 +735,9 @@ class Task(Generic[T]):
         runtime._submit_coroutine(
             task,
             _delay_coroutine(runtime, seconds, token),
-            allow_during_shutdown=runtime.is_runtime_thread(),
+            allow_during_shutdown=(
+                runtime.is_runtime_thread() or _current_task.value is not None
+            ),
         )
         return task
 
@@ -756,8 +785,14 @@ class Task(Generic[T]):
 
     def result(self) -> T:
         """Block an external thread until completion and return/raise the result."""
-        if not self.done() and self._runtime.is_runtime_thread():
-            raise RuntimeError("Task.result() would block the runtime thread; use 'await task'")
+        if not self.done() and (
+                            self._runtime.is_runtime_thread()
+                            or _current_task.value is not None
+                        ):
+            raise RuntimeError(
+                    "Task.result() would block the runtime or a Task worker; "
+                    "use 'await task'"
+                )
         self._completed.wait()
         return self._raise_or_return()
 
@@ -768,6 +803,14 @@ class Task(Generic[T]):
         if self._state == self.CANCELLED:
             raise self._cancellation_exception()
         return self._exception
+
+    def _close_coroutine(self) -> None:
+        with self._coroutine_lock:
+            coroutine = self._coroutine
+            if coroutine is None:
+                return
+            self._coroutine = None
+            coroutine.close()
 
     def _cancellation_exception(self) -> OperationCanceledError:
         if isinstance(self._exception, OperationCanceledError):
@@ -832,40 +875,18 @@ class Task(Generic[T]):
         exc = self._next_exception
         self._next_value = None
         self._next_exception = None
-        self._running = True
-        previous_task = self._runtime._current_task
-        self._runtime._current_task = self
+
         if isinstance(exc, OperationCanceledError):
             self._cancel_requested = False
-        try:
-            try:
-                if exc is not None:
-                    yielded = coroutine.throw(exc)
-                else:
-                    yielded = coroutine.send(value)
-            except StopIteration as stop:
-                self._finish(self.SUCCEEDED, result=stop.value)
-                return
-            except OperationCanceledError as cancelled:
-                self._finish(self.CANCELLED, exception=cancelled)
-                return
-            except BaseException as error:
-                self._finish(self.FAILED, exception=error)
-                return
-        finally:
-            self._running = False
-            self._runtime._current_task = previous_task
-        if self._cancel_requested:
-            self._runtime._schedule(self, exc=OperationCanceledError(f"{self.name} cancelled"))
-            return
-        try:
-            self._runtime._handle_yielded(self, yielded)
-        except BaseException as error:
-            self._runtime._detach_wait(self)
-            self._runtime._schedule(self, exc=error)
+
+        self._running = True
+        self._runtime._dispatch_coroutine_step(self, coroutine, value, exc)
 
     def __repr__(self) -> str:
         return f"<{self.name} state={self._state}>"
+
+
+_current_task: AsyncLocal[Task[Any] | None] = AsyncLocal()
 
 
 class TaskCompletionSource(Generic[T]):
@@ -1160,7 +1181,7 @@ class _Runtime:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Thread")
         self._inflight_lock = threading.Condition()
         self._inflight_futures: set[Future[Any]] = set()
-        self._current_task: Task[Any] | None = None
+        self._worker_context = threading.local()
         self._thread_id: int | None = None
         self._start_lock = threading.Lock()
         self._started = threading.Event()
@@ -1305,7 +1326,12 @@ class _Runtime:
             elif _is_async_callable(work):
                 coroutine = _invoke_async(work, args, call_kwargs)
             else:
-                coroutine = _invoke_background(self, work, args, call_kwargs)
+                self._tasks.add(task)
+                self._queue_background(
+                    task,
+                    _BackgroundCall(self, work, args, call_kwargs),
+                )
+                return
             self._start_coroutine(task, coroutine)
         except BaseException as error:
             self._tasks.add(task)
@@ -1420,18 +1446,7 @@ class _Runtime:
                 target._awaiters.add(task)
                 self._register_operation_token(task, yielded)
         elif isinstance(yielded, _BackgroundCall):
-            task._waiting_on = yielded
-            if self._background_active < self._max_workers and not self._pending_background:
-                self._start_background(task, yielded)
-            elif len(self._pending_background) < self._max_pending_background:
-                self._pending_background.append((task, yielded))
-                self._register_operation_token(task, yielded)
-            else:
-                task._waiting_on = None
-                raise BackgroundQueueFull(
-                    f"background queue is full (max_workers={self._max_workers}, "
-                    f"max_pending_background={self._max_pending_background})"
-                )
+            self._queue_background(task, yielded)
         else:
             raise RuntimeError(f"unsupported operation type: {type(yielded).__name__}")
 
@@ -1466,7 +1481,11 @@ class _Runtime:
         self._background_active += 1
         operation._counted_active = True
         try:
-            future = self._executor.submit(operation.function, *operation.args, **operation.kwargs)
+            future = self._executor.submit(
+                    self._run_background_call,
+                    task,
+                    operation,
+                )
         except BaseException as error:
             self._background_active -= 1
             operation._counted_active = False
@@ -1482,6 +1501,25 @@ class _Runtime:
             lambda completed, task=task, op=operation: self._background_worker_done(task, op, completed)
         )
 
+    def _run_background_call(
+            self,
+            task: Task[Any],
+            operation: _BackgroundCall,
+    ) -> Any:
+        def execute() -> Any:
+            previous_task = _current_task.value
+            _current_task.value = task
+
+            try:
+                return operation.function(
+                    *operation.args,
+                    **operation.kwargs,
+                )
+            finally:
+                _current_task.value = previous_task
+
+        return task._execution_context.run(execute)
+
     def _background_worker_done(
             self, task: Task[Any], operation: _BackgroundCall, future: Future[Any]
     ) -> None:
@@ -1496,21 +1534,66 @@ class _Runtime:
             pass
 
     def _background_finished(
-            self, task: Task[Any], operation: _BackgroundCall, future: Future[Any]
+            self,
+            task: Task[Any],
+            operation: _BackgroundCall,
+            future: Future[Any],
     ) -> None:
         if operation._counted_active:
             operation._counted_active = False
             self._background_active = max(0, self._background_active - 1)
+
         if not task.done() and task._waiting_on is operation:
             task._waiting_on = None
             self._dispose_operation_token(operation)
+
             try:
                 value = future.result()
             except BaseException as error:
-                self._schedule(task, exc=error)
+                if task._coroutine is None:
+                    state = (
+                        Task.CANCELLED
+                        if isinstance(error, OperationCanceledError)
+                        else Task.FAILED
+                    )
+                    task._finish(state, exception=error)
+                else:
+                    self._schedule(task, exc=error)
             else:
-                self._schedule(task, value=value)
+                if task._coroutine is None:
+                    if inspect.isawaitable(value):
+                        coroutine = (
+                            value if inspect.iscoroutine(value)
+                            else _await_any(value)
+                        )
+                        self._start_coroutine(task, coroutine)
+                    else:
+                        task._finish(Task.SUCCEEDED, result=value)
+                else:
+                    self._schedule(task, value=value)
+
         self._pump_background_queue()
+
+    def _queue_background(
+            self,
+            task: Task[Any],
+            operation: _BackgroundCall,
+    ) -> None:
+        task._waiting_on = operation
+
+        if self._background_active < self._max_workers and not self._pending_background:
+            self._start_background(task, operation)
+
+        elif len(self._pending_background) < self._max_pending_background:
+            self._pending_background.append((task, operation))
+            self._register_operation_token(task, operation)
+
+        else:
+            task._waiting_on = None
+            raise BackgroundQueueFull(
+                f"background queue is full (max_workers={self._max_workers}, "
+                f"max_pending_background={self._max_pending_background})"
+            )
 
     def _pump_background_queue(self) -> None:
         if self._shutdown_requested:
@@ -1659,15 +1742,28 @@ class _Runtime:
     def _next_timeout(self) -> float | None:
         max_selector_wait = 24 * 60 * 60  # 24 hours, in seconds
 
+        shutdown_timeout = None
+        if self._shutdown_requested and self._shutdown_deadline is not None:
+            shutdown_timeout = max(
+                0.0,
+                self._shutdown_deadline - time.monotonic(),
+                )
+
         while self._timers:
             deadline, _, task, operation = self._timers[0]
+
             if task.done() or task._waiting_on is not operation:
                 heapq.heappop(self._timers)
             else:
                 remaining = max(0.0, deadline - time.monotonic())
-                return min(remaining, max_selector_wait)
+                timer_timeout = min(remaining, max_selector_wait)
 
-        return None
+                if shutdown_timeout is None:
+                    return timer_timeout
+
+                return min(timer_timeout, shutdown_timeout)
+
+        return shutdown_timeout
 
     def _begin_shutdown(self) -> None:
         self._shutdown_deadline = time.monotonic() + self._shutdown_grace
@@ -1675,6 +1771,117 @@ class _Runtime:
             task._cancel_on_runtime()
         # Anything waiting in our bounded background queue is removed as its
         # task receives cancellation. Do not admit more background work at shutdown.
+
+    def is_task_worker_thread(self) -> bool:
+        return getattr(self._worker_context, "current_task", None) is not None
+
+    def _run_coroutine_step(
+            self,
+            task: Task[Any],
+            coroutine: Coroutine[Any, Any, Any],
+            value: Any,
+            exception: BaseException | None,
+    ) -> _CoroutineStep:
+        def execute_step() -> _CoroutineStep:
+            previous_task = _current_task.value
+            _current_task.value = task
+
+            try:
+                return _advance_coroutine(coroutine, value, exception)
+            finally:
+                _current_task.value = previous_task
+
+        return _run_with_context(task._execution_context, execute_step)
+
+    def _dispatch_coroutine_step(
+            self,
+            task: Task[Any],
+            coroutine: Coroutine[Any, Any, Any],
+            value: Any,
+            exception: BaseException | None,
+    ) -> None:
+        try:
+            future = self._executor.submit(
+                self._run_coroutine_step,
+                task,
+                coroutine,
+                value,
+                exception,
+            )
+        except BaseException as error:
+            task._running = False
+            task._finish(Task.FAILED, exception=error)
+            return
+
+        task._step_future = future
+        with self._inflight_lock:
+            self._inflight_futures.add(future)
+
+        future.add_done_callback(
+            lambda completed: self._coroutine_step_worker_done(task, completed)
+        )
+
+    def _coroutine_step_worker_done(
+            self,
+            task: Task[Any],
+            future: Future[_CoroutineStep],
+    ) -> None:
+        with self._inflight_lock:
+            self._inflight_futures.discard(future)
+            self._inflight_lock.notify_all()
+
+        try:
+            self._post(
+                lambda: self._coroutine_step_finished(task, future),
+                internal=True,
+            )
+        except RuntimeShutdownError:
+            try:
+                task._close_coroutine()
+            except BaseException as error:
+                self._report_exception(
+                    {"message": f"Error closing coroutine for {task.name}"},
+                    error,
+                )
+
+    def _coroutine_step_finished(
+            self,
+            task: Task[Any],
+            future: Future[_CoroutineStep],
+    ) -> None:
+        task._step_future = None
+        task._running = False
+
+        if task.done():
+            return
+
+        try:
+            outcome = future.result()
+        except BaseException as error:
+            task._finish(Task.FAILED, exception=error)
+            return
+
+        if outcome.completed:
+            if isinstance(outcome.error, OperationCanceledError):
+                task._finish(Task.CANCELLED, exception=outcome.error)
+            elif outcome.error is not None:
+                task._finish(Task.FAILED, exception=outcome.error)
+            else:
+                task._finish(Task.SUCCEEDED, result=outcome.result)
+            return
+
+        if task._cancel_requested:
+            self._schedule(
+                task,
+                exc=OperationCanceledError(f"{task.name} cancelled"),
+            )
+            return
+
+        try:
+            self._handle_yielded(task, outcome.yielded)
+        except BaseException as error:
+            self._detach_wait(task)
+            self._schedule(task, exc=error)
 
     def _loop(self) -> None:
         self._thread_id = threading.get_ident()
@@ -1730,10 +1937,10 @@ class _Runtime:
             for task in tasks:
                 self._detach_wait(task)
             for task in tasks:
-                coroutine = task._coroutine
-                if coroutine is not None:
+                future = task._step_future
+                if future is None or future.done():
                     try:
-                        coroutine.close()
+                        task._close_coroutine()
                     except BaseException as error:
                         self._report_exception(
                             {"message": f"Error closing coroutine for {task.name}"}, error

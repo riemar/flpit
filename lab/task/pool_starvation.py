@@ -7,7 +7,7 @@ SABOTEUR_TASKS = 10
 Task.configure(max_workers=MAX_WORKERS, max_pending_background=128)
 
 @task
-def blocking_saboteur(task_id: int):
+async def blocking_saboteur(task_id: int):
     """Simulates the 'completely safe... until it isn't' legacy blocking behavior."""
     # Instead of relying on print's automatic trailing newline:
     print(f"[Saboteur #{task_id}] Holding a native OS thread hostage...\n", end="")
@@ -29,12 +29,12 @@ async def main():
     for i in range(SABOTEUR_TASKS):
         _ = blocking_saboteur(i)
 
-    # give the tasks a chance to strat
+    start_time = time.perf_counter() # timing needs to start here, main will also wait after yield
+    # give the tasks a chance to start
     await Task.yield_now()
 
     # 2. Dispatch the victim task. It will sit in the queue because the pool is full.
     print("Spawn innocent victim (should freeze until a saboteur finishes)...")
-    start_time = time.perf_counter()
 
     victim_task = innocent_victim()
 

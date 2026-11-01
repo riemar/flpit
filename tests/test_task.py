@@ -20,6 +20,8 @@ from flpit.task import (
 
 from typing import Any
 
+from flpit.threading import AsyncLocal
+
 
 @pytest.fixture(scope="module", autouse=True)
 def configure_task_runtime():
@@ -352,25 +354,23 @@ def test_shutdown_runs_async_cleanup_and_reports_running_workers():
     Task.shutdown(grace_timeout=0.5, worker_timeout=0.5)
 
 
-@pytest.mark.skip("AsyncLocal decision outstanding. will have an impact whether this assumption will be true at all")
-def test_contextvars_are_isolated_between_tasks():
-    import contextvars
-    value = contextvars.ContextVar("flpit_test_value", default="unset")
+def test_asynclocal_values_are_isolated_between_tasks():
+    value = AsyncLocal[str](default="unset")
     first_has_set_value = threading.Event()
 
     async def first():
-        value.set("first")
+        value.value = "first"
         first_has_set_value.set()
 
-        # Let another task run before this task resumes.
         await Task.delay(0.1)
-        return value.get()
+        return value.value
 
     async def second():
-        value_before = value.get()
-        value.set("second")
+        value_before = value.value
+        value.value = "second"
+
         await Task.delay(0.01)
-        return value_before, value.get()
+        return value_before, value.value
 
     first_task = Task.run(first)
     assert first_has_set_value.wait(1), "First task did not start"
@@ -637,6 +637,44 @@ def test_task_concurrency_race_condition_fence(concurrency_pool, tlog):
     assert len(results) == 100
     assert len(shared_accumulator) == 100
 
+def test_blocking_coroutine_bodies_are_serialized(concurrency_pool, tlog) -> None:
+    """A blocking call in one coroutine prevents another from running on the
+    same execution thread.
+
+    The barrier is a rendezvous: both coroutine bodies can pass it only if
+    they are executing concurrently. With a single coroutine execution thread,
+    the first body blocks at the barrier, the barrier times out, and the second
+    body encounters the already-broken barrier when it eventually runs.
+
+    This uses a short bounded timeout instead of sleeping for two seconds and
+    asserting on wall-clock duration.
+    """
+    _RENDEZVOUS_TIMEOUT_SECONDS = 1.0
+
+    rendezvous = threading.Barrier(2)
+
+    def wait_for_other_coroutine() -> bool:
+        try:
+            rendezvous.wait(timeout=_RENDEZVOUS_TIMEOUT_SECONDS)
+        except threading.BrokenBarrierError:
+            return False
+        return True
+
+    first = Task.run(wait_for_other_coroutine)
+    second = Task.run(wait_for_other_coroutine)
+
+    try:
+        both_reached_barrier = Task.when_all(first, second).result()
+    except BaseException:
+        tlog.error("FIRST: %r", first._exception)
+        tlog.error("SECOND: %r", second._exception)
+        raise
+
+    assert both_reached_barrier == [True, True], (
+        "Both coroutine bodies reached a blocking rendezvous concurrently; "
+        "they were not serialized as expected for a single execution thread."
+    )
+
 def test_task_unhandled_exception_marshaling_chain():
     def throwing_worker():
         raise ZeroDivisionError("Simulated execution failure")
@@ -649,7 +687,7 @@ def test_task_unhandled_exception_marshaling_chain():
         failed_task.result()
 
 
-def test_Task_result_rejects_blocking_on_runtime_thread() -> None:
+def test_task_result_rejects_blocking_from_task_context() -> None:
     async def runtime_work() -> None:
         pending = Task.delay(10)
 
@@ -657,11 +695,25 @@ def test_Task_result_rejects_blocking_on_runtime_thread() -> None:
 
         with pytest.raises(
                 RuntimeError,
-                match="Task.result\\(\\) would block the runtime thread",
+                match="Task.result\\(\\) would block the runtime or a Task worker"
         ):
             pending.result()
 
     Task.run(runtime_work).result()
+
+
+def test_task_result_rejects_blocking_from_sync_task_context():
+    def sync_work():
+        pending = Task.delay(10)
+
+        with pytest.raises(
+                RuntimeError,
+                match="Task.result\\(\\) would block the runtime or a Task worker",
+        ):
+            pending.result()
+
+    Task.run(sync_work).result()
+
 
 def test_twait_RejectsUseInsideAsyncFunction() -> None:
     task = Task.run(lambda: 42)
@@ -672,3 +724,4 @@ def test_twait_RejectsUseInsideAsyncFunction() -> None:
             twait >> task
 
     Task.run(async_caller).result()
+

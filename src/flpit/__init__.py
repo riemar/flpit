@@ -1,7 +1,6 @@
 """
 Fluent LINQ for Python — flip your iterables.
 """
-from __future__ import annotations
 from importlib.metadata import version
 __version__ = version("flpit")
 
