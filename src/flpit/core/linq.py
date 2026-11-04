@@ -617,6 +617,8 @@ class FlpIt[TItem](Iterable[TItem]):
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
         has_predicate = predicate is not _SENTINEL
+        if has_predicate and predicate is None:
+            raise PredicateNoneError()
         query = self.where(predicate) if has_predicate else self
         it = iter(query)
 
@@ -631,6 +633,17 @@ class FlpIt[TItem](Iterable[TItem]):
             return first_val
 
         raise MultipleMatchesError() if has_predicate else MultipleElementsError()
+
+    def single_or_default[TResult](
+            self,
+            default: TResult,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
+    ) -> TItem | TResult:
+        """Returns the single matching element, or the specified default."""
+        try:
+            return self.single(predicate)
+        except (EmptySequenceError, NoMatchError):
+            return default
 
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
@@ -1218,6 +1231,13 @@ class FlpList[TItem](Collection[TItem]):
 
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         return FlpIt(self.__list.data).single(predicate)
+
+    def single_or_default[TResult](
+            self,
+            default: TResult,
+            predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL,
+    ) -> TItem | TResult:
+        return FlpIt(self.__list.data).single_or_default(default, predicate)
 
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
