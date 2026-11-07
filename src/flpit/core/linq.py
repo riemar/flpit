@@ -269,6 +269,9 @@ class FlpIt[TItem](Iterable[TItem]):
 
     def select[TResult](self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         """Projects each element into a new form."""
+        if selector is None:
+            raise SelectorNoneError()
+
         def _generator() -> Iterator[TResult]:
             for item in self:
                 yield selector(item)
