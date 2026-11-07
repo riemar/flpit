@@ -135,9 +135,5 @@ def test_ThrowsOnNullSource(flp_type):
 def test_ThrowsOnNullPredicate(flp_type):
     source = flp_type([])
 
-    # EXPECTED TO FAIL with the current FlpIt.single implementation:
-    # single(None) treats None as a supplied predicate but does not validate
-    # it before enumeration. Since this source is empty, the predicate is
-    # never called and single() raises NoMatchError instead of PredicateNoneError.
     with pytest.raises(PredicateNoneError):
         source.single(None)

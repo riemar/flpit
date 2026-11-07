@@ -186,11 +186,6 @@ def test_ThrowsOnNullSourceDefault(flp_type):
 def test_ThrowsOnNullPredicate(flp_type):
     source = flp_type([])
 
-    # EXPECTED TO FAIL with the current FlpIt.single implementation:
-    # single() treats None as a supplied predicate but does not validate it
-    # before enumeration. On an empty source it raises NoMatchError, which
-    # single_or_default catches and converts to the default. .NET validates
-    # the null predicate immediately, even when the source is empty.
     with pytest.raises(PredicateNoneError):
         source.single_or_default(0, None)
 
@@ -198,8 +193,5 @@ def test_ThrowsOnNullPredicate(flp_type):
 def test_ThrowsOnNullPredicateDefault(flp_type):
     source = flp_type([])
 
-    # EXPECTED TO FAIL for the same reason as test_ThrowsOnNullPredicate:
-    # the current implementation returns the supplied default instead of
-    # raising PredicateNoneError for None predicate on an empty source.
     with pytest.raises(PredicateNoneError):
         source.single_or_default(5, None)
