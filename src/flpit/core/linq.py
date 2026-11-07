@@ -257,6 +257,9 @@ class FlpIt[TItem](Iterable[TItem]):
 
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
         """Filters elements based on a predicate."""
+        if predicate is None:
+            raise PredicateNoneError()
+
         def _generator() -> Iterator[TItem]:
             for item in self:
                 if predicate(item):
@@ -617,8 +620,6 @@ class FlpIt[TItem](Iterable[TItem]):
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
         has_predicate = predicate is not _SENTINEL
-        if has_predicate and predicate is None:
-            raise PredicateNoneError()
         query = self.where(predicate) if has_predicate else self
         it = iter(query)
 
