@@ -381,8 +381,13 @@ Key features:
 - **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation, cancellation callbacks, timeouts, and linked cancellation tokens.
 - **Resource management:** Configure worker capacity and pending background-work limits, handle queue saturation explicitly, and shut down the process-wide runtime with an observable shutdown report.
+- **Asyncio interoperability:** FlpIt Tasks can be awaited directly inside asyncio coroutines when Task.asyncio_interop is enabled. 
+  - This is disabled by default. 
+  - Enabling it adds runtime-detection overhead to every pending await.
+    - await in flpit runtime: 200ish nano sec (just loop detection)
+    - await in asyncio loop: 
 
-The runtime starts lazily and manages its own lifecycle. It is deliberately not an `asyncio` compatibility layer; cancellation of running synchronous functions is cooperative.
+The runtime starts lazily and manages its own lifecycle. Cancellation of running synchronous functions is cooperative.
 
 See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/examples/task) for usage examples.
 
@@ -403,25 +408,37 @@ Distributed under the MIT License. See `LICENSE` for more information.
 > Note: The test cases exercise both core types, `FlpIt` and `FlpList`, with transitions between lazy and eager execution occurring as part of the individual test cases.
 
 ```
-================================================================
-| Test Module File                               |  Test Cases |
-----------------------------------------------------------------
-| tests/nettests/                                |             |
-| ├── test_all.py                                |          80 |
-| ├── test_any.py                                |          90 |
-| ├── test_average.py                            |         572 |
-| ├── test_concat.py                             |          64 |
-| ├── test_count.py                              |          37 |
-| ├── test_generic_list.py                       |          95 |
-| ├── test_last.py                               |          29 |
-| ├── test_order_by.py                           |         100 |
-| ├── test_order_descending_by.py                |          45 |
-| ├── test_skip.py                               |          75 |
-| ├── test_sum.py                                |         134 |
-| ├── test_take.py                               |          39 |
-| ├── test_then_by.py                            |          40 |
-| └── test_then_descending_by.py                 |          34 |
-----------------------------------------------------------------
-| GRAND TOTALS                                   |        1434 |
-================================================================
+================================================================================
+| Test Module File                                               |  Test Cases |
+--------------------------------------------------------------------------------
+| tests/nettests/                                                |             |
+| ├── linq/                                                      |             |
+| │   ├── test_all.py                                            |          80 |
+| │   ├── test_any.py                                            |          90 |
+| │   ├── test_average.py                                        |         572 |
+| │   ├── test_concat.py                                         |          64 |
+| │   ├── test_count.py                                          |          37 |
+| │   ├── test_first.py                                          |          29 |
+| │   ├── test_first_or_default.py                               |          50 |
+| │   ├── test_generic_list.py                                   |          95 |
+| │   ├── test_last.py                                           |          29 |
+| │   ├── test_order_by.py                                       |          98 |
+| │   ├── test_order_descending_by.py                            |          45 |
+| │   ├── test_single.py                                         |          34 |
+| │   ├── test_single_or_default.py                              |          48 |
+| │   ├── test_skip.py                                           |          75 |
+| │   ├── test_sum.py                                            |         134 |
+| │   ├── test_take.py                                           |          39 |
+| │   ├── test_then_by.py                                        |          40 |
+| │   ├── test_then_descending_by.py                             |          34 |
+| │   └── test_where.py                                          |          76 |
+| └── task/                                                      |             |
+|     ├── test_cancellation.py                                   |          69 |
+|     ├── test_task_completion_source.py                         |          26 |
+|     ├── test_task_factory.py                                   |           3 |
+|     ├── test_task_rt.py                                        |          12 |
+|     └── test_task_rt_core.py                                   |          22 |
+--------------------------------------------------------------------------------
+| GRAND TOTALS                                                   |        1801 |
+================================================================================
 ```

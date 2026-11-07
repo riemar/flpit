@@ -1,6 +1,6 @@
 """Task: a small asyncio-free task/awaitable runtime.
 
-This is a deliberately small runtime, not an asyncio compatibility layer.
+Although it's asyncio free, it can cooperate / co-exist with asyncio.
 
 Public API
 ----------
