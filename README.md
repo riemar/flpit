@@ -425,8 +425,10 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_last.py                                           |          29 |
-| │   ├── test_order_by.py                                       |          98 |
+| │   ├── test_order_by.py                                       |          99 |
 | │   ├── test_order_descending_by.py                            |          45 |
+| │   ├── test_select.py                                         |         140 |
+| │   ├── test_select_many.py                                    |          85 |
 | │   ├── test_single.py                                         |          34 |
 | │   ├── test_single_or_default.py                              |          48 |
 | │   ├── test_skip.py                                           |          75 |
@@ -442,6 +444,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        1801 |
+| GRAND TOTALS                                                   |        2027 |
 ================================================================================
 ```

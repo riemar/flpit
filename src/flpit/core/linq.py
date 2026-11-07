@@ -282,6 +282,9 @@ class FlpIt[TItem](Iterable[TItem]):
             self, selector: Callable[[TItem], Iterable[TResult]]
     ) -> FlpIt[TResult]:
         """Flattens sequence projections."""
+        if selector is None:
+            raise SelectorNoneError()
+
         def _generator() -> Iterator[TResult]:
             for item in self:
                 yield from selector(item)
