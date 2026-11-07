@@ -1,5 +1,8 @@
 # FlpIt
 
+**[🌐 View on GitHub](https://github.com/riemar/flpit)** | [📦 View on PyPI](https://pypi.org/project/flpit/)
+
+
 > **Fluent LINQ for Python — LINQ semantics, Python-native execution**
 
 `FlpIt` brings a strongly typed, LINQ-style API to standard Python iterables. It combines the fluent query model and semantics of .NET LINQ with Python's native iterable and generator model.
