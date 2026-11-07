@@ -78,10 +78,11 @@ class ReadmeRuntimeTablePlugin:
 
         # --- Table 2: Successful Test Cases, grouped by subfolder ---
         width = 80
+        tree_width = 62
         output.append("=" * width)
         output.append(f"{'| Test Module File':<64} | {'Test Cases':>11} |")
         output.append("-" * width)
-        output.append(f"{'| tests/nettests/':<64} | {'':>11} |")
+        output.append(f"| {'tests/nettests/':<{tree_width}} | {'':>11} |")
 
         files_by_parent = defaultdict(list)
         for full_path in self.totals:
@@ -94,8 +95,11 @@ class ReadmeRuntimeTablePlugin:
             is_last_group = group_index == len(parent_groups) - 1
             group_branch = "└──" if is_last_group else "├──"
 
-            if parent != ".":
-                output.append(f"| {group_branch} {parent}/".ljust(66) + f" | {'':>11} |")
+            if parent == ".":
+                prefix = ""
+            else:
+                prefix = "    " if is_last_group else "│   "
+                output.append(f"| {group_branch} {parent}/".ljust(tree_width + 2) + f" | {'':>11} |")
 
             files = sorted(files_by_parent[parent])
             for file_index, (filename, full_path) in enumerate(files):
@@ -104,11 +108,11 @@ class ReadmeRuntimeTablePlugin:
 
                 is_last_file = file_index == len(files) - 1
                 file_branch = "└──" if is_last_file else "├──"
-                prefix = "    " if parent != "." else ""
-                output.append(f"| {prefix}{file_branch} {filename:<56} | {passed_cases:>11} |")
+                tree_entry = f"{prefix}{file_branch} {filename}"
+                output.append(f"| {tree_entry:<{tree_width}} | {passed_cases:>11} |")
 
         output.append("-" * width)
-        output.append(f"| {'GRAND TOTALS':<62} | {grand_passed:>11} |")
+        output.append(f"| {'GRAND TOTALS':<{tree_width}} | {grand_passed:>11} |")
         output.append("=" * width)
 
         print("\n" + "\n".join(output) + "\n")
