@@ -8,7 +8,7 @@ from flpit import flp
 from flpit.core.linq import (
     FlpIt,
     FlpList,
-    Grouping,
+    # Grouping,
     OrderedIt,
 
     #====================
@@ -36,6 +36,8 @@ from flpit.core.linq import (
     ArgumentNonNegError,
     ArgumentOutOfBoundsError
 )
+
+from flpit.core._grouping import Grouping
 
 __all__ = [
     "flp",
