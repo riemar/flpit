@@ -370,6 +370,9 @@ class FlpIt[TItem](Iterable[TItem]):
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[TItem]:
         """Returns distinct elements from a sequence according to a key selector function."""
+        if key_selector is None:
+            raise SelectorNoneError()
+
         def _generator() -> Iterator[TItem]:
             seen: Set[TKey] = set()
             for item in self:

@@ -419,12 +419,13 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_average.py                                        |         572 |
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_count.py                                          |          37 |
+| │   ├── test_distinct.py                                       |          85 |
 | │   ├── test_element_at.py                                     |          43 |
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_last.py                                           |          29 |
-| │   ├── test_order_by.py                                       |          99 |
+| │   ├── test_order_by.py                                       |          98 |
 | │   ├── test_order_descending_by.py                            |          45 |
 | │   ├── test_select.py                                         |         140 |
 | │   ├── test_select_many.py                                    |          85 |
@@ -443,6 +444,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2112 |
+| GRAND TOTALS                                                   |        2196 |
 ================================================================================
 ```
