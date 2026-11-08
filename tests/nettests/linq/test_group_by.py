@@ -30,6 +30,7 @@ Skip reasons (the first missing feature wins when several are missing):
 from dataclasses import dataclass
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -37,7 +38,7 @@ from flpit import (
     flp,
     ArgumentOutOfRangeError,
     SourceNoneError,
-    SelectorNoneError,
+    SelectorNoneError, FlpIt,
 )
 
 _SKIP_ELEMENT = pytest.mark.skip("element selector not implemented yet")
@@ -175,7 +176,6 @@ def test_Grouping_IList_NotSupported():
     pass
 
 
-@pytest.mark.skip("Grouping indexer not implemented yet")
 def test_Grouping_IList_IndexerGetter():
     odds_evens = flp.it([1, 2, 3, 4]).group_by(lambda i: i % 2 == 0)
 
@@ -189,18 +189,23 @@ def test_Grouping_IList_IndexerGetter():
     assert evens[1] == 4
 
 
-@pytest.mark.skip("Grouping indexer not implemented yet")
 def test_Grouping_IList_IndexGetterOutOfRange():
-    odds_evens = flp.it([1, 2, 3, 4]).group_by(lambda i: i % 2 == 0)
+    odds_evens: FlpIt[Any] = flp.it([1, 2, 3, 4]).group_by(lambda i: i % 2 == 0)
 
     e = iter(odds_evens)
     odds = next(e)
 
-    # Python negative indices conflict with .NET's ArgumentOutOfRangeException("index").
-    with pytest.raises(ArgumentOutOfRangeError):
-        odds[-1]
-    with pytest.raises(ArgumentOutOfRangeError):
-        odds[23]
+    # .NET indexing doesn't support negative
+    # with pytest.raises(ArgumentOutOfRangeError):
+    #     odds[-1]
+
+    # as we are using Python native subscription notation, it's supported
+    assert odds[-1] == 3
+
+    # .NET would raise via it's indexing ArgumentOutOfRangeError
+    # we are using python native indexing... thus IndexError
+    with pytest.raises(IndexError):
+        _ = odds[23]
 
 
 def test_Grouping_ICollection_Contains(flp_type):
