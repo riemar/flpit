@@ -441,6 +441,9 @@ class FlpIt[TItem](Iterable[TItem]):
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[Grouping[TKey, TItem]]:
         """Groups elements according to a specified key selector function."""
+        if key_selector is None:
+            raise SelectorNoneError()
+
         def _generator() -> Iterator[Grouping[TKey, TItem]]:
             groups: dict[TKey, List[TItem]] = {}
             for item in self:

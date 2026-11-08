@@ -424,6 +424,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_generic_list.py                                   |          95 |
+| │   ├── test_group_by.py                                       |          21 |
 | │   ├── test_last.py                                           |          29 |
 | │   ├── test_order_by.py                                       |          98 |
 | │   ├── test_order_descending_by.py                            |          45 |
@@ -444,6 +445,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2196 |
+| GRAND TOTALS                                                   |        2217 |
 ================================================================================
 ```
