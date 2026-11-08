@@ -413,11 +413,13 @@ Distributed under the MIT License. See `LICENSE` for more information.
 --------------------------------------------------------------------------------
 | tests/nettests/                                                |             |
 | ├── linq/                                                      |             |
+| │   ├── test_aggregate.py                                      |          42 |
 | │   ├── test_all.py                                            |          80 |
 | │   ├── test_any.py                                            |          90 |
 | │   ├── test_average.py                                        |         572 |
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_count.py                                          |          37 |
+| │   ├── test_element_at.py                                     |          43 |
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_generic_list.py                                   |          95 |
@@ -441,6 +443,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2027 |
+| GRAND TOTALS                                                   |        2112 |
 ================================================================================
 ```
