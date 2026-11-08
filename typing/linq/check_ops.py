@@ -88,6 +88,8 @@ assert_type(QUERY.first_or_default("missing"), Record | str)
 assert_type(QUERY.first_or_default("missing", lambda item: item.record_id == 999), Record | str)
 assert_type(QUERY.single(lambda item: item.record_id == 1), Record)
 assert_type(QUERY.to_list(), FlpList[Record])
+assert_type(QUERY.to_dictionary(lambda item: item.record_id), dict[int, Record])
+assert_type(QUERY.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])
 
 
 # ============================================================================
@@ -132,6 +134,8 @@ assert_type(CONTAINER.last(lambda item: item.active), Record)
 assert_type(CONTAINER.first_or_default("missing"), Record | str)
 assert_type(CONTAINER.single(lambda item: item.record_id == 1), Record)
 assert_type(CONTAINER.to_list(), FlpList[Record])
+assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])
+assert_type(CONTAINER.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])
 
 # FlpList-specific collection operators and mutation signatures.
 MUTABLE: FlpList[Record] = flp.lst([RECORD, INACTIVE_RECORD])
