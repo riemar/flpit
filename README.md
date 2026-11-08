@@ -11,17 +11,14 @@
 > Where Python's language or type system requires a different API contract, the contract is adapted accordingly. 
 > The implementation is actively developed, and semantic deviations may still exist.
 
-> **⚠️ Breaking Change — `FlpList` — v0.2.0**
->
-> `FlpList` no longer derives from `collections.UserList`.
->
-> **Retained:** Python collection behavior such as iteration, `len()`, `in`, indexing, and slicing.
->
-> **LINQ:** `append()`, `concat()`, and other LINQ operations remain available with lazy semantics.
->
-> **`List<T>` semantics:** `add()`, `add_range()`, and other mutating operations follow the `List<T>` API where applicable.
->
-> **Removed:** `copy()`, `+`, `*`, and other `UserList`-specific operations that are not part of the `FlpList` API.
+## Familiar LINQ, Now in Python
+
+FlpIt is a Python implementation of the popular .NET Language Integrated Query (LINQ), adapted to Python.
+
+If you know C# LINQ, you already know most of FlpIt. Existing LINQ examples, query patterns, and documentation can generally be translated directly.
+FlpIt aims to make its implemented LINQ operators behave like their corresponding .NET `System.Linq.Enumerable` counterparts.
+
+This makes the extensive .NET LINQ ecosystem a valuable reference for developers and AI coding assistants alike.
 
 ## ⚡ Key Features
 

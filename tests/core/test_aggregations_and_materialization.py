@@ -41,7 +41,7 @@ class TestAggregationsAndMaterialization:
         assert FlpIt([1, 2, 3, 4]).aggregate(lambda acc, x: acc + x) == 10
         
         # With seed: initial 10 + sum([1, 2, 3]) -> 16
-        assert FlpIt([1, 2, 3]).aggregate(lambda acc, x: acc + x, seed=10) == 16
+        assert FlpIt([1, 2, 3]).aggregate(10, lambda acc, x: acc + x) == 16
 
     def test_min_max_and_by_variants(self):
         items = [{"val": 10}, {"val": 30}, {"val": 20}]

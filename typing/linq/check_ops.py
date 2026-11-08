@@ -66,7 +66,8 @@ assert_type(QUERY.group_by(lambda item: item.department), FlpIt[Grouping[str, Re
 
 # Aggregation / terminal operators.
 assert_type(NUMBERS.aggregate(lambda total, value: total + value), int)
-assert_type(QUERY.aggregate(lambda total, item: total + item.record_id, 0), int)
+assert_type(QUERY.aggregate(0, lambda total, item: total + item.record_id), int)
+assert_type(QUERY.aggregate(0, lambda total, item: total + item.record_id, lambda total: str(total)), str)
 assert_type(QUERY.last(), Record)
 assert_type(QUERY.last(lambda item: item.active), Record)
 assert_type(NUMBERS.min(), int)
@@ -114,7 +115,7 @@ assert_type(CONTAINER.chunk(2), FlpIt[FlpList[Record]])
 assert_type(CONTAINER.order_by(lambda item: item.name), OrderedIt[Record])
 assert_type(CONTAINER.order_by_descending(lambda item: item.record_id), OrderedIt[Record])
 assert_type(CONTAINER.group_by(lambda item: item.department), FlpIt[Grouping[str, Record]])
-assert_type(CONTAINER.aggregate(lambda total, item: total + item.record_id, 0), int)
+assert_type(CONTAINER.aggregate(0, lambda total, item: total + item.record_id), int)
 assert_type(CONTAINER.min(), Record)
 assert_type(CONTAINER.min_by(lambda item: item.record_id), Record)
 assert_type(CONTAINER.max(), Record)

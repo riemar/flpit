@@ -97,7 +97,7 @@ def test_flplist_aggregate_without_seed() -> None:
 
 
 def test_flplist_aggregate_with_seed() -> None:
-    assert FlpList([1, 2, 3]).aggregate(lambda a, b: a + b, 10) == 16
+    assert FlpList([1, 2, 3]).aggregate(10, lambda a, b: a + b) == 16
 
 
 def test_flplist_aggregate_empty_without_seed_raises() -> None:

@@ -87,11 +87,11 @@ def test_aggregate_without_seed_reduces_from_first_element() -> None:
 
 
 def test_aggregate_with_seed_uses_seed_even_for_empty_source() -> None:
-    assert flp.it([]).aggregate(lambda a, b: a + b, 10) == 10
+    assert flp.it([]).aggregate(10, lambda a, b: a + b) == 10
 
 
 def test_aggregate_with_seed_applies_function_left_to_right() -> None:
-    assert flp.it([1, 2, 3]).aggregate(lambda a, b: a * 10 + b, 0) == 123
+    assert flp.it([1, 2, 3]).aggregate(0, lambda a, b: a * 10 + b) == 123
 
 
 def test_aggregate_without_seed_on_empty_raises() -> None:

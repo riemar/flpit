@@ -100,6 +100,14 @@ class SecondNoneError(ArgumentNullError):
     def __init__(self):
         super().__init__("second")
 
+class FuncNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("func")
+
+class ResultSelectorNoneError(ArgumentNullError):
+    def __init__(self):
+        super().__init__("resultSelector")
+
 class ArgumentOutOfRangeError(ArgumentError):
     def __init__(self, argument: str, pattern:str="Index was out of range. Must be non-negative and less than the size of the collection."):
         super().__init__(f"{pattern} (Parameter '{argument}')")
@@ -443,31 +451,66 @@ class FlpIt[TItem](Iterable[TItem]):
     # --- Immediate Execution (Materialization & Aggregation) ---
 
     @overload
-    def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
+    def aggregate(self, func: Callable[[TItem, TItem], TItem], /) -> TItem: ...
 
     @overload
     def aggregate(
-            self, func: Callable[[TAccumulate, TItem], TAccumulate], seed: TAccumulate
+            self, seed: TAccumulate, func: Callable[[TAccumulate, TItem], TAccumulate], /
     ) -> TAccumulate: ...
 
-    def aggregate(
+    @overload
+    def aggregate[TAcc, TResult](
             self,
-            func: Callable[[Any, Any], Any],
-            seed: Any = _SENTINEL,
-    ) -> TItem | TAccumulate:
-        """Applies an accumulator function over a sequence."""
+            seed: TAcc,
+            func: Callable[[TAcc, TItem], TAcc],
+            result_selector: Callable[[TAcc], TResult],
+            /,
+    ) -> TResult: ...
+
+    def aggregate(self, *args: Any) -> Any:
+        """Applies an accumulator function over a sequence.
+
+        aggregate(func)                         first element is the seed; raises
+                                                EmptySequenceError for an empty source
+        aggregate(seed, func)                   seed is the initial accumulator
+        aggregate(seed, func, result_selector)  result_selector is applied to the
+                                                final accumulator value
+        """
+        if len(args) == 1:
+            (func,) = args
+            has_seed = False
+            seed = None
+            result_selector = _SENTINEL
+        elif len(args) == 2:
+            seed, func = args
+            has_seed = True
+            result_selector = _SENTINEL
+        elif len(args) == 3:
+            seed, func, result_selector = args
+            has_seed = True
+        else:
+            raise TypeError(
+                f"aggregate() takes from 1 to 3 positional arguments but {len(args)} were given"
+            )
+
+        if func is None:
+            raise FuncNoneError()
+        if result_selector is None:
+            raise ResultSelectorNoneError()
+
         it = iter(self)
-        if seed is _SENTINEL:
+        if has_seed:
+            accumulator = seed
+        else:
             try:
                 accumulator = next(it)
             except StopIteration:
                 raise EmptySequenceError()
-            for item in it:
-                accumulator = func(accumulator, item)
-        else:
-            accumulator = seed
-            for item in it:
-                accumulator = func(accumulator, item)
+        for item in it:
+            accumulator = func(accumulator, item)
+
+        if result_selector is not _SENTINEL:
+            return result_selector(accumulator)
         return accumulator
 
     @overload
@@ -1130,19 +1173,24 @@ class FlpList[TItem](Collection[TItem]):
         return FlpIt(self.__list.data).group_by(key_selector)
 
     @overload
-    def aggregate(self, func: Callable[[TItem, TItem], TItem]) -> TItem: ...
+    def aggregate(self, func: Callable[[TItem, TItem], TItem], /) -> TItem: ...
 
     @overload
     def aggregate(
-            self, func: Callable[[TAccumulate, TItem], TAccumulate], seed: TAccumulate
+            self, seed: TAccumulate, func: Callable[[TAccumulate, TItem], TAccumulate], /
     ) -> TAccumulate: ...
 
-    def aggregate(
+    @overload
+    def aggregate[TAcc, TResult](
             self,
-            func: Callable[[Any, Any], Any],
-            seed: Any = _SENTINEL,
-    ) -> TItem | TAccumulate:
-        return FlpIt(self.__list.data).aggregate(func, seed=seed)
+            seed: TAcc,
+            func: Callable[[TAcc, TItem], TAcc],
+            result_selector: Callable[[TAcc], TResult],
+            /,
+    ) -> TResult: ...
+
+    def aggregate(self, *args: Any) -> Any:
+        return FlpIt(self.__list.data).aggregate(*args)
 
     @_guard_empty
     def min(self) -> TItem:

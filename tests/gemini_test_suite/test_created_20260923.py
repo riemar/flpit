@@ -287,8 +287,8 @@ class TestFlpItAggregations:
         assert FlpIt(["a", "b", "c"]).aggregate(lambda acc, x: acc + "," + x) == "a,b,c"
 
     def test_aggregate_with_seed(self):
-        assert FlpIt([1, 2, 3]).aggregate(lambda acc, x: acc + x, seed=10) == 16
-        assert FlpIt([]).aggregate(lambda acc, x: acc + x, seed=100) == 100
+        assert FlpIt([1, 2, 3]).aggregate(10, lambda acc, x: acc + x) == 16
+        assert FlpIt([]).aggregate(100, lambda acc, x: acc + x) == 100
 
     def test_aggregate_empty_no_seed_raises(self):
         with pytest.raises(EmptySequenceError):

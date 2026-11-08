@@ -325,16 +325,16 @@ def test_aggregate():
     assert numbers.aggregate(lambda acc, x: acc + x) == 10
 
     # Accumulation with seed
-    assert numbers.aggregate(lambda acc, x: acc * x, seed=10) == 240
+    assert numbers.aggregate(10, lambda acc, x: acc * x) == 240
 
     # Custom accumulation type
-    assert numbers.aggregate(lambda acc, x: f"{acc}-{x}", seed="start") == "start-1-2-3-4"
+    assert numbers.aggregate("start", lambda acc, x: f"{acc}-{x}") == "start-1-2-3-4"
 
     empty = FlpList([])
     with pytest.raises(ValueError, match="Sequence contains no elements"):
         empty.aggregate(lambda acc, x: acc + x)
 
-    assert empty.aggregate(lambda acc, x: acc + x, seed=42) == 42
+    assert empty.aggregate(42, lambda acc, x: acc + x) == 42
 
 
 def test_zip():

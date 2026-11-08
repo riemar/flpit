@@ -30,6 +30,8 @@ from flpit.core.linq import (
     CollectionNoneError,
     SelectorNoneError,
     SecondNoneError,
+    FuncNoneError,
+    ResultSelectorNoneError,
     ArgumentOutOfRangeError,
     ArgumentNonNegError,
     ArgumentOutOfBoundsError
@@ -55,6 +57,8 @@ __all__ = [
     "CollectionNoneError",
     "SelectorNoneError",
     "SecondNoneError",
+    "FuncNoneError",
+    "ResultSelectorNoneError",
     "ArgumentOutOfRangeError",
     "ArgumentNonNegError",
     "ArgumentOutOfBoundsError",
