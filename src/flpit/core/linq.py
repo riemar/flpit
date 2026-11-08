@@ -701,6 +701,40 @@ class FlpIt[TItem](Iterable[TItem]):
         except (EmptySequenceError, NoMatchError):
             return default
 
+    @overload
+    def to_dictionary[TKey](
+            self, key_selector: Callable[[TItem], TKey], /
+    ) -> dict[TKey, TItem]: ...
+
+    @overload
+    def to_dictionary[TKey, TValue](
+            self,
+            key_selector: Callable[[TItem], TKey],
+            element_selector: Callable[[TItem], TValue],
+            /,
+    ) -> dict[TKey, TValue]: ...
+
+    def to_dictionary(
+            self,
+            key_selector: Callable[[TItem], Any],
+            element_selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL,
+    ) -> dict[Any, Any]:
+        """Materializes the sequence as a dictionary using the selected key and optional value."""
+        if key_selector is None:
+            raise SelectorNoneError()
+        if element_selector is None:
+            raise SelectorNoneError()
+
+        result: dict[Any, Any] = {}
+        for item in self:
+            key = key_selector(item)
+            if key in result:
+                raise ValueError(f"An item with the same key has already been added. Key: {key!r}")
+            value = item if element_selector is _SENTINEL else element_selector(item)
+            result[key] = value
+
+        return result
+
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
         return FlpList[TItem](self)
@@ -1276,6 +1310,29 @@ class FlpList[TItem](Collection[TItem]):
     ) -> TItem | TResult:
         return FlpIt(self.__list.data).single_or_default(default, predicate)
 
+    @overload
+    def to_dictionary[TKey](
+            self, key_selector: Callable[[TItem], TKey], /
+    ) -> dict[TKey, TItem]: ...
+
+    @overload
+    def to_dictionary[TKey, TValue](
+            self,
+            key_selector: Callable[[TItem], TKey],
+            element_selector: Callable[[TItem], TValue],
+            /,
+    ) -> dict[TKey, TValue]: ...
+
+    def to_dictionary(
+            self,
+            key_selector: Callable[[TItem], Any],
+            element_selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL,
+    ) -> dict[Any, Any]:
+        return FlpIt(self.__list.data).to_dictionary(key_selector, element_selector)
+
+    def to_list(self) -> FlpList[TItem]:
+        """Explicitly returns a shallow copy instance to isolate mutations."""
+        return FlpList(self.__list.data.copy())
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
         return FlpList(self.__list.data.copy())
