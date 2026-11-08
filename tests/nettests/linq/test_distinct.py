@@ -325,10 +325,9 @@ def test_DistinctBy_KeySelectorNull_ThrowsArgumentNullException(flp_type):
     with pytest.raises(SelectorNoneError):
         flp_type(source).distinct_by(key_selector)
 
-    # The comparer overload does not exist yet; this call is never reached
-    # because the constructor already raised.
-    with pytest.raises(SelectorNoneError):
-        flp_type(source).distinct_by(key_selector, _ANAGRAM_COMPARER)
+    # comparer overload doesn't exist yet. it might ever exist as this isn't actually a thing in Python
+    # with pytest.raises(SelectorNoneError):
+    #     flp_type(source).distinct_by(key_selector, _ANAGRAM_COMPARER)
 
 
 _DISTINCT_BY_TEST_DATA = [
