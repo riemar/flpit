@@ -672,6 +672,15 @@ class FlpIt[TItem](Iterable[TItem]):
         except (EmptySequenceError, NoMatchError):
             return default
 
+    def last_or_default[TResult](
+            self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
+    ) -> TItem | TResult:
+        """Returns the last element matching a predicate, or a default value."""
+        try:
+            return self.last(predicate)
+        except (EmptySequenceError, NoMatchError):
+            return default
+
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
         has_predicate = predicate is not _SENTINEL
@@ -1299,6 +1308,14 @@ class FlpList[TItem](Collection[TItem]):
             self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
     ) -> TItem | TResult:
         return FlpIt(self.__list.data).first_or_default(default, predicate)
+
+    def last_or_default[TResult](
+            self, default: TResult, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL
+    ) -> TItem | TResult:
+        try:
+            return self.last(predicate)
+        except (EmptySequenceError, NoMatchError):
+            return default
 
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         return FlpIt(self.__list.data).single(predicate)
