@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 import builtins
 from collections import UserList
 from functools import wraps
-from itertools import islice
+from itertools import islice, chain
 
 from typing import (
     Any,
@@ -167,6 +167,46 @@ class _FactoryIterable[TItem](Iterable[TItem]):
         return self._factory()
 
 
+# Exact builtin types whose iter() has no side effects and no failure mode, so
+# calling it eagerly is indistinguishable from calling it on the first next().
+_PURE_ITER_TYPES = (list, tuple, range)
+
+
+def _is_pure(source: object) -> bool:
+    return type(source) in _PURE_ITER_TYPES or getattr(source, "_pure", False) is True
+
+
+class _WhereIterable[TItem](Iterable[TItem]):
+    """Deferred filter node with independent iteration state."""
+    __slots__ = ("_source", "_predicate", "_pure")
+
+    def __init__(self, source: Iterable[TItem], predicate: Callable[[TItem], bool]) -> None:
+        self._source = source
+        self._predicate = predicate
+        self._pure = _is_pure(source)
+
+    def __iter__(self) -> Iterator[TItem]:
+        if self._pure:  # whole chain bottoms out in a list/tuple/range: no wrapper needed
+            return filter(self._predicate, iter(self._source))  # type: ignore[arg-type]
+        # chain.from_iterable defers iter(source) to the first next(), like a generator would.
+        return filter(self._predicate, chain.from_iterable((self._source,)))  # type: ignore[arg-type]
+
+
+class _SelectIterable[TItem, TResult](Iterable[TResult]):
+    """Deferred projection node with independent iteration state."""
+    __slots__ = ("_source", "_selector", "_pure")
+
+    def __init__(self, source: Iterable[TItem], selector: Callable[[TItem], TResult]) -> None:
+        self._source = source
+        self._selector = selector
+        self._pure = _is_pure(source)
+
+    def __iter__(self) -> Iterator[TResult]:
+        if self._pure:
+            return map(self._selector, iter(self._source))  # type: ignore[arg-type]
+        return map(self._selector, chain.from_iterable((self._source,)))  # type: ignore[arg-type]
+
+
 class FlpIt[TItem](Iterable[TItem]):
     """
     | Fluent Iterable
@@ -263,28 +303,21 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def _node_source(self) -> Iterable[TItem]:
+        """Return the upstream iterable, preserving subclasses that customize iteration."""
+        return self._iterable if type(self) is FlpIt else self
+
     def where(self, predicate: Callable[[TItem], bool]) -> FlpIt[TItem]:
-        """Filters elements based on a predicate."""
+        """Filters elements based on a predicate (deferred)."""
         if predicate is None:
             raise PredicateNoneError()
-
-        def _generator() -> Iterator[TItem]:
-            for item in self:
-                if predicate(item):
-                    yield item
-        # return typing_cast(FlpIt[TItem], FlpIt[TItem](_FactoryIterable(_generator)))
-        return FlpIt[TItem](_FactoryIterable(_generator))
+        return FlpIt[TItem](_WhereIterable(self._node_source(), predicate))
 
     def select[TResult](self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
-        """Projects each element into a new form."""
+        """Projects each element into a new form (deferred)."""
         if selector is None:
             raise SelectorNoneError()
-
-        def _generator() -> Iterator[TResult]:
-            for item in self:
-                yield selector(item)
-
-        return FlpIt(_FactoryIterable(_generator))
+        return FlpIt(_SelectIterable(self._node_source(), selector))
 
     def select_many[TResult](
             self, selector: Callable[[TItem], Iterable[TResult]]
