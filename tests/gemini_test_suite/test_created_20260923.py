@@ -268,7 +268,7 @@ class TestFlpItDeferredOperations:
 
     @pytest.mark.parametrize("invalid_size", [0, -1, -100])
     def test_chunk_invalid_size_raises_value_error(self, invalid_size: int):
-        with pytest.raises(ValueError, match="Chunk size must be greater than 0."):
+        with pytest.raises(ArgumentOutOfRangeError):
             FlpIt([1, 2, 3]).chunk(invalid_size)
 
     def test_as_type_identity(self):

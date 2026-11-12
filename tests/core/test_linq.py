@@ -366,10 +366,10 @@ def test_chunk():
     # Verify inner structures are FlpList
     assert isinstance(chunks[0], FlpList)
 
-    with pytest.raises(ValueError, match="Chunk size must be greater than 0"):
+    with pytest.raises(ArgumentOutOfRangeError):
         data.chunk(0)
 
-    with pytest.raises(ValueError, match="Chunk size must be greater than 0"):
+    with pytest.raises(ArgumentOutOfRangeError):
         data.chunk(-1)
 
 

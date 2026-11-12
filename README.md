@@ -439,7 +439,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_take.py                                           |          39 |
 | │   ├── test_then_by.py                                        |          40 |
 | │   ├── test_then_descending_by.py                             |          34 |
-| │   └── test_where.py                                          |          76 |
+| │   ├── test_where.py                                          |          76 |
+| │   └── test_zip.py                                            |         101 |
 | └── task/                                                      |             |
 |     ├── test_cancellation.py                                   |          69 |
 |     ├── test_task_completion_source.py                         |          26 |
@@ -447,6 +448,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2289 |
+| GRAND TOTALS                                                   |        2390 |
 ================================================================================
 ```

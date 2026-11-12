@@ -4,6 +4,9 @@ Fluent LINQ for Python — flip your iterables.
 from importlib.metadata import version
 __version__ = version("flpit")
 
+# noinspection protected-member
+from flpit.core._zip import ZipTuple
+
 from flpit import flp
 from flpit.core.linq import (
     FlpIt,
@@ -34,7 +37,7 @@ from flpit.core.linq import (
     ResultSelectorNoneError,
     ArgumentOutOfRangeError,
     ArgumentNonNegError,
-    ArgumentOutOfBoundsError
+    ArgumentOutOfBoundsError,
 )
 
 from flpit.core._grouping import Grouping
@@ -64,5 +67,7 @@ __all__ = [
     "ArgumentOutOfRangeError",
     "ArgumentNonNegError",
     "ArgumentOutOfBoundsError",
+
+    "ZipTuple",
 ]
 

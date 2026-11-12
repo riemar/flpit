@@ -33,6 +33,7 @@ from typing import (
 )
 
 from flpit.json import JsonConvert, JsonSerializerOptions
+from flpit import ZipTuple
 
 TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
@@ -417,7 +418,7 @@ class FlpIt[TItem](Iterable[TItem]):
         return FlpIt(_FactoryIterable(_generator))
 
     @overload
-    def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
+    def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
 
     @overload
     def zip[TResult, TOther](
@@ -432,12 +433,18 @@ class FlpIt[TItem](Iterable[TItem]):
             result_selector: Callable[[TItem, TOther], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         """Applies a specified function to corresponding elements of two sequences."""
+        if second is None:
+            raise SecondNoneError()
+
+        if result_selector is None:
+            raise ResultSelectorNoneError()
+
         def _generator() -> Iterator[Any]:
             for first_item, second_item in zip(self, second):
                 if result_selector is not _SENTINEL:
                     yield result_selector(first_item, second_item)
                 else:
-                    yield first_item, second_item
+                    yield ZipTuple(first_item, second_item)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1196,7 +1203,7 @@ class FlpList[TItem](Collection[TItem]):
         return FlpIt(self.__list.data).distinct_by(key_selector)
 
     @overload
-    def zip(self, second: Iterable[TOther]) -> FlpIt[tuple[TItem, TOther]]: ...
+    def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
 
     @overload
     def zip[TResult, TOther](

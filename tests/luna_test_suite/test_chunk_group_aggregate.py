@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from flpit import flp, FlpList, Grouping, EmptySequenceError
+from flpit import flp, FlpList, Grouping, EmptySequenceError, ArgumentOutOfRangeError
 
 
 def test_chunk_splits_exact_multiple() -> None:
@@ -27,7 +27,7 @@ def test_chunk_empty_source_is_empty() -> None:
 
 @pytest.mark.parametrize("size", [0, -1, -10])
 def test_chunk_rejects_non_positive_sizes(size: int) -> None:
-    with pytest.raises(ValueError, match="greater than 0"):
+    with pytest.raises(ArgumentOutOfRangeError):
         flp.it([1, 2]).chunk(size)
 
 
