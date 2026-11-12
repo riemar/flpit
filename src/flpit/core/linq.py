@@ -444,7 +444,7 @@ class FlpIt[TItem](Iterable[TItem]):
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
         """Splits the elements of a sequence into chunks of size at most size."""
         if size <= 0:
-            raise ValueError("Chunk size must be greater than 0.")
+            raise ArgumentOutOfRangeError("Specified argument was out of the range of valid values. (Parameter 'size')")
 
         def _generator() -> Iterator[FlpList[TItem]]:
             current_chunk: List[TItem] = []

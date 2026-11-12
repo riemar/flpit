@@ -417,6 +417,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_all.py                                            |          80 |
 | │   ├── test_any.py                                            |          90 |
 | │   ├── test_average.py                                        |         572 |
+| │   ├── test_chunk.py                                          |          22 |
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_count.py                                          |          37 |
 | │   ├── test_distinct.py                                       |          87 |
@@ -426,7 +427,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_group_by.py                                       |          23 |
 | │   ├── test_last.py                                           |          29 |
-| │   ├── test_order_by.py                                       |          98 |
+| │   ├── test_last_or_default.py                                |          45 |
+| │   ├── test_order_by.py                                       |          99 |
 | │   ├── test_order_descending_by.py                            |          45 |
 | │   ├── test_select.py                                         |         140 |
 | │   ├── test_select_many.py                                    |          85 |
@@ -445,6 +447,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2221 |
+| GRAND TOTALS                                                   |        2289 |
 ================================================================================
 ```
