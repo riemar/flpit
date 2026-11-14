@@ -86,6 +86,13 @@ def test_duplicates_are_kept(flp_type):
 
     assert result == [(1, 2)] * 4
 
+def test_cros_join_equal_select_many(flp_type):
+    result = list(flp_type([1, 1]).cross_join([2, 2]))
+
+    assert result == [(1, 2)] * 4
+
+    sel_many_result = list(flp_type([1, 1]).select_many(lambda o: flp.it([2, 2]).select(lambda i: JoinTuple(o, i))))
+    assert sel_many_result == result
 
 def test_none_elements_are_ordinary_values(flp_type):
     result = list(flp_type([None, 1]).cross_join([None]))
