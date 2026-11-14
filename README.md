@@ -451,6 +451,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_all.py                                            |          80 |
 | │   ├── test_any.py                                            |          90 |
 | │   ├── test_average.py                                        |         572 |
+| │   ├── test_cast.py                                           |          45 |
 | │   ├── test_chunk.py                                          |          22 |
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_contains.py                                       |         108 |
@@ -489,6 +490,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        4733 |
+| GRAND TOTALS                                                   |        4778 |
 ================================================================================
 ```

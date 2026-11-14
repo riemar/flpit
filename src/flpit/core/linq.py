@@ -546,13 +546,21 @@ class FlpIt[TItem](Iterable[TItem]):
 
     def cast[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Casts elements to a specified type or raises TypeError if cast fails."""
+        _VALUE_TYPES = (int, float, bool, complex)
+
         def _generator() -> Iterator[TResult]:
             for item in self:
+                if item is None:
+                    if target_type in _VALUE_TYPES:
+                        raise AttributeError("Cannot unbox None to a non-nullable value type")
+                    yield item
+                    continue
+
                 if not isinstance(item, target_type):
                     raise TypeError(
                         f"Cannot cast element {item!r} of type {type(item).__name__} to {target_type.__name__}"
                     )
-                yield item  # type: ignore[misc]
+                yield item
 
         return FlpIt(_FactoryIterable(_generator))
 
