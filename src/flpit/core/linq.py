@@ -351,7 +351,7 @@ def _validate_join_args(
         inner_key_selector: Any,
         result_selector: Any,
 ) -> None:
-    """Eager argument validation shared by join / left_join / full_join (mirrors .NET)."""
+    """Eager argument validation shared by join / left_join / full_join / group_join (mirrors .NET)."""
     if inner is None:
         raise InnerNoneError()
     if outer_key_selector is None:
@@ -935,6 +935,60 @@ class FlpIt[TItem](Iterable[TItem]):
                         yield JoinTuple(outer_item, inner_item)
                     else:
                         yield result_selector(outer_item, inner_item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def group_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[Grouping[TItem, TInner]]: ...
+
+    @overload
+    def group_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, FlpList[TInner]], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def group_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, FlpList[TInner]], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        """
+        Group join (.NET ``GroupJoin``): correlates each outer element with the group of its matching inner elements.
+
+        Yields exactly one result per outer element, in outer order, so an outer element without a match
+        still appears, paired with an empty group. The group holds the matching inner elements in inner order
+        and can be enumerated repeatedly. Without a result selector a ``Grouping`` is yielded, whose ``key`` is
+        the outer element and whose items are its matching inner elements; with one,
+        ``result_selector(outer, group)`` is yielded with ``group`` being a ``FlpList`` of the matches.
+        Elements whose key is ``None`` never match (an outer element with a ``None`` key gets an empty group).
+
+        Arguments are validated eagerly. The outer sequence is streamed; like .NET, ``inner`` is buffered
+        into a hash lookup (O(N + M)) only once the outer sequence yields its first element, so an empty outer
+        sequence never enumerates ``inner``.
+        """
+        _validate_join_args(inner, outer_key_selector, inner_key_selector, result_selector)
+
+        def _generator() -> Iterator[Any]:
+            lookup: dict[Any, list[TInner]] | None = None
+            for outer_item in self:
+                if lookup is None:
+                    lookup = _build_lookup(inner, inner_key_selector)
+                key = outer_key_selector(outer_item)
+                matches = () if key is None else lookup.get(key, ())
+                if result_selector is _SENTINEL:
+                    yield Grouping(outer_item, matches)
+                else:
+                    yield result_selector(outer_item, FlpList(matches))
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1852,6 +1906,32 @@ class FlpList[TItem](Collection[TItem]):
             result_selector: Callable[[TItem, TInner], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         return FlpIt(self.__list.data).cross_join(inner, result_selector)
+
+    @overload
+    def group_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[Grouping[TItem, TInner]]: ...
+
+    @overload
+    def group_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, FlpList[TInner]], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def group_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, FlpList[TInner]], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        return FlpIt(self.__list.data).group_join(inner, outer_key_selector, inner_key_selector, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
         return FlpIt(self.__list.data).chunk(size)

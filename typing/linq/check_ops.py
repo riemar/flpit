@@ -76,6 +76,10 @@ assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda
 assert_type(QUERY.cross_join([10, 20]), FlpIt[JoinTuple[Record, int]])
 assert_type(QUERY.cross_join([10, 20], lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
 assert_type(QUERY.cross_join([10, 20], lambda item, inner: item.name * inner), FlpIt[str])
+assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[Grouping[Record, int]])
+assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, FlpList[int]]])
+assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner.count())), FlpIt[tuple[str, int]])
+assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n.count()), FlpIt[str])
 
 ordered: OrderedIt[Record] = QUERY.order_by(lambda item: item.department)
 assert_type(ordered, OrderedIt[Record])
@@ -181,6 +185,10 @@ assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n, la
 assert_type(CONTAINER.cross_join([10, 20]), FlpIt[JoinTuple[Record, int]])
 assert_type(CONTAINER.cross_join([10, 20], lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
 assert_type(CONTAINER.cross_join([10, 20], lambda item, inner: item.name * inner), FlpIt[str])
+assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[Grouping[Record, int]])
+assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, FlpList[int]]])
+assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner.count())), FlpIt[tuple[str, int]])
+assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n.count()), FlpIt[str])
 
 assert_type(CONTAINER.to_list(), FlpList[Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])

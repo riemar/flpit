@@ -302,15 +302,19 @@ flp.it(customers).left_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o:
 flp.it(customers).full_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o: (c and c[0], o and o[0]))
 # [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None), (None, 12)]   (.NET 11 FullJoin)
 
+flp.it(customers).group_join(orders, lambda c: c[1], lambda o: o[1], lambda c, os: (c[0], os.select(lambda o: o[0]).to_list()))
+# [("Prakash", [10, 11]), ("Tim", []), ("Robert", [])]        group join  (.NET GroupJoin)
+
 flp.it([1, 2]).cross_join(["a", "b"], lambda n, c: f"{n}{c}")
 # ["1a", "1b", "2a", "2b"]                                    cross join   (no .NET equivalent)
 ```
 
-Without a result selector all four yield `JoinTuple(outer, inner)`.
+Without a result selector `join()`, `left_join()`, `full_join()` and `cross_join()` yield `JoinTuple(outer, inner)`; `group_join()` yields a `Grouping` whose `key` is the outer element and whose items are its matching inner elements.
 
-* Elements whose key is `None` never match. `left_join()` / `full_join()` still emit them as unmatched.
+* Elements whose key is `None` never match. `left_join()` / `full_join()` still emit them as unmatched; `group_join()` still emits them with an empty group.
 * An unmatched side is passed to the result selector as `None` (the Python equivalent of .NET `default`).
 * `full_join()` follows .NET 11 `FullJoin` (`join()` / `left_join()` follow .NET 10 and earlier). It yields the `left_join()` rows in outer order, followed by every inner element that was never matched (in inner order).
+* `group_join()` follows .NET `GroupJoin`: it yields exactly one result per outer element, in outer order. Outer elements without a match get an empty group. The result selector receives the matching inner elements as a re-enumerable `FlpList` (a snapshot, in inner order). Like .NET, `inner` is only enumerated once the outer sequence yields its first element, so an empty outer sequence never touches `inner`.
 * `cross_join()` has no .NET LINQ equivalent. It yields the cartesian product: outer order, then inner order for each outer element. There are no keys, so only `inner` and an optional result selector are taken. If `inner` is empty the result is empty and the outer sequence is not enumerated.
 * Argument validation is eager (`InnerNoneError`, `OuterKeySelectorNoneError`, `InnerKeySelectorNoneError`, `ResultSelectorNoneError`; `cross_join()` has no key selectors); everything else is deferred.
 * Custom equality comparers are not supported yet (keys are compared with `==` / `hash`, like `group_by()`).
@@ -328,11 +332,12 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
 | `left_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
 | `full_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
+| `group_join()`         | Yes                | Yes (outer)             | Yes (inner)   |
 | `cross_join()`         | Yes                | Yes (outer)             | Yes (inner)   |
 
 `order_by()` and `group_by()` therefore remain deferred at query construction time, but enumeration of either operator requires buffering its upstream input.
 
-`join()`, `left_join()` and `full_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)). `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
+`join()`, `left_join()`, `full_join()` and `group_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)); `group_join()` builds it once the outer sequence yields its first element. `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
 
 `group_by()` produces a query of groupings rather than terminating the pipeline:
 
@@ -465,6 +470,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_full_join.py                                      |          37 |
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_group_by.py                                       |          23 |
+| │   ├── test_group_join.py                                     |          53 |
 | │   ├── test_intersect.py                                      |          42 |
 | │   ├── test_join.py                                           |          47 |
 | │   ├── test_last.py                                           |          29 |
@@ -497,6 +503,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        5096 |
+| GRAND TOTALS                                                   |        5149 |
 ================================================================================
 ```
