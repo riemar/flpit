@@ -428,7 +428,9 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_group_by.py                                       |          23 |
 | │   ├── test_last.py                                           |          29 |
 | │   ├── test_last_or_default.py                                |          45 |
-| │   ├── test_order_by.py                                       |          99 |
+| │   ├── test_max.py                                            |        1100 |
+| │   ├── test_min.py                                            |         968 |
+| │   ├── test_order_by.py                                       |         100 |
 | │   ├── test_order_descending_by.py                            |          45 |
 | │   ├── test_select.py                                         |         140 |
 | │   ├── test_select_many.py                                    |          85 |
@@ -448,6 +450,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        2390 |
+| GRAND TOTALS                                                   |        4459 |
 ================================================================================
 ```

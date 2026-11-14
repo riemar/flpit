@@ -32,14 +32,6 @@ class TestFlpList:
         assert list(appended) == [2, 3, 4]
         assert list(prepended) == [1, 2, 3]
 
-    def test_flplist_empty_guard_decorators(self):
-        empty_list = FlpList([])
-        
-        with pytest.raises(ValueError):
-            empty_list.min()
-            
-        with pytest.raises(ValueError):
-            empty_list.max()
 
 # =====================================================================
 # PYTEST SUITE FOR USERLIST BEHAVIORS

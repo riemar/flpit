@@ -4,7 +4,7 @@ from typing import assert_type
 
 from flpit.json import JsonSerializerOptions
 
-from flpit import FlpIt, FlpList, Grouping, OrderedIt, flp
+from flpit import FlpIt, FlpList, Grouping, OrderedIt, flp, ZipTuple
 
 
 class Record:
@@ -53,7 +53,7 @@ assert_type(QUERY.distinct_by(lambda item: item.department), FlpIt[Record])
 # FlpIt.zip declaration in src/flpit/core/linq.py returns FlpIt[Any] and has no
 # overloads, so a type checker should flag them until that declaration is
 # tightened. The parallel FlpList overloads are checked below.
-assert_type(QUERY.zip([10, 20]), FlpIt[tuple[Record, int]])
+assert_type(QUERY.zip([10, 20]), FlpIt[ZipTuple[Record, int]])
 assert_type(QUERY.zip([10, 20], lambda item, n: item.name * n), FlpIt[str])
 
 assert_type(QUERY.chunk(2), FlpIt[FlpList[Record]])
@@ -71,8 +71,10 @@ assert_type(QUERY.aggregate(0, lambda total, item: total + item.record_id, lambd
 assert_type(QUERY.last(), Record)
 assert_type(QUERY.last(lambda item: item.active), Record)
 assert_type(NUMBERS.min(), int)
-assert_type(NUMBERS.max(), int)
+assert_type(QUERY.min(lambda item: item.name), str)
 assert_type(QUERY.min_by(lambda item: item.record_id), Record)
+assert_type(NUMBERS.max(), int)
+assert_type(QUERY.max(lambda item: item.record_id), int)
 assert_type(QUERY.max_by(lambda item: item.name), Record)
 assert_type(NUMBERS.sum(), int | float | Decimal)
 assert_type(QUERY.sum(lambda item: item.record_id), int | float | Decimal)
@@ -111,7 +113,7 @@ assert_type(CONTAINER.cast(int), FlpIt[int])
 assert_type(CONTAINER.of_type(int), FlpIt[int])
 assert_type(CONTAINER.distinct(), FlpIt[Record])
 assert_type(CONTAINER.distinct_by(lambda item: item.department), FlpIt[Record])
-assert_type(CONTAINER.zip([1, 2]), FlpIt[tuple[Record, int]])
+assert_type(CONTAINER.zip([1, 2]), FlpIt[ZipTuple[Record, int]])
 assert_type(CONTAINER.zip([1, 2], lambda item, n: item.name * n), FlpIt[str])
 assert_type(CONTAINER.chunk(2), FlpIt[FlpList[Record]])
 assert_type(CONTAINER.order_by(lambda item: item.name), OrderedIt[Record])
@@ -119,8 +121,10 @@ assert_type(CONTAINER.order_by_descending(lambda item: item.record_id), OrderedI
 assert_type(CONTAINER.group_by(lambda item: item.department), FlpIt[Grouping[str, Record]])
 assert_type(CONTAINER.aggregate(0, lambda total, item: total + item.record_id), int)
 assert_type(CONTAINER.min(), Record)
+assert_type(CONTAINER.min(lambda item: item.record_id), int)
 assert_type(CONTAINER.min_by(lambda item: item.record_id), Record)
 assert_type(CONTAINER.max(), Record)
+assert_type(CONTAINER.max(lambda item: item.name), str)
 assert_type(CONTAINER.max_by(lambda item: item.name), Record)
 assert_type(CONTAINER.sum(lambda item: item.record_id), int | float | Decimal)
 assert_type(CONTAINER.average(lambda item: item.record_id), float | int | Decimal | None)

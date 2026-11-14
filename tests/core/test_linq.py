@@ -373,34 +373,6 @@ def test_chunk():
         data.chunk(-1)
 
 
-def test_min_and_min_by():
-    numbers = FlpList([5, 2, 8, 1, 9])
-    assert numbers.min() == 1
-
-    objs = FlpList([{"name": "A", "age": 30}, {"name": "B", "age": 20}])
-    assert objs.min_by(lambda x: x["age"]) == {"name": "B", "age": 20}
-
-    empty = FlpList([])
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.min()
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.min_by(lambda x: x)
-
-
-def test_max_and_max_by():
-    numbers = FlpList([5, 2, 8, 1, 9])
-    assert numbers.max() == 9
-
-    objs = FlpList([{"name": "A", "age": 30}, {"name": "B", "age": 20}])
-    assert objs.max_by(lambda x: x["age"]) == {"name": "A", "age": 30}
-
-    empty = FlpList([])
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.max()
-    with pytest.raises(ValueError, match="Sequence contains no elements"):
-        empty.max_by(lambda x: x)
-
-
 def test_ordering_chaining():
     data = FlpList([
         {"age": 30, "score": 90, "name": "Bob"},

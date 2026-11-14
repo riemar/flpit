@@ -8,8 +8,10 @@ from contextlib import AbstractContextManager
 
 import builtins
 from collections import UserList
-from functools import wraps
-from itertools import islice, chain
+from functools import wraps, partial as _partial
+from operator import is_not as _is_not, ne as _ne, eq as _eq
+from itertools import islice, chain, compress
+from numbers import Real as _Real
 
 from typing import (
     Any,
@@ -122,25 +124,147 @@ class ArgumentOutOfBoundsError(ArgumentError):
         super().__init__("Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.")
 
 
-def _guard_empty[SelfT: Sized, R, **P](
-        func: Callable[Concatenate[SelfT, P], R],
-) -> Callable[Concatenate[SelfT, P], R]:
-    """Translate empty-sequence ValueError into EmptySequenceError."""
+_NOT_NONE = _partial(_is_not, None)
+_EXTREME_CHUNK = 1024
 
-    @wraps(func)
-    def wrapper(
-            self: SelfT,
-            *args: P.args,
-            **kwargs: P.kwargs,
-    ) -> R:
-        try:
-            return func(self, *args, **kwargs)
-        except ValueError as e:
-            if len(self) == 0:
-                raise EmptySequenceError() from e
-            raise
 
-    return wrapper
+def _project(items: Iterable[Any], selector: Any) -> Iterable[Any]:
+    """Applies an optional selector lazily (C-level map); None selector is an error."""
+    if selector is _SENTINEL:
+        return items
+    if selector is None:
+        raise SelectorNoneError()
+    return map(selector, items)
+
+
+def _extreme_values(items: Iterable[Any], is_min: bool) -> Any:
+    """
+    Single-pass min/max of values with .NET Enumerable.Min/Max semantics.
+
+    flpit has no runtime generics, so every sequence is "None-able":
+
+    - empty input or only None values -> None
+    - None values are skipped (nullable Min/Max)
+    - numeric NaN uses .NET's total order, where NaN is smaller than every
+      other value, including -inf:  min -> NaN if any is present,
+      max -> NaN only if every value is NaN
+      (builtins.min/max depend on where the NaN sits, since every comparison
+      with NaN is False)
+
+    Only the leading run of None values is scanned in Python; the remainder
+    is filtered at C speed. Numeric input is reduced in bounded chunks so NaN
+    can be detected at C speed (x != x is True only for NaN) in O(chunk) memory.
+    """
+    pick = builtins.min if is_min else builtins.max
+    it = iter(items)
+
+    for first in it:
+        if first is None:
+            continue
+
+        rest = filter(_NOT_NONE, it)
+
+        if not isinstance(first, (_Real, Decimal)):
+            # Non-numeric (str, tuple, date, ...): no NaN semantics apply.
+            return pick(chain((first,), rest)) # pyrefly: ignore [bad-specialization]
+
+        if is_min:
+            if first != first:
+                return first
+
+            best = first
+            while chunk := list(islice(rest, _EXTREME_CHUNK)):
+                if any(map(_ne, chunk, chunk)):
+                    return next(x for x in chunk if x != x)
+                best = pick(best, pick(chunk)) # pyrefly: ignore [bad-specialization]
+            return best
+
+        nan: Any = first if first != first else _MISSING
+        best = _MISSING if nan is not _MISSING else first
+        while chunk := list(islice(rest, _EXTREME_CHUNK)):
+            if any(map(_ne, chunk, chunk)):
+                if nan is _MISSING:
+                    nan = next(x for x in chunk if x != x)
+                chunk = list(compress(chunk, map(_eq, chunk, chunk)))
+                if not chunk:
+                    continue
+            candidate = builtins.max(chunk) # pyrefly: ignore [bad-specialization]
+            best = candidate if best is _MISSING else builtins.max(best, candidate) # pyrefly: ignore [bad-specialization]
+        return nan if best is _MISSING else best
+
+    return None
+
+
+def _extreme_by(items: Iterable[Any], key_selector: Any, is_min: bool) -> Any:
+    """
+    Single-pass MinBy/MaxBy returning the *element* with the extreme key.
+
+    Follows .NET Enumerable.MinBy/MaxBy:
+    - empty input                  -> None (no runtime generics: everything is None-able)
+    - key_selector is None         -> SelectorNoneError as soon as there is an element
+                                      to select a key for (empty input still gives None)
+    - None keys are skipped; if every key is None the first element is returned
+    - ties keep the first element
+    - NaN keys order below every other number (Comparer<double>.Default):
+      min_by returns the first NaN-keyed element, max_by ignores NaN keys
+      unless all keys are NaN.
+
+    The selector runs exactly once per element, in order. Work is done in
+    bounded chunks so None/NaN filtering and the reduction run at C speed.
+    """
+    it = iter(items)
+
+    if key_selector is None:
+        for _ in it:
+            raise SelectorNoneError()
+        return None
+
+    pick = builtins.min if is_min else builtins.max
+    first_item: Any = _MISSING
+    nan_item: Any = _MISSING
+    best_item: Any = _MISSING
+    best_key: Any = _MISSING
+
+    while chunk := list(islice(it, _EXTREME_CHUNK)):
+        if first_item is _MISSING:
+            first_item = chunk[0]
+
+        keys = list(map(key_selector, chunk))
+
+        if not all(map(_NOT_NONE, keys)):
+            mask = list(map(_NOT_NONE, keys))
+            keys = list(compress(keys, mask))
+            chunk = list(compress(chunk, mask))
+            if not keys:
+                continue
+
+        if any(map(_ne, keys, keys)):
+            nan_index = next(i for i, k in enumerate(keys) if k != k)
+            if is_min:
+                return chunk[nan_index]
+            if nan_item is _MISSING:
+                nan_item = chunk[nan_index]
+            mask = list(map(_eq, keys, keys))
+            keys = list(compress(keys, mask))
+            chunk = list(compress(chunk, mask))
+            if not keys:
+                continue
+
+        extreme = pick(keys)
+        if best_key is _MISSING or (extreme < best_key if is_min else extreme > best_key):
+            best_key = extreme
+            best_item = chunk[keys.index(extreme)]
+
+    if best_item is not _MISSING:
+        return best_item
+    if nan_item is not _MISSING:
+        return nan_item
+    if first_item is not _MISSING:
+        return first_item
+
+    # raise EmptySequenceError()
+    # no proper generic runtime type, so everything is assumed to be nullable
+    return None
 
 
 def dotnet_context() -> AbstractContextManager[decimal.Context]:
@@ -594,29 +718,44 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return typing_cast(TItem, last_item)
 
-    def _extreme(self, func: Any, **kwargs: Any) -> TItem:
-        result = func(self, default=_MISSING, **kwargs)
+    @overload
+    def min(self) -> TItem: ...
 
-        if result is _MISSING:
-            raise EmptySequenceError()
+    @overload
+    def min[TResult](self, selector: Callable[[TItem], TResult]) -> TResult: ...
 
-        return typing_cast(TItem, result)
+    def min(self, selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL) -> Any:
+        """
+        Returns the minimum value in a sequence, optionally projecting each
+        element through a selector first (Enumerable.Min / Min(selector)).
 
-    def min(self) -> TItem:
-        """Returns the minimum value in a sequence."""
-        return self._extreme(builtins.min)
+        With a selector the minimum *projected value* is returned, not the
+        element (use min_by for that). None values are ignored; all-None
+        returns None; empty raises EmptySequenceError; NaN wins if present.
+        """
+        return _extreme_values(_project(self, selector), True)
+
+    @overload
+    def max(self) -> TItem: ...
+
+    @overload
+    def max[TResult](self, selector: Callable[[TItem], TResult]) -> TResult: ...
+
+    def max(self, selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL) -> Any:
+        """
+        Returns the maximum value in a sequence, optionally projecting each
+        element through a selector first (Enumerable.Max / Max(selector)).
+        Same None / NaN / empty rules as min.
+        """
+        return _extreme_values(_project(self, selector), False)
 
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        """Returns the value in a sequence that has the minimum key value."""
-        return self._extreme(builtins.min, key=key_selector)
-
-    def max(self) -> TItem:
-        """Returns the maximum value in a sequence."""
-        return self._extreme(builtins.max)
+        """Returns the element with the minimum key (Enumerable.MinBy)."""
+        return _extreme_by(self, key_selector, True)
 
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        """Returns the value in a sequence that has the maximum key value."""
-        return self._extreme(builtins.max, key=key_selector)
+        """Returns the element with the maximum key (Enumerable.MaxBy)."""
+        return _extreme_by(self, key_selector, False)
 
     def average(
             self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL
@@ -1257,21 +1396,29 @@ class FlpList[TItem](Collection[TItem]):
     def aggregate(self, *args: Any) -> Any:
         return FlpIt(self.__list.data).aggregate(*args)
 
-    @_guard_empty
-    def min(self) -> TItem:
-        return builtins.min(self.__list.data) # pyrefly: ignore [bad-specialization]
+    @overload
+    def min(self) -> TItem: ...
 
-    @_guard_empty
+    @overload
+    def min[TResult](self, selector: Callable[[TItem], TResult]) -> TResult: ...
+
+    def min(self, selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL) -> Any:
+        return _extreme_values(_project(self.__list.data, selector), True)
+
+    @overload
+    def max(self) -> TItem: ...
+
+    @overload
+    def max[TResult](self, selector: Callable[[TItem], TResult]) -> TResult: ...
+
+    def max(self, selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL) -> Any:
+        return _extreme_values(_project(self.__list.data, selector), False)
+
     def min_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        return builtins.min(self.__list.data, key=key_selector)
+        return _extreme_by(self.__list.data, key_selector, True)
 
-    @_guard_empty
-    def max(self) -> TItem:
-        return builtins.max(self.__list.data) # pyrefly: ignore [bad-specialization]
-
-    @_guard_empty
     def max_by(self, key_selector: Callable[[TItem], Any]) -> TItem:
-        return builtins.max(self.__list.data, key=key_selector)
+        return _extreme_by(self.__list.data, key_selector, False)
 
     def sum(
             self, selector: Callable[[TItem], int | float | Decimal] | _Sentinel = _SENTINEL

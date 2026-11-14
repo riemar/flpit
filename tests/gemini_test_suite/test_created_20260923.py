@@ -308,12 +308,6 @@ class TestFlpItAggregations:
         assert it.min() == expected_min
         assert it.max() == expected_max
 
-    def test_min_max_empty_raises(self):
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).min()
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).max()
-
     def test_min_by_max_by(self):
         people = [
             Person("Alice", 30, "IT"),
@@ -323,12 +317,6 @@ class TestFlpItAggregations:
         it = FlpIt(people)
         assert it.min_by(lambda p: p.age) == Person("Bob", 20, "HR")
         assert it.max_by(lambda p: p.age) == Person("Charlie", 40, "IT")
-
-    def test_min_by_max_by_empty_raises(self):
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).min_by(lambda x: x)
-        with pytest.raises(EmptySequenceError):
-            FlpIt([]).max_by(lambda x: x)
 
 
     @pytest.mark.parametrize(
@@ -590,22 +578,6 @@ class TestFlpListSpecifics:
     def test_count(self, arg: tuple, expected: int):
         flp = FlpList([1, 2, 2, 3, 4])
         assert flp.count(*arg) == expected
-
-
-    def test_guarded_empty_methods_on_flp_list(self):
-        empty_list = FlpList[int]()
-
-        with pytest.raises(EmptySequenceError):
-            empty_list.min()
-
-        with pytest.raises(EmptySequenceError):
-            empty_list.min_by(lambda x: x)
-
-        with pytest.raises(EmptySequenceError):
-            empty_list.max()
-
-        with pytest.raises(EmptySequenceError):
-            empty_list.max_by(lambda x: x)
 
     def test_element_at_flp_list(self):
         flp = FlpList([100, 200])

@@ -21,12 +21,6 @@ def test_max(values, expected) -> None:
     assert flp.it(values).max() == expected
 
 
-@pytest.mark.parametrize("method", ["min", "max"])
-def test_min_max_empty_raise_empty_sequence(method) -> None:
-    with pytest.raises(EmptySequenceError, match="no elements"):
-        getattr(flp.it([]), method)()
-
-
 def test_min_by_returns_original_item() -> None:
     rows = [("a", 3), ("b", 1), ("c", 2)]
     assert flp.it(rows).min_by(lambda row: row[1]) == ("b", 1)
@@ -35,16 +29,6 @@ def test_min_by_returns_original_item() -> None:
 def test_max_by_returns_original_item() -> None:
     rows = [("a", 3), ("b", 1), ("c", 2)]
     assert flp.it(rows).max_by(lambda row: row[1]) == ("a", 3)
-
-
-def test_min_by_empty_raises() -> None:
-    with pytest.raises(EmptySequenceError):
-        flp.it([]).min_by(lambda x: x)
-
-
-def test_max_by_empty_raises() -> None:
-    with pytest.raises(EmptySequenceError):
-        flp.it([]).max_by(lambda x: x)
 
 
 def test_average_numbers() -> None:

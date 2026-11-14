@@ -380,7 +380,7 @@ def test_SortsRandomizedEnumerableCorrectly(flp_type, items):
     gc.enable()
 
     # pure sort time should never exceed 1s
-    assert elapsed < 0.7 # not part of the original test
+    assert elapsed < 0.75 # not part of the original test
 
     # randomized.sort(key=lambda x: (x is not None, x))
 

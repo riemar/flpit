@@ -114,18 +114,6 @@ def test_flplist_min_max_and_by_variants() -> None:
     assert FlpList(rows).max_by(lambda x: x[1]) == rows[0]
 
 
-@pytest.mark.parametrize("method", ["min", "max"])
-def test_flplist_min_max_empty_uses_empty_sequence_error(method) -> None:
-    with pytest.raises(EmptySequenceError, match="Sequence contains no elements"):
-        getattr(FlpList([]), method)()
-
-
-@pytest.mark.parametrize("method", ["min_by", "max_by"])
-def test_flplist_min_max_by_empty_uses_empty_sequence_error(method) -> None:
-    with pytest.raises(EmptySequenceError, match="Sequence contains no elements"):
-        getattr(FlpList([]), method)(lambda x: x)
-
-
 def test_flplist_min_does_not_relabel_value_error_from_comparison() -> None:
     class Broken:
         def __lt__(self, other):
