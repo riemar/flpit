@@ -568,7 +568,7 @@ class FlpIt[TItem](Iterable[TItem]):
         """Filters the elements of an Iterable based on a specified type."""
         def _generator() -> Iterator[TResult]:
             for item in self:
-                if isinstance(item, target_type):
+                if item is not None and isinstance(item, target_type):
                     yield item  # type: ignore[misc]
 
         return FlpIt(_FactoryIterable(_generator))
