@@ -4,8 +4,10 @@ FlpIt-specific behaviour of join / left_join / full_join.
 The .NET ports live in tests/nettests/linq/test_join.py and test_left_join.py. This module covers:
     * architectural invariants from .agents/rules.md (deferred execution, no consumption on
       construction, single-use sources, streaming / short-circuiting, O(N + M) key-selector usage),
-    * full_join, which has no .NET LINQ equivalent (so no .NET oracle) and defines its own semantics:
-      left_join output, followed by the never-matched inner elements (outer = None) in inner order.
+    * full_join, whose .NET 11 oracle (FullJoin) is ported in tests/nettests/linq/test_full_join.py; the
+      FlpIt-specific semantics checked here are: left_join output, followed by the never-matched inner
+      elements (outer = None) in inner order.
+cross_join is covered in tests/core/test_cross_join.py.
 """
 import pytest
 
@@ -239,7 +241,7 @@ def test_left_join_one_row_per_match_and_one_for_miss():
 
 
 # ---------------------------------------------------------------------------
-# full_join (no .NET equivalent)
+# full_join (FlpIt-specific semantics; .NET 11 FullJoin)
 # ---------------------------------------------------------------------------
 
 def _fj(outer, inner, selector=None, ok=lambda x: x, ik=lambda x: x):

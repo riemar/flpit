@@ -3,7 +3,7 @@ Copyright (c) .NET Foundation and Contributors.
 Copyright (c) FlpIt
 SPDX-License-Identifier: MIT
 
-Ported to pytest/Python from the .NET Runtime System.Linq FullJoinTests.cs (.NET 10):
+Ported to pytest/Python from the .NET Runtime System.Linq FullJoinTests.cs (.NET 11):
 https://github.com/dotnet/runtime/blob/main/src/libraries/System.Linq/tests/FullJoinTests.cs
 
 Original source attribution: .NET Foundation / dotnet/runtime, MIT License.

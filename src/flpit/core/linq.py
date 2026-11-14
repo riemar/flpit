@@ -752,7 +752,7 @@ class FlpIt[TItem](Iterable[TItem]):
             result_selector: Callable[[TItem | None, TInner | None], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         """
-        Full outer join (no .NET LINQ equivalent).
+        Full outer join (.NET 11 ``FullJoin``).
 
         Produces everything ``left_join`` does (unmatched outer elements paired with ``None``),
         followed by every inner element that was never matched by any outer element, paired with
@@ -794,6 +794,51 @@ class FlpIt[TItem](Iterable[TItem]):
                         yield JoinTuple(None, inner_item)
                     else:
                         yield result_selector(None, inner_item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def cross_join[TInner](
+            self,
+            inner: Iterable[TInner],
+    ) -> FlpIt[JoinTuple[TItem, TInner]]: ...
+
+    @overload
+    def cross_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            result_selector: Callable[[TItem, TInner], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def cross_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            result_selector: Callable[[TItem, TInner], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        """
+        Cross join (cartesian product; no .NET LINQ equivalent).
+
+        Produces one result per (outer, inner) pair, in outer order and, per outer element,
+        in inner order. Without a result selector ``JoinTuple(outer, inner)`` is yielded.
+        Arguments are validated eagerly. The outer sequence is streamed; ``inner`` is buffered
+        once when enumeration starts, because it is traversed again for every outer element.
+        If ``inner`` is empty the result is empty and the outer sequence is not enumerated.
+        """
+        if inner is None:
+            raise InnerNoneError()
+        if result_selector is None:
+            raise ResultSelectorNoneError()
+
+        def _generator() -> Iterator[Any]:
+            inner_items = list(inner)
+            if not inner_items:
+                return
+            for outer_item in self:
+                for inner_item in inner_items:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, inner_item)
+                    else:
+                        yield result_selector(outer_item, inner_item)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1668,6 +1713,26 @@ class FlpList[TItem](Collection[TItem]):
             result_selector: Callable[[TItem | None, TInner | None], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         return FlpIt(self.__list.data).full_join(inner, outer_key_selector, inner_key_selector, result_selector)
+
+    @overload
+    def cross_join[TInner](
+            self,
+            inner: Iterable[TInner],
+    ) -> FlpIt[JoinTuple[TItem, TInner]]: ...
+
+    @overload
+    def cross_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            result_selector: Callable[[TItem, TInner], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def cross_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            result_selector: Callable[[TItem, TInner], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        return FlpIt(self.__list.data).cross_join(inner, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
         return FlpIt(self.__list.data).chunk(size)

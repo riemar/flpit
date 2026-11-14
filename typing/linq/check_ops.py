@@ -69,6 +69,9 @@ assert_type(QUERY.left_join([10, 20], lambda r: r.record_id, lambda n: n, lambda
 assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record | None, int | None]])
 assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record | None, int | None]])
 assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.active if item is not None else None, inner)), FlpIt[tuple[bool | None, int | None]])
+assert_type(QUERY.cross_join([10, 20]), FlpIt[JoinTuple[Record, int]])
+assert_type(QUERY.cross_join([10, 20], lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
+assert_type(QUERY.cross_join([10, 20], lambda item, inner: item.name * inner), FlpIt[str])
 
 ordered: OrderedIt[Record] = QUERY.order_by(lambda item: item.department)
 assert_type(ordered, OrderedIt[Record])
@@ -167,6 +170,9 @@ assert_type(CONTAINER.left_join([10, 20], lambda r: r.record_id, lambda n: n, la
 assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record | None, int | None]])
 assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record | None, int | None]])
 assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.active if item is not None else None, inner)), FlpIt[tuple[bool | None, int | None]])
+assert_type(CONTAINER.cross_join([10, 20]), FlpIt[JoinTuple[Record, int]])
+assert_type(CONTAINER.cross_join([10, 20], lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
+assert_type(CONTAINER.cross_join([10, 20], lambda item, inner: item.name * inner), FlpIt[str])
 
 assert_type(CONTAINER.to_list(), FlpList[Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])

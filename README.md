@@ -300,15 +300,19 @@ flp.it(customers).left_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o:
 # [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None)]   (.NET 10 LeftJoin)
 
 flp.it(customers).full_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o: (c and c[0], o and o[0]))
-# [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None), (None, 12)]
+# [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None), (None, 12)]   (.NET 11 FullJoin)
+
+flp.it([1, 2]).cross_join(["a", "b"], lambda n, c: f"{n}{c}")
+# ["1a", "1b", "2a", "2b"]                                    cross join   (no .NET equivalent)
 ```
 
-Without a result selector all three yield `JoinTuple(outer, inner)`.
+Without a result selector all four yield `JoinTuple(outer, inner)`.
 
 * Elements whose key is `None` never match. `left_join()` / `full_join()` still emit them as unmatched.
 * An unmatched side is passed to the result selector as `None` (the Python equivalent of .NET `default`).
-* `full_join()` has no .NET LINQ equivalent. It yields the `left_join()` rows in outer order, followed by every inner element that was never matched (in inner order).
-* Argument validation is eager (`InnerNoneError`, `OuterKeySelectorNoneError`, `InnerKeySelectorNoneError`, `ResultSelectorNoneError`); everything else is deferred.
+* `full_join()` follows .NET 11 `FullJoin` (`join()` / `left_join()` follow .NET 10 and earlier). It yields the `left_join()` rows in outer order, followed by every inner element that was never matched (in inner order).
+* `cross_join()` has no .NET LINQ equivalent. It yields the cartesian product: outer order, then inner order for each outer element. There are no keys, so only `inner` and an optional result selector are taken. If `inner` is empty the result is empty and the outer sequence is not enumerated.
+* Argument validation is eager (`InnerNoneError`, `OuterKeySelectorNoneError`, `InnerKeySelectorNoneError`, `ResultSelectorNoneError`; `cross_join()` has no key selectors); everything else is deferred.
 * Custom equality comparers are not supported yet (keys are compared with `==` / `hash`, like `group_by()`).
 
 ## Execution Characteristics
@@ -324,10 +328,11 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
 | `left_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
 | `full_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
+| `cross_join()`         | Yes                | Yes (outer)             | Yes (inner)   |
 
 `order_by()` and `group_by()` therefore remain deferred at query construction time, but enumeration of either operator requires buffering its upstream input.
 
-`join()`, `left_join()` and `full_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)).
+`join()`, `left_join()` and `full_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)). `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
 
 `group_by()` produces a query of groupings rather than terminating the pipeline:
 
