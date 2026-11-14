@@ -1202,8 +1202,15 @@ class FlpIt[TItem](Iterable[TItem]):
         result: dict[Any, Any] = {}
         for item in self:
             key = key_selector(item)
+
+            if key is None:
+                raise ArgumentNullError("Value cannot be null. (Parameter 'key')")
+
             if key in result:
-                raise ValueError(f"An item with the same key has already been added. Key: {key!r}")
+                raise ArgumentError(
+                    f"An item with the same key has already been added. Key: {key!r}"
+                )
+
             value = item if element_selector is _SENTINEL else element_selector(item)
             result[key] = value
 
