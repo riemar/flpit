@@ -428,6 +428,18 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def contains(self, value: TItem) -> bool:
+        source = self._iterable
+
+        if isinstance(source, Collection):
+            return value in source
+
+        for item in source:
+            if item == value:
+                return True
+
+        return False
+
     def _node_source(self) -> Iterable[TItem]:
         """Return the upstream iterable, preserving subclasses that customize iteration."""
         return self._iterable if type(self) is FlpIt else self
