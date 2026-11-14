@@ -313,6 +313,5 @@ def test_SkipMoreThanCountFollowedByOperators(flp_type):
         assert_empty(source.skip(2).distinct().to_list())
         # assert_empty(source.skip(2).order_by(lambda x: x).to_array())
         assert_empty(source.skip(2).order_by(lambda x: x).to_list())
-        # contains not implemented yet
-        # assert not source.skip(2).contains(1)
-        # assert not source.skip(2).contains(2)
+        assert not source.skip(2).contains(1)
+        assert not source.skip(2).contains(2)
