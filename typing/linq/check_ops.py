@@ -4,7 +4,7 @@ from typing import assert_type
 
 from flpit.json import JsonSerializerOptions
 
-from flpit import FlpIt, FlpList, Grouping, OrderedIt, flp, ZipTuple
+from flpit import FlpIt, FlpList, Grouping, JoinTuple, OrderedIt, flp, ZipTuple
 
 
 class Record:
@@ -58,6 +58,18 @@ assert_type(QUERY.zip([10, 20]), FlpIt[ZipTuple[Record, int]])
 assert_type(QUERY.zip([10, 20], lambda item, n: item.name * n), FlpIt[str])
 
 assert_type(QUERY.chunk(2), FlpIt[FlpList[Record]])
+
+assert_type(QUERY.join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record, int]])
+assert_type(QUERY.join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
+assert_type(QUERY.join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner)), FlpIt[tuple[str, int]])
+assert_type(QUERY.join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n), FlpIt[str])
+assert_type(QUERY.left_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record, int | None]])
+assert_type(QUERY.left_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, int | None]])
+assert_type(QUERY.left_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.record_id, inner)), FlpIt[tuple[int, int | None]])
+assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record | None, int | None]])
+assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record | None, int | None]])
+assert_type(QUERY.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.active if item is not None else None, inner)), FlpIt[tuple[bool | None, int | None]])
+
 ordered: OrderedIt[Record] = QUERY.order_by(lambda item: item.department)
 assert_type(ordered, OrderedIt[Record])
 assert_type(QUERY.order_by_descending(lambda item: item.name), OrderedIt[Record])
@@ -91,6 +103,9 @@ assert_type(QUERY.first_or_default("missing"), Record | str)
 assert_type(QUERY.first_or_default("missing", lambda item: item.record_id == 999), Record | str)
 assert_type(QUERY.reverse(), FlpIt[Record])
 assert_type(QUERY.single(lambda item: item.record_id == 1), Record)
+
+assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record, int]])
+
 assert_type(QUERY.to_list(), FlpList[Record])
 assert_type(QUERY.to_dictionary(lambda item: item.record_id), dict[int, Record])
 assert_type(QUERY.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])
@@ -141,6 +156,18 @@ assert_type(CONTAINER.last(lambda item: item.active), Record)
 assert_type(CONTAINER.first_or_default("missing"), Record | str)
 assert_type(CONTAINER.reverse(), None) # inplace mutation
 assert_type(CONTAINER.single(lambda item: item.record_id == 1), Record)
+
+assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record, int]])
+assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, int]])
+assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner)), FlpIt[tuple[str, int]])
+assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n), FlpIt[str])
+assert_type(CONTAINER.left_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record, int | None]])
+assert_type(CONTAINER.left_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, int | None]])
+assert_type(CONTAINER.left_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.record_id, inner)), FlpIt[tuple[int, int | None]])
+assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[JoinTuple[Record | None, int | None]])
+assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record | None, int | None]])
+assert_type(CONTAINER.full_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.active if item is not None else None, inner)), FlpIt[tuple[bool | None, int | None]])
+
 assert_type(CONTAINER.to_list(), FlpList[Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])

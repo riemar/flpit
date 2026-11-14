@@ -6,6 +6,7 @@ __version__ = version("flpit")
 
 # noinspection protected-member
 from flpit.core._zip import ZipTuple
+from flpit.core._join import JoinTuple
 
 from flpit import flp
 from flpit.core.linq import (
@@ -35,6 +36,9 @@ from flpit.core.linq import (
     SecondNoneError,
     FuncNoneError,
     ResultSelectorNoneError,
+    InnerNoneError,
+    OuterKeySelectorNoneError,
+    InnerKeySelectorNoneError,
     ArgumentOutOfRangeError,
     ArgumentNonNegError,
     ArgumentOutOfBoundsError,
@@ -64,10 +68,14 @@ __all__ = [
     "SecondNoneError",
     "FuncNoneError",
     "ResultSelectorNoneError",
+    "InnerNoneError",
+    "OuterKeySelectorNoneError",
+    "InnerKeySelectorNoneError",
     "ArgumentOutOfRangeError",
     "ArgumentNonNegError",
     "ArgumentOutOfBoundsError",
 
     "ZipTuple",
+    "JoinTuple",
 ]
 

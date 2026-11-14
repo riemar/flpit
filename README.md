@@ -287,6 +287,30 @@ It does not modify `original`, and it is not affected by the separately created 
 
 This matches the independent-query behavior of .NET LINQ.
 
+### Joins
+
+```python
+customers = [("Prakash", 1), ("Tim", 2), ("Robert", 3)]
+orders    = [(10, 1), (11, 1), (12, 4)]          # (order_id, customer_id)
+
+flp.it(customers).join(orders, lambda c: c[1], lambda o: o[1], lambda c, o: (c[0], o[0]))
+# [("Prakash", 10), ("Prakash", 11)]                          inner join   (.NET Join)
+
+flp.it(customers).left_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o: (c[0], o and o[0]))
+# [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None)]   (.NET 10 LeftJoin)
+
+flp.it(customers).full_join(orders, lambda c: c[1], lambda o: o[1], lambda c, o: (c and c[0], o and o[0]))
+# [("Prakash", 10), ("Prakash", 11), ("Tim", None), ("Robert", None), (None, 12)]
+```
+
+Without a result selector all three yield `JoinTuple(outer, inner)`.
+
+* Elements whose key is `None` never match. `left_join()` / `full_join()` still emit them as unmatched.
+* An unmatched side is passed to the result selector as `None` (the Python equivalent of .NET `default`).
+* `full_join()` has no .NET LINQ equivalent. It yields the `left_join()` rows in outer order, followed by every inner element that was never matched (in inner order).
+* Argument validation is eager (`InnerNoneError`, `OuterKeySelectorNoneError`, `InnerKeySelectorNoneError`, `ResultSelectorNoneError`); everything else is deferred.
+* Custom equality comparers are not supported yet (keys are compared with `==` / `hash`, like `group_by()`).
+
 ## Execution Characteristics
 
 Lazy execution does not mean that every operator is streaming. Some operators must consume and buffer their input before they can produce their result.
@@ -297,8 +321,13 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | `where()` / `select()` | Yes                | Yes                     | No            |
 | `order_by()`           | Yes                | No                      | Yes           |
 | `group_by()`           | Yes                | No                      | Yes           |
+| `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
+| `left_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
+| `full_join()`          | Yes                | Yes (outer)             | Yes (inner)   |
 
 `order_by()` and `group_by()` therefore remain deferred at query construction time, but enumeration of either operator requires buffering its upstream input.
+
+`join()`, `left_join()` and `full_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)).
 
 `group_by()` produces a query of groupings rather than terminating the pipeline:
 
@@ -419,19 +448,24 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_average.py                                        |         572 |
 | │   ├── test_chunk.py                                          |          22 |
 | │   ├── test_concat.py                                         |          64 |
+| │   ├── test_contains.py                                       |         108 |
 | │   ├── test_count.py                                          |          37 |
 | │   ├── test_distinct.py                                       |          87 |
 | │   ├── test_element_at.py                                     |          43 |
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
+| │   ├── test_full_join.py                                      |          37 |
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_group_by.py                                       |          23 |
+| │   ├── test_join.py                                           |          47 |
 | │   ├── test_last.py                                           |          29 |
 | │   ├── test_last_or_default.py                                |          45 |
+| │   ├── test_left_join.py                                      |          47 |
 | │   ├── test_max.py                                            |        1100 |
 | │   ├── test_min.py                                            |         968 |
 | │   ├── test_order_by.py                                       |         100 |
 | │   ├── test_order_descending_by.py                            |          45 |
+| │   ├── test_reverse.py                                        |          35 |
 | │   ├── test_select.py                                         |         140 |
 | │   ├── test_select_many.py                                    |          85 |
 | │   ├── test_single.py                                         |          34 |
@@ -450,6 +484,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        4459 |
+| GRAND TOTALS                                                   |        4733 |
 ================================================================================
 ```

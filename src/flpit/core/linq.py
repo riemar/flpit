@@ -36,6 +36,7 @@ from typing import (
 
 from flpit.json import JsonConvert, JsonSerializerOptions
 from flpit import ZipTuple
+from flpit.core._join import JoinTuple
 
 TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
@@ -108,8 +109,20 @@ class FuncNoneError(ArgumentNullError):
         super().__init__("func")
 
 class ResultSelectorNoneError(ArgumentNullError):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("resultSelector")
+
+class InnerNoneError(ArgumentNullError):
+    def __init__(self) -> None:
+        super().__init__("inner")
+
+class OuterKeySelectorNoneError(ArgumentNullError):
+    def __init__(self) -> None:
+        super().__init__("outerKeySelector")
+
+class InnerKeySelectorNoneError(ArgumentNullError):
+    def __init__(self) -> None:
+        super().__init__("innerKeySelector")
 
 class ArgumentOutOfRangeError(ArgumentError):
     def __init__(self, argument: str, pattern:str="Index was out of range. Must be non-negative and less than the size of the collection."):
@@ -330,6 +343,33 @@ class _SelectIterable[TItem, TResult](Iterable[TResult]):
         if self._pure:
             return map(self._selector, iter(self._source))  # type: ignore[arg-type]
         return map(self._selector, chain.from_iterable((self._source,)))  # type: ignore[arg-type]
+
+
+def _validate_join_args(
+        inner: Any,
+        outer_key_selector: Any,
+        inner_key_selector: Any,
+        result_selector: Any,
+) -> None:
+    """Eager argument validation shared by join / left_join / full_join (mirrors .NET)."""
+    if inner is None:
+        raise InnerNoneError()
+    if outer_key_selector is None:
+        raise OuterKeySelectorNoneError()
+    if inner_key_selector is None:
+        raise InnerKeySelectorNoneError()
+    if result_selector is None:
+        raise ResultSelectorNoneError()
+
+
+def _build_lookup(inner: Iterable[Any], inner_key_selector: Callable[[Any], Any]) -> dict[Any, list[Any]]:
+    """Hash lookup key -> inner elements (insertion order kept). Elements with a None key are dropped."""
+    lookup: dict[Any, list[Any]] = {}
+    for inner_item in inner:
+        key = inner_key_selector(inner_item)
+        if key is not None:
+            lookup.setdefault(key, []).append(inner_item)
+    return lookup
 
 
 class FlpIt[TItem](Iterable[TItem]):
@@ -581,6 +621,179 @@ class FlpIt[TItem](Iterable[TItem]):
                     yield result_selector(first_item, second_item)
                 else:
                     yield ZipTuple(first_item, second_item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem, TInner]]: ...
+
+    @overload
+    def join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        """
+        Inner join: correlates the elements of two sequences based on matching keys.
+
+        Yields one result per matching (outer, inner) pair, in outer order and, per outer element,
+        in inner order. Elements whose key is ``None`` never match. Arguments are validated eagerly;
+        ``inner`` is buffered into a hash lookup when enumeration starts (O(N + M)).
+        """
+        _validate_join_args(inner, outer_key_selector, inner_key_selector, result_selector)
+
+        def _generator() -> Iterator[Any]:
+            lookup = _build_lookup(inner, inner_key_selector)
+            if not lookup:  # like .NET: nothing can match, so the outer sequence is not enumerated
+                return
+            for outer_item in self:
+                key = outer_key_selector(outer_item)
+                if key is None:
+                    continue
+                matches = lookup.get(key)
+                if matches is None:
+                    continue
+                for inner_item in matches:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, inner_item)
+                    else:
+                        yield result_selector(outer_item, inner_item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def left_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem, TInner | None]]: ...
+
+    @overload
+    def left_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner | None], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def left_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner | None], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        """
+        Left outer join (.NET ``LeftJoin``): every outer element is produced at least once.
+
+        Outer elements without a match (including those with a ``None`` key) are paired with
+        ``None`` as the inner element, i.e. ``result_selector(outer, None)``.
+        """
+        _validate_join_args(inner, outer_key_selector, inner_key_selector, result_selector)
+
+        def _generator() -> Iterator[Any]:
+            lookup = _build_lookup(inner, inner_key_selector)
+            for outer_item in self:
+                key = outer_key_selector(outer_item)
+                matches = None if key is None else lookup.get(key)
+                if matches is None:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, None)
+                    else:
+                        yield result_selector(outer_item, None)
+                    continue
+                for inner_item in matches:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, inner_item)
+                    else:
+                        yield result_selector(outer_item, inner_item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    @overload
+    def full_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem | None, TInner | None]]: ...
+
+    @overload
+    def full_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem | None, TInner | None], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def full_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem | None, TInner | None], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        """
+        Full outer join (no .NET LINQ equivalent).
+
+        Produces everything ``left_join`` does (unmatched outer elements paired with ``None``),
+        followed by every inner element that was never matched by any outer element, paired with
+        ``None`` as the outer element (``result_selector(None, inner)``), in inner order.
+        Elements with a ``None`` key never match and therefore always appear unmatched.
+        The outer sequence is streamed; the inner sequence is buffered.
+        """
+        _validate_join_args(inner, outer_key_selector, inner_key_selector, result_selector)
+
+        def _generator() -> Iterator[Any]:
+            inner_items: list[tuple[Any, TInner]] = []
+            lookup: dict[Any, list[TInner]] = {}
+            for inner_item in inner:
+                inner_key = inner_key_selector(inner_item)
+                inner_items.append((inner_key, inner_item))
+                if inner_key is not None:
+                    lookup.setdefault(inner_key, []).append(inner_item)
+
+            matched_keys: set[Any] = set()
+            for outer_item in self:
+                key = outer_key_selector(outer_item)
+                matches = None if key is None else lookup.get(key)
+                if matches is None:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, None)
+                    else:
+                        yield result_selector(outer_item, None)
+                    continue
+                matched_keys.add(key)
+                for inner_item in matches:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(outer_item, inner_item)
+                    else:
+                        yield result_selector(outer_item, inner_item)
+
+            for inner_key, inner_item in inner_items:
+                if inner_key is None or inner_key not in matched_keys:
+                    if result_selector is _SENTINEL:
+                        yield JoinTuple(None, inner_item)
+                    else:
+                        yield result_selector(None, inner_item)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1377,6 +1590,84 @@ class FlpList[TItem](Collection[TItem]):
             result_selector: Callable[[TItem, TOther], Any] | _Sentinel = _SENTINEL,
     ) -> FlpIt[Any]:
         return FlpIt(self.__list.data).zip(second, result_selector)
+
+    @overload
+    def join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem, TInner]]: ...
+
+    @overload
+    def join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        return FlpIt(self.__list.data).join(inner, outer_key_selector, inner_key_selector, result_selector)
+
+    @overload
+    def left_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem, TInner | None]]: ...
+
+    @overload
+    def left_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner | None], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def left_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem, TInner | None], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        return FlpIt(self.__list.data).left_join(inner, outer_key_selector, inner_key_selector, result_selector)
+
+    @overload
+    def full_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+    ) -> FlpIt[JoinTuple[TItem | None, TInner | None]]: ...
+
+    @overload
+    def full_join[TResult, TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem | None, TInner | None], TResult],
+    ) -> FlpIt[TResult]: ...
+
+    def full_join[TInner](
+            self,
+            inner: Iterable[TInner],
+            outer_key_selector: Callable[[TItem], Any],
+            inner_key_selector: Callable[[TInner], Any],
+            result_selector: Callable[[TItem | None, TInner | None], Any] | _Sentinel = _SENTINEL,
+    ) -> FlpIt[Any]:
+        return FlpIt(self.__list.data).full_join(inner, outer_key_selector, inner_key_selector, result_selector)
 
     def chunk(self, size: int) -> FlpIt[FlpList[TItem]]:
         return FlpIt(self.__list.data).chunk(size)
