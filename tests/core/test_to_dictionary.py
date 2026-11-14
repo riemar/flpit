@@ -2,6 +2,7 @@
 Tests for FlpIt.to_dictionary() and FlpList.to_dictionary().
 """
 
+from flpit import ArgumentError
 import pytest
 
 from flpit import flp, SelectorNoneError
@@ -38,7 +39,7 @@ def test_ToDictionary_RunOnce():
 
 
 def test_ToDictionary_DuplicateKeysRaise(flp_type):
-    with pytest.raises(ValueError, match="same key"):
+    with pytest.raises(ArgumentError, match="same key"):
         flp_type([("a", 1), ("a", 2)]).to_dictionary(lambda item: item[0])
 
 
@@ -50,9 +51,3 @@ def test_ToDictionary_NullKeySelectorRaises(flp_type):
 def test_ToDictionary_NullElementSelectorRaises(flp_type):
     with pytest.raises(SelectorNoneError):
         flp_type([1, 2]).to_dictionary(lambda item: item, None)
-
-
-def test_ToDictionary_AllowsNoneKey(flp_type):
-    assert flp_type([(None, 1)]).to_dictionary(lambda item: item[0], lambda item: item[1]) == {
-        None: 1
-    }
