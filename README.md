@@ -450,6 +450,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_aggregate.py                                      |          42 |
 | │   ├── test_all.py                                            |          80 |
 | │   ├── test_any.py                                            |          90 |
+| │   ├── test_append_prepend.py                                 |          36 |
 | │   ├── test_average.py                                        |         572 |
 | │   ├── test_cast.py                                           |          45 |
 | │   ├── test_chunk.py                                          |          22 |
@@ -469,6 +470,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_left_join.py                                      |          47 |
 | │   ├── test_max.py                                            |        1100 |
 | │   ├── test_min.py                                            |         968 |
+| │   ├── test_of_type.py                                        |          38 |
 | │   ├── test_order_by.py                                       |         100 |
 | │   ├── test_order_descending_by.py                            |          45 |
 | │   ├── test_reverse.py                                        |          35 |
@@ -481,6 +483,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_take.py                                           |          39 |
 | │   ├── test_then_by.py                                        |          40 |
 | │   ├── test_then_descending_by.py                             |          34 |
+| │   ├── test_to_dictionary.py                                  |          32 |
+| │   ├── test_to_list.py                                        |          40 |
 | │   ├── test_where.py                                          |          76 |
 | │   └── test_zip.py                                            |         101 |
 | └── task/                                                      |             |
@@ -490,6 +494,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        4778 |
+| GRAND TOTALS                                                   |        4924 |
 ================================================================================
 ```
