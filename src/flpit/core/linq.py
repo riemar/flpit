@@ -137,6 +137,37 @@ def _project(items: Iterable[Any], selector: Any) -> Iterable[Any]:
     return map(selector, items)
 
 
+_DOTNET_VALUE_TYPES = (bool, int, float, Decimal)
+
+
+def _default_equals(left: Any, right: Any) -> bool:
+    """Approximate EqualityComparer<T>.Default for Python's comparable value domain."""
+    if left is right:
+        return True
+    if left is None or right is None:
+        return False
+
+    # Python considers bool/int and int/float equal; boxed .NET value types do not.
+    if type(left) is not type(right) and (
+        isinstance(left, _DOTNET_VALUE_TYPES) or isinstance(right, _DOTNET_VALUE_TYPES)
+    ):
+        return False
+
+    # Double.Equals treats NaN as equal to NaN, unlike Python's float ==.
+    if type(left) is float and type(right) is float and left != left and right != right:
+        return True
+
+    return bool(left == right)
+
+
+def _contains_default(items: Iterable[Any], value: Any) -> bool:
+    """Searches once, stopping at the first default-equality match."""
+    for item in items:
+        if _default_equals(item, value):
+            return True
+    return False
+
+
 def _extreme_values(items: Iterable[Any], is_min: bool) -> Any:
     """
     Single-pass min/max of values with .NET Enumerable.Min/Max semantics.
@@ -397,6 +428,20 @@ class FlpIt[TItem](Iterable[TItem]):
             return False
 
         return True
+
+    def contains(self, value: TItem) -> bool:
+        """
+        Determines whether the sequence contains a value using default equality.
+
+        Mirrors the one-argument Enumerable.Contains overload. Collection
+        sources may provide their own Contains implementation; other sources
+        are scanned once and stop at the first match. No comparer is accepted.
+        """
+        source = self._iterable
+        builtin_collections = (list, tuple, range, set, frozenset, dict, UserList)
+        if isinstance(source, Collection) and type(source) not in builtin_collections:
+            return value in source
+        return _contains_default(source, value)
 
 
     def all(self, predicate: Callable[[TItem], bool]) -> bool:
@@ -1064,7 +1109,7 @@ class FlpList[TItem](Collection[TItem]):
         return self.__list.__len__()
 
     def __contains__(self, item: TItem) -> bool:
-        return self.__list.__contains__(item)
+        return _contains_default(self.__list.data, item)
 
     # =====================================================================
     # 2. Keep some of the Python UserList like behavior
@@ -1167,7 +1212,7 @@ class FlpList[TItem](Collection[TItem]):
         self.__list.data.clear()
 
     def contains(self, item: TItem) -> bool:
-        return item in self.__list.data
+        return _contains_default(self.__list.data, item)
 
     def exists(self, predicate: Callable[[TItem], bool]) -> bool:
         return any(predicate(item) for item in self.__list.data)
