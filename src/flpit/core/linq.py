@@ -601,6 +601,50 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def except_(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        """Produces the set difference of two sequences (deferred).
+
+        Named ``except_`` because ``except`` is a reserved word in Python.
+        Returns the distinct elements of this sequence that do not appear in
+        ``second``, in source order. ``second`` is fully enumerated on first iteration.
+        """
+        if second is None:
+            raise SecondNoneError()
+
+        def _generator() -> Iterator[TItem]:
+            seen: Set[TItem] = set(second)
+            for item in self:
+                if item not in seen:
+                    seen.add(item)
+                    yield item
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def except_by(
+            self,
+            second: Iterable[TKey],
+            key_selector: Callable[[TItem], TKey],
+    ) -> FlpIt[TItem]:
+        """Produces the set difference of two sequences according to a key selector (deferred).
+
+        Returns the elements of this sequence, distinct by key, whose key does not
+        appear in ``second``, in source order.
+        """
+        if second is None:
+            raise SecondNoneError()
+        if key_selector is None:
+            raise SelectorNoneError()
+
+        def _generator() -> Iterator[TItem]:
+            seen: Set[TKey] = set(second)
+            for item in self:
+                key = key_selector(item)
+                if key not in seen:
+                    seen.add(key)
+                    yield item
+
+        return FlpIt(_FactoryIterable(_generator))
+
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
 
@@ -1633,6 +1677,16 @@ class FlpList[TItem](Collection[TItem]):
             self, key_selector: Callable[[TItem], TKey]
     ) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).distinct_by(key_selector)
+
+    def except_(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).except_(second)
+
+    def except_by(
+            self,
+            second: Iterable[TKey],
+            key_selector: Callable[[TItem], TKey],
+    ) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).except_by(second, key_selector)
 
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...

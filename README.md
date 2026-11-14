@@ -459,6 +459,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_count.py                                          |          37 |
 | │   ├── test_distinct.py                                       |          87 |
 | │   ├── test_element_at.py                                     |          43 |
+| │   ├── test_except.py                                         |          68 |
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_full_join.py                                      |          37 |
@@ -494,6 +495,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        4924 |
+| GRAND TOTALS                                                   |        4992 |
 ================================================================================
 ```
