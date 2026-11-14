@@ -465,6 +465,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_full_join.py                                      |          37 |
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_group_by.py                                       |          23 |
+| │   ├── test_intersect.py                                      |          42 |
 | │   ├── test_join.py                                           |          47 |
 | │   ├── test_last.py                                           |          29 |
 | │   ├── test_last_or_default.py                                |          45 |
@@ -495,6 +496,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        4992 |
+| GRAND TOTALS                                                   |        5034 |
 ================================================================================
 ```

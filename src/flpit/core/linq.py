@@ -645,6 +645,26 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def intersect(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        """Produces the set intersection of two sequences (deferred).
+
+        Returns the distinct elements of this sequence that also appear in
+        ``second``, in source order. ``second`` is fully enumerated on first
+        iteration, before the first element of this sequence is requested;
+        this sequence is then streamed.
+        """
+        if second is None:
+            raise SecondNoneError()
+
+        def _generator() -> Iterator[TItem]:
+            remaining: Set[TItem] = set(second)
+            for item in self:
+                if item in remaining:
+                    remaining.remove(item)
+                    yield item
+
+        return FlpIt(_FactoryIterable(_generator))
+
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
 
@@ -1687,6 +1707,9 @@ class FlpList[TItem](Collection[TItem]):
             key_selector: Callable[[TItem], TKey],
     ) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).except_by(second, key_selector)
+
+    def intersect(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).intersect(second)
 
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
