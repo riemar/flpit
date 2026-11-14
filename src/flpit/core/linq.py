@@ -665,6 +665,30 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def union(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        """Produces the set union of two sequences (deferred).
+
+        Returns the distinct elements of this sequence followed by the distinct
+        elements of ``second`` that were not already produced, in encounter order.
+        Both sequences are streamed; ``second`` is not enumerated until this
+        sequence is exhausted.
+        """
+        if second is None:
+            raise SecondNoneError()
+
+        def _generator() -> Iterator[TItem]:
+            seen: Set[TItem] = set()
+            for item in self:
+                if item not in seen:
+                    seen.add(item)
+                    yield item
+            for item in second:
+                if item not in seen:
+                    seen.add(item)
+                    yield item
+
+        return FlpIt(_FactoryIterable(_generator))
+
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...
 
@@ -1710,6 +1734,9 @@ class FlpList[TItem](Collection[TItem]):
 
     def intersect(self, second: Iterable[TItem]) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).intersect(second)
+
+    def union(self, second: Iterable[TItem]) -> FlpIt[TItem]:
+        return FlpIt(self.__list.data).union(second)
 
     @overload
     def zip(self, second: Iterable[TOther]) -> FlpIt[ZipTuple[TItem, TOther]]: ...

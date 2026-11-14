@@ -52,6 +52,7 @@ assert_type(QUERY.distinct_by(lambda item: item.department), FlpIt[Record])
 assert_type(flp.it([1, 2, 1]).except_([1]), FlpIt[int])
 assert_type(QUERY.except_by(["engineering"], lambda item: item.department), FlpIt[Record])
 assert_type(flp.it([1, 2, 1]).intersect([1]), FlpIt[int])
+assert_type(flp.it([1, 2, 1]).union([1, 3]), FlpIt[int])
 
 # These assertions express the intended precise zip contract. The current
 # FlpIt.zip declaration in src/flpit/core/linq.py returns FlpIt[Any] and has no
@@ -140,6 +141,7 @@ assert_type(CONTAINER.distinct_by(lambda item: item.department), FlpIt[Record])
 assert_type(CONTAINER.except_([RECORD]), FlpIt[Record])
 assert_type(CONTAINER.except_by(["engineering"], lambda item: item.department), FlpIt[Record])
 assert_type(CONTAINER.intersect([RECORD]), FlpIt[Record])
+assert_type(CONTAINER.union([RECORD]), FlpIt[Record])
 assert_type(CONTAINER.zip([1, 2]), FlpIt[ZipTuple[Record, int]])
 assert_type(CONTAINER.zip([1, 2], lambda item, n: item.name * n), FlpIt[str])
 assert_type(CONTAINER.chunk(2), FlpIt[FlpList[Record]])

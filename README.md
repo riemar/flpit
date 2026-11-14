@@ -487,6 +487,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_then_descending_by.py                             |          34 |
 | │   ├── test_to_dictionary.py                                  |          32 |
 | │   ├── test_to_list.py                                        |          40 |
+| │   ├── test_union.py                                          |          62 |
 | │   ├── test_where.py                                          |          76 |
 | │   └── test_zip.py                                            |         101 |
 | └── task/                                                      |             |
@@ -496,6 +497,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        5034 |
+| GRAND TOTALS                                                   |        5096 |
 ================================================================================
 ```
