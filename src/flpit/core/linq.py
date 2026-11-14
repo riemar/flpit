@@ -872,6 +872,14 @@ class FlpIt[TItem](Iterable[TItem]):
         except (EmptySequenceError, NoMatchError):
             return default
 
+    def reverse(self) -> FlpIt[TItem]:
+        """Returns the elements of the sequence in reverse order."""
+        def _generator() -> Iterator[TItem]:
+            items = list(self)
+            yield from reversed(items)
+
+        return FlpIt(_FactoryIterable(_generator))
+
     def single(self, predicate: Callable[[TItem], bool] | _Sentinel = _SENTINEL) -> TItem:
         """Returns the single, unique element matching a predicate."""
         has_predicate = predicate is not _SENTINEL
