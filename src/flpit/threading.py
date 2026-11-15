@@ -26,7 +26,14 @@ class AsyncLocal[T]:
             f"flpit.AsyncLocal.{id(self):x}",
             default=default,
         )
+        self._default = default
         self._value_changed_handler = value_changed_handler
+
+        if value_changed_handler is not None:
+            # Context-transition notifications cost several context lookups
+            # per switch. They are only paid for once a handler exists.
+            global _notifications_enabled
+            _notifications_enabled = True
 
     @property
     def value(self) -> T | None:
@@ -75,6 +82,9 @@ class AsyncLocal[T]:
             )
 
 
+# False until the first AsyncLocal with a change handler is created.
+_notifications_enabled = False
+
 # Equivalent to .NET's per-ExecutionContext IAsyncLocal notification list.
 _async_local_change_notifications: ContextVar[
     tuple[AsyncLocal[Any], ...]
@@ -104,15 +114,44 @@ def _notify_context_transition(
         )
 
 
+def _context_value(context: Context, local: AsyncLocal[Any]) -> Any:
+    # Reads the value without entering the context, so it also works for a
+    # context that is currently entered elsewhere.
+    return context.get(local._value, local._default)
+
+
 def _run_with_context[R](
         context: Context,
-        callback: Callable[[], R],
+        callback: Callable[..., R],
+        /,
+        *args: Any,
+        **kwargs: Any,
 ) -> R:
+    """Run ``callback(*args, **kwargs)`` in ``context`` with AsyncLocal notifications.
+
+    This sits on the hot path of the task runtime (once per coroutine step),
+    so the common case of "no AsyncLocal has a change handler" is a plain
+    ``Context.run``.
+    """
+    if not _notifications_enabled:
+        try:
+            return context.run(callback, *args, **kwargs)
+        finally:
+            # A handler may have been installed while the callback ran.
+            if _notifications_enabled:
+                _notify_context_exit(context)
+
     # Capture the currently active execution context.
     previous_locals = _async_local_change_notifications.get()
 
     # Obtain the notification registrations belonging to the target context.
-    incoming_locals = context.run(_async_local_change_notifications.get)
+    incoming_locals = context.get(_async_local_change_notifications, ())
+
+    if not previous_locals and not incoming_locals:
+        try:
+            return context.run(callback, *args, **kwargs)
+        finally:
+            _notify_context_exit(context)
 
     transition_locals = _merge_async_locals(
         previous_locals,
@@ -125,7 +164,7 @@ def _run_with_context[R](
     }
 
     incoming_values = {
-        local: context.run(local._value.get)
+        local: _context_value(context, local)
         for local in transition_locals
     }
 
@@ -135,37 +174,42 @@ def _run_with_context[R](
             previous_values,
             incoming_values,
         )
-        return callback()
+        return callback(*args, **kwargs)
 
     try:
         return context.run(enter_context)
 
     finally:
-        # The target context has now exited. Inspect its final values,
-        # including AsyncLocal instances registered during callback execution.
-        outgoing_locals = context.run(
-            _async_local_change_notifications.get
-        )
+        _notify_context_exit(context)
 
-        restored_locals = _async_local_change_notifications.get()
 
-        exit_locals = _merge_async_locals(
-            outgoing_locals,
-            restored_locals,
-        )
+def _notify_context_exit(context: Context) -> None:
+    # The target context has now exited. Inspect its final values,
+    # including AsyncLocal instances registered during callback execution.
+    outgoing_locals = context.get(_async_local_change_notifications, ())
 
-        outgoing_values = {
-            local: context.run(local._value.get)
-            for local in exit_locals
-        }
+    restored_locals = _async_local_change_notifications.get()
 
-        restored_values = {
-            local: local.value
-            for local in exit_locals
-        }
+    if not outgoing_locals and not restored_locals:
+        return
 
-        _notify_context_transition(
-            exit_locals,
-            outgoing_values,
-            restored_values,
-        )
+    exit_locals = _merge_async_locals(
+        outgoing_locals,
+        restored_locals,
+    )
+
+    outgoing_values = {
+        local: _context_value(context, local)
+        for local in exit_locals
+    }
+
+    restored_values = {
+        local: local.value
+        for local in exit_locals
+    }
+
+    _notify_context_transition(
+        exit_locals,
+        outgoing_values,
+        restored_values,
+    )

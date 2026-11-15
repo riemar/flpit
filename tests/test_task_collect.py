@@ -1,4 +1,5 @@
 import pytest
+import pytest
 
 from flpit.task import (
     Task,
@@ -14,7 +15,7 @@ def isolate_worker_pool():
     Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
 
     # 2. Broaden the gates now that the engine is stopped
-    Task.configure(max_workers=4, max_pending_background=10)
+    Task.configure(max_workers=4)
 
     yield
 
@@ -22,7 +23,7 @@ def isolate_worker_pool():
     Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
 
     # 4. Restore the strict module environment expected by the other tests
-    Task.configure(max_workers=1, max_pending_background=1)
+    Task.configure(max_workers=1)
 
 
 @asyncio_task

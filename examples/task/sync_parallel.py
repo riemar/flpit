@@ -23,6 +23,7 @@ def step_alpha(duration: float) -> str:
     """A blocking function wrapped with the @task decorator."""
     print("Worker Thread: Alpha starting heavy work...")
     time.sleep(duration)
+    print("Worker Thread: Alpha done!")
     return "Alpha Payload"
 
 
@@ -30,6 +31,7 @@ def step_beta(duration: float) -> str:
     """A raw, standard blocking function with no decorator."""
     print("Worker Thread: Beta starting heavy work...")
     time.sleep(duration)
+    print("Worker Thread: Beta done!")
     return "Beta Payload"
 
 

@@ -35,7 +35,6 @@ AGGREGATION_TASK_COUNT = int(os.environ.get("FLPIT_BENCH_AGGREGATION_TASKS", "20
 BACKGROUND_TASK_COUNT = int(os.environ.get("FLPIT_BENCH_BACKGROUND_TASKS", "64"))
 BACKGROUND_SLEEP_SECONDS = float(os.environ.get("FLPIT_BENCH_BACKGROUND_SLEEP", "0.002"))
 WORKER_COUNT = int(os.environ.get("FLPIT_BENCH_WORKERS", "8"))
-MAX_PENDING_BACKGROUND = max(512, BACKGROUND_TASK_COUNT * 2)
 WAIT_TIMEOUT_SECONDS = 30.0
 
 
@@ -43,10 +42,7 @@ WAIT_TIMEOUT_SECONDS = 30.0
 def _configure_task_runtime():
     """Give the Task side enough bounded capacity for these comparisons."""
     Task.shutdown(grace_timeout=1.0, worker_timeout=2.0)
-    Task.configure(
-        max_workers=WORKER_COUNT,
-        max_pending_background=MAX_PENDING_BACKGROUND,
-    )
+    Task.configure(max_workers=WORKER_COUNT)
     yield
     Task.shutdown(grace_timeout=1.0, worker_timeout=2.0)
 
@@ -139,7 +135,7 @@ class TestTaskCreationAndCompletion:
     def test_create_and_complete_trivial_tasks(self):
         def task_operation():
             tasks = [Task.run(_task_noop, i) for i in range(TASK_COUNT)]
-            return Task.when_all(tasks).result(WAIT_TIMEOUT_SECONDS)
+            return Task.when_all(tasks).result()
 
         async def asyncio_operation():
             tasks = [asyncio.create_task(_asyncio_noop(i)) for i in range(TASK_COUNT)]
@@ -176,7 +172,7 @@ class TestSchedulingThroughput:
 
         def task_operation():
             tasks = [Task.run(task_yield_job, i) for i in range(YIELD_TASK_COUNT)]
-            return Task.when_all(tasks).result(WAIT_TIMEOUT_SECONDS)
+            return Task.when_all(tasks).result()
 
         async def asyncio_operation():
             tasks = [
@@ -248,10 +244,10 @@ class TestTaskAggregation:
 
     def test_when_all_against_gather_for_completed_children(self):
         task_children = [Task.run(_task_noop, i) for i in range(AGGREGATION_TASK_COUNT)]
-        expected = Task.when_all(task_children).result(WAIT_TIMEOUT_SECONDS)
+        expected = Task.when_all(task_children).result()
 
         def task_aggregate():
-            return Task.when_all(task_children).result(WAIT_TIMEOUT_SECONDS)
+            return Task.when_all(task_children).result()
 
         task_samples, task_result = _measure_task(task_aggregate)
 
@@ -287,7 +283,7 @@ class TestTaskAggregation:
         Task.when_all(task_children).result(WAIT_TIMEOUT_SECONDS)
 
         def task_aggregate():
-            return Task.when_any(task_children).result(WAIT_TIMEOUT_SECONDS)
+            return Task.when_any(task_children).result()
 
         task_samples, task_winner = _measure_task(task_aggregate)
         assert task_winner in task_children
@@ -336,7 +332,7 @@ class TestBackgroundWork:
                 Task.run(self._blocking_work, i)
                 for i in range(BACKGROUND_TASK_COUNT)
             ]
-            return Task.when_all(tasks).result(WAIT_TIMEOUT_SECONDS)
+            return Task.when_all(tasks).result()
 
         async def asyncio_operation():
             return await asyncio.gather(

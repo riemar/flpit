@@ -22,7 +22,7 @@ target = "https://httpbin.org/delay"
 # ===================================================================================
 
 # we are just i/o bound so it's "fine"
-Task.configure(max_workers=1000, max_pending_background=2048)
+Task.configure(max_workers=1000)
 
 my_limits = httpx.Limits(
     max_connections=200,

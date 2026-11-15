@@ -4,7 +4,7 @@ from flpit.task import task, Task
 # Limit the pipeline artificially to force the bottleneck
 MAX_WORKERS = 4
 SABOTEUR_TASKS = 10
-Task.configure(max_workers=MAX_WORKERS, max_pending_background=128)
+Task.configure(max_workers=MAX_WORKERS)
 
 @task
 async def blocking_saboteur(task_id: int):

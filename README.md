@@ -455,14 +455,14 @@ Operations such as `order_by()` necessarily materialize their input internally t
 
 ## ⚙️ Task Runtime
 
-FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coordinating concurrent work, with synchronous callables executed through a bounded worker pool.
+FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coordinating concurrent work, modelled on the .NET thread pool: coroutines and synchronous callables both run on pool worker threads, without a single-threaded event loop in between.
 
 Key features:
 
 - **Task scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
 - **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation, cancellation callbacks, timeouts, and linked cancellation tokens.
-- **Resource management:** Configure worker capacity and pending background-work limits, handle queue saturation explicitly, and shut down the process-wide runtime with an observable shutdown report.
+- **Resource management:** Configure worker capacity with `Task.configure(min_workers=..., max_workers=...)`; work beyond that queues up (the queue is unbounded) and workers are added when the pool is starved or blocked in `Task.result()`. Calling `Task.result()` inside a task on a task that has not started yet runs it inline, as .NET does. Shut down the process-wide runtime with an observable shutdown report.
 - **Asyncio interoperability:** FlpIt Tasks can be awaited directly inside asyncio coroutines when Task.asyncio_interop is enabled. 
   - This is disabled by default. 
   - Enabling it adds runtime-detection overhead to every pending await.

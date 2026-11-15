@@ -48,7 +48,7 @@ def configure_task_runtime():
     """
     previous_config = dict(task_module._runtime_config)
     Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
-    Task.configure(max_workers=1, max_pending_background=1)
+    Task.configure(max_workers=1)
     yield
     # Leave the test process without a live scheduler/worker pool.
     Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
@@ -155,29 +155,43 @@ def test_socket_readiness_and_cancellation():
         writer.close()
 
 
-def test_background_queue_is_bounded():
+def test_background_queue_is_unbounded():
+    """Like the .NET thread pool, excess work queues up instead of failing.
+
+    The module runs with a single worker, so the second and third call can
+    only wait in the queue while the first one blocks.
+    """
     entered = threading.Event()
     release = threading.Event()
+    order = []
 
     def blocking_call(number: int) -> int:
         if number == 1:
             entered.set()
         release.wait(2)
+        order.append(number)
         return number
 
     first = Task.run(blocking_call, 1)
     assert entered.wait(1)
-    second = Task.run(blocking_call, 2)
-    third = Task.run(blocking_call, 3)
+    queued = [Task.run(blocking_call, number) for number in range(2, 40)]
 
     try:
-        with pytest.raises(BackgroundQueueFull):
-            third.result()
+        time.sleep(0.02)
+        assert not any(task.done() for task in queued)
     finally:
         release.set()
 
     assert first.result() == 1
-    assert second.result() == 2
+    assert [task.result() for task in queued] == list(range(2, 40))
+    assert order == list(range(1, 40))  # one worker: strictly first-in, first-out
+    assert issubclass(BackgroundQueueFull, RuntimeError)  # still importable
+
+
+def test_max_pending_background_is_accepted_but_deprecated():
+    Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
+    with pytest.warns(DeprecationWarning, match="max_pending_background"):
+        Task.configure(max_workers=1, max_pending_background=1)
 
 
 def test_passed_token_allows_cooperative_worker_stop():
@@ -633,7 +647,7 @@ def concurrency_pool():
     Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
 
     # 2. Broaden the gates now that the engine is stopped
-    Task.configure(max_workers=100, max_pending_background=200)
+    Task.configure(max_workers=100)
 
     yield
 
@@ -641,7 +655,7 @@ def concurrency_pool():
     Task.shutdown(grace_timeout=0.1, worker_timeout=0.2)
 
     # 4. Restore the strict module environment expected by the other tests
-    Task.configure(max_workers=1, max_pending_background=1)
+    Task.configure(max_workers=1)
 
 def test_task_concurrency_race_condition_fence(concurrency_pool, tlog):
     # Verify that writing values concurrently to distinct slots is safe
@@ -710,32 +724,47 @@ def test_task_unhandled_exception_marshaling_chain():
         failed_task.result()
 
 
-def test_task_result_rejects_blocking_from_task_context() -> None:
-    async def runtime_work() -> None:
-        pending = Task.delay(10)
+def test_task_result_blocks_inside_task_context() -> None:
+    """Task.result() inside a task blocks the worker, like .NET's Task.Result.
+
+    The delay is completed by the timer thread, so this works even with the
+    single worker this module is configured with.
+    """
+    async def runtime_work() -> str:
+        pending = Task.delay(0.05)
 
         assert not pending.done()
+        assert pending.result() is None
+        assert pending.done()
+        return "unblocked"
 
-        with pytest.raises(
-                RuntimeError,
-                match="Task.result\\(\\) would block the runtime or a Task worker"
-        ):
-            pending.result()
-
-    Task.run(runtime_work).result()
+    assert Task.run(runtime_work).result() == "unblocked"
 
 
-def test_task_result_rejects_blocking_from_sync_task_context():
-    def sync_work():
-        pending = Task.delay(10)
+def test_task_result_blocks_inside_sync_task_context():
+    def sync_work() -> str:
+        pending = Task.delay(0.05)
 
-        with pytest.raises(
-                RuntimeError,
-                match="Task.result\\(\\) would block the runtime or a Task worker",
-        ):
-            pending.result()
+        assert pending.result() is None
+        return "unblocked"
 
-    Task.run(sync_work).result()
+    assert Task.run(sync_work).result() == "unblocked"
+
+
+def test_task_result_inside_task_waits_for_work_on_another_worker(concurrency_pool):
+    """Sync-over-async: the blocked worker is replaced so the child can run."""
+    def child() -> int:
+        return 21
+
+    async def parent() -> int:
+        return Task.run(child).result() * 2
+
+    def sync_parent() -> int:
+        return Task.run(child).result() * 2
+
+    assert Task.run(parent).result() == 42
+    assert Task.run(sync_parent).result() == 42
+    assert Task.when_all([Task.run(parent) for _ in range(20)]).result() == [42] * 20
 
 
 def test_twait_RejectsUseInsideAsyncFunction() -> None:
