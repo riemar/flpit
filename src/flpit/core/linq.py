@@ -296,6 +296,19 @@ def dotnet_context() -> AbstractContextManager[decimal.Context]:
     return decimal.localcontext(ctx)
 
 
+def _decimal_mean(total: Decimal, count: int) -> Decimal:
+    """
+    ``total / count`` like .NET ``decimal`` division: rounded to 29 significant digits instead of
+    raising ``Inexact`` (the summation context traps ``Inexact`` only to detect decimal overflow).
+    """
+    ctx = decimal.getcontext().copy()
+    ctx.prec = max(ctx.prec, 29)
+    ctx.traps[Inexact] = False
+    ctx.traps[Overflow] = True
+    with decimal.localcontext(ctx):
+        return total / Decimal(count)
+
+
 class _FactoryIterable[TItem](Iterable[TItem]):
     """
     Wraps a generator factory function into a clean Iterable[T].
@@ -929,20 +942,18 @@ class FlpIt[TItem](Iterable[TItem]):
 
         Produces everything ``left_join`` does (unmatched outer elements paired with ``None``),
         followed by every inner element that was never matched by any outer element, paired with
-        ``None`` as the outer element (``result_selector(None, inner)``), in inner order.
+        ``None`` as the outer element (``result_selector(None, inner)``), grouped by key in order of
+        first key appearance (like .NET, which walks its inner lookup).
         Elements with a ``None`` key never match and therefore always appear unmatched.
         The outer sequence is streamed; the inner sequence is buffered.
         """
         _validate_join_args(inner, outer_key_selector, inner_key_selector, result_selector)
 
         def _generator() -> Iterator[Any]:
-            inner_items: list[tuple[Any, TInner]] = []
+            # Like .NET (Lookup.Create): None keys are kept, but never match.
             lookup: dict[Any, list[TInner]] = {}
             for inner_item in inner:
-                inner_key = inner_key_selector(inner_item)
-                inner_items.append((inner_key, inner_item))
-                if inner_key is not None:
-                    lookup.setdefault(inner_key, []).append(inner_item)
+                lookup.setdefault(inner_key_selector(inner_item), []).append(inner_item)
 
             matched_keys: set[Any] = set()
             for outer_item in self:
@@ -961,12 +972,13 @@ class FlpIt[TItem](Iterable[TItem]):
                     else:
                         yield result_selector(outer_item, inner_item)
 
-            for inner_key, inner_item in inner_items:
+            for inner_key, group in lookup.items():
                 if inner_key is None or inner_key not in matched_keys:
-                    if result_selector is _SENTINEL:
-                        yield JoinTuple(None, inner_item)
-                    else:
-                        yield result_selector(None, inner_item)
+                    for inner_item in group:
+                        if result_selector is _SENTINEL:
+                            yield JoinTuple(None, inner_item)
+                        else:
+                            yield result_selector(None, inner_item)
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1265,7 +1277,7 @@ class FlpIt[TItem](Iterable[TItem]):
                 return None
 
             if isinstance(total, Decimal):
-                return total / Decimal(count)
+                return _decimal_mean(total, count)
 
             assert total is not None
             assert isinstance(total, Decimal) or isinstance(total, int) or isinstance(total, float)
