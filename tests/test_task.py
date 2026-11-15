@@ -40,11 +40,19 @@ def interop[**P, R](test: Callable[P, R]) -> Callable[P, R]:
 
 @pytest.fixture(scope="module", autouse=True)
 def configure_task_runtime():
-    """Mirror the former unittest setUpClass configuration."""
+    """Mirror the former unittest setUpClass configuration.
+
+    The runtime is a process-wide singleton: other modules may have started it
+    lazily, so stop it before reconfiguring and restore the previous config
+    afterwards so later modules see the defaults again.
+    """
+    previous_config = dict(task_module._runtime_config)
+    Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
     Task.configure(max_workers=1, max_pending_background=1)
     yield
     # Leave the test process without a live scheduler/worker pool.
     Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
+    Task.configure(**previous_config)
 
 
 def test_async_composition_and_background_callable():
