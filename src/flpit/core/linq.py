@@ -2288,9 +2288,6 @@ class FlpList[TItem](Collection[TItem]):
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
         return FlpList(self.__list.data.copy())
-    def to_list(self) -> FlpList[TItem]:
-        """Explicitly returns a shallow copy instance to isolate mutations."""
-        return FlpList(self.__list.data.copy())
 
     # =====================================================================
     # 5. json serialization
