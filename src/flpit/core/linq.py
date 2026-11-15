@@ -102,6 +102,10 @@ class SelectorNoneError(ArgumentNullError):
     def __init__(self):
         super().__init__("keySelector")
 
+class ElementSelectorNoneError(ArgumentNullError):
+    def __init__(self) -> None:
+        super().__init__("elementSelector")
+
 class SecondNoneError(ArgumentNullError):
     def __init__(self):
         super().__init__("second")
@@ -1431,6 +1435,45 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return result
 
+    @overload
+    def to_lookup[TKey](
+            self, key_selector: Callable[[TItem], TKey], /
+    ) -> Lookup[TKey, TItem]: ...
+
+    @overload
+    def to_lookup[TKey, TElement](
+            self,
+            key_selector: Callable[[TItem], TKey],
+            element_selector: Callable[[TItem], TElement],
+            /,
+    ) -> Lookup[TKey, TElement]: ...
+
+    def to_lookup(
+            self,
+            key_selector: Callable[[TItem], Any],
+            element_selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL,
+    ) -> Lookup[Any, Any]:
+        """
+        Materializes the sequence as a ``Lookup`` (.NET ``ToLookup``): a read-only one-to-many map of keys
+        to groupings, in order of first key appearance. ``None`` is a valid key; missing keys index to an
+        empty sequence. Keys are compared with ``==`` / ``hash``; comparer overloads are not provided yet.
+        """
+        if key_selector is None:
+            raise SelectorNoneError()
+        if element_selector is None:
+            raise ElementSelectorNoneError()
+
+        groups: dict[Any, list[Any]] = {}
+        if element_selector is _SENTINEL:
+            for item in self:
+                groups.setdefault(key_selector(item), []).append(item)
+        else:
+            for item in self:
+                key = key_selector(item)
+                groups.setdefault(key, []).append(element_selector(item))
+
+        return Lookup({k: Grouping(k, v) for k, v in groups.items()})
+
     def to_list(self) -> FlpList[TItem]:
         """Explicitly materializes the query into a FlpList."""
         return FlpList[TItem](self)
@@ -2222,6 +2265,26 @@ class FlpList[TItem](Collection[TItem]):
     ) -> dict[Any, Any]:
         return FlpIt(self.__list.data).to_dictionary(key_selector, element_selector)
 
+    @overload
+    def to_lookup[TKey](
+            self, key_selector: Callable[[TItem], TKey], /
+    ) -> Lookup[TKey, TItem]: ...
+
+    @overload
+    def to_lookup[TKey, TElement](
+            self,
+            key_selector: Callable[[TItem], TKey],
+            element_selector: Callable[[TItem], TElement],
+            /,
+    ) -> Lookup[TKey, TElement]: ...
+
+    def to_lookup(
+            self,
+            key_selector: Callable[[TItem], Any],
+            element_selector: Callable[[TItem], Any] | _Sentinel = _SENTINEL,
+    ) -> Lookup[Any, Any]:
+        return FlpIt(self.__list.data).to_lookup(key_selector, element_selector)
+
     def to_list(self) -> FlpList[TItem]:
         """Explicitly returns a shallow copy instance to isolate mutations."""
         return FlpList(self.__list.data.copy())
@@ -2253,3 +2316,4 @@ class FlpList[TItem](Collection[TItem]):
 
 # I hate it, but Python being Python
 from ._grouping import Grouping
+from ._lookup import Lookup

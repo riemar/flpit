@@ -4,7 +4,7 @@ from typing import assert_type
 
 from flpit.json import JsonSerializerOptions
 
-from flpit import FlpIt, FlpList, Grouping, IndexTuple, JoinTuple, OrderedIt, flp, ZipTuple
+from flpit import FlpIt, FlpList, Grouping, IndexTuple, JoinTuple, Lookup, OrderedIt, flp, ZipTuple
 
 
 class Record:
@@ -127,6 +127,10 @@ assert_type(CONTAINER.join([10, 20], lambda r: r.record_id, lambda n: n), FlpIt[
 assert_type(QUERY.to_list(), FlpList[Record])
 assert_type(QUERY.to_dictionary(lambda item: item.record_id), dict[int, Record])
 assert_type(QUERY.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])
+assert_type(QUERY.to_lookup(lambda item: item.department), Lookup[str, Record])
+assert_type(QUERY.to_lookup(lambda item: item.department, lambda item: item.name), Lookup[str, str])
+assert_type(QUERY.to_lookup(lambda item: item.department)["x"], FlpList[Record])
+assert_type(QUERY.to_lookup(lambda item: item.department).first(), Grouping[str, Record])
 
 
 # ============================================================================
@@ -205,6 +209,10 @@ assert_type(CONTAINER.index(), FlpIt[IndexTuple[Record]])
 assert_type(CONTAINER.to_list(), FlpList[Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id, lambda item: item.name), dict[int, str])
+assert_type(CONTAINER.to_lookup(lambda item: item.department), Lookup[str, Record])
+assert_type(CONTAINER.to_lookup(lambda item: item.department, lambda item: item.name), Lookup[str, str])
+assert_type(CONTAINER.to_lookup(lambda item: item.department)["x"], FlpList[Record])
+assert_type(CONTAINER.to_lookup(lambda item: item.department).first(), Grouping[str, Record])
 
 # FlpList-specific collection operators and mutation signatures.
 MUTABLE: FlpList[Record] = flp.lst([RECORD, INACTIVE_RECORD])

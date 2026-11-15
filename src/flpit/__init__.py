@@ -34,6 +34,7 @@ from flpit.core.linq import (
     PredicateNoneError,
     CollectionNoneError,
     SelectorNoneError,
+    ElementSelectorNoneError,
     SecondNoneError,
     FuncNoneError,
     ResultSelectorNoneError,
@@ -46,12 +47,14 @@ from flpit.core.linq import (
 )
 
 from flpit.core._grouping import Grouping
+from flpit.core._lookup import Lookup
 
 __all__ = [
     "flp",
     "FlpIt",
     "FlpList",
     "Grouping",
+    "Lookup",
     "OrderedIt",
 
     "InvalidOperationError",
@@ -66,6 +69,7 @@ __all__ = [
     "PredicateNoneError",
     "CollectionNoneError",
     "SelectorNoneError",
+    "ElementSelectorNoneError",
     "SecondNoneError",
     "FuncNoneError",
     "ResultSelectorNoneError",

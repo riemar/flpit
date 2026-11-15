@@ -379,6 +379,8 @@ On `FlpIt`, `skip_last()` streams with a look-ahead of `count` elements: it hold
 
 `join()`, `left_join()`, `full_join()` and `group_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)); `group_join()` builds it once the outer sequence yields its first element. `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
 
+`to_lookup(key_selector[, element_selector])` is the terminal counterpart (.NET `ToLookup`): it enumerates the source once, immediately, and returns a read-only, re-enumerable `Lookup`, itself a `FlpIt` of `Grouping`s in order of first key appearance. `len(lookup)` is the number of keys, `lookup[key]` returns the key's elements or an empty sequence for a missing key, and `key in lookup` / `lookup.contains(key)` test for a key. `None` is a valid key. Keys are compared with `==` / `hash`; comparer overloads are not supported yet.
+
 `group_by()` produces a query of groupings rather than terminating the pipeline:
 
 ```python
@@ -537,6 +539,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_then_descending_by.py                             |          34 |
 | │   ├── test_to_dictionary.py                                  |          32 |
 | │   ├── test_to_list.py                                        |          40 |
+| │   ├── test_to_lookup.py                                      |          26 |
 | │   ├── test_union.py                                          |          62 |
 | │   ├── test_where.py                                          |          76 |
 | │   └── test_zip.py                                            |         101 |
@@ -547,6 +550,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        7634 |
+| GRAND TOTALS                                                   |        7660 |
 ================================================================================
 ```
