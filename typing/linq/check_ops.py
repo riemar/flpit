@@ -4,7 +4,7 @@ from typing import assert_type
 
 from flpit.json import JsonSerializerOptions
 
-from flpit import FlpIt, FlpList, Grouping, JoinTuple, OrderedIt, flp, ZipTuple
+from flpit import FlpIt, FlpList, Grouping, IndexTuple, JoinTuple, OrderedIt, flp, ZipTuple
 
 
 class Record:
@@ -80,6 +80,9 @@ assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n), FlpI
 assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, FlpList[int]]])
 assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner.count())), FlpIt[tuple[str, int]])
 assert_type(QUERY.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n.count()), FlpIt[str])
+assert_type(QUERY.index(), FlpIt[IndexTuple[Record]])
+assert_type(QUERY.index().select(lambda t: t.index), FlpIt[int])
+assert_type(QUERY.index().select(lambda t: t.item.name), FlpIt[str])
 
 ordered: OrderedIt[Record] = QUERY.order_by(lambda item: item.department)
 assert_type(ordered, OrderedIt[Record])
@@ -189,6 +192,7 @@ assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n), 
 assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item, inner)), FlpIt[tuple[Record, FlpList[int]]])
 assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda item, inner: (item.name, inner.count())), FlpIt[tuple[str, int]])
 assert_type(CONTAINER.group_join([10, 20], lambda r: r.record_id, lambda n: n, lambda r, n: r.name * n.count()), FlpIt[str])
+assert_type(CONTAINER.index(), FlpIt[IndexTuple[Record]])
 
 assert_type(CONTAINER.to_list(), FlpList[Record])
 assert_type(CONTAINER.to_dictionary(lambda item: item.record_id), dict[int, Record])

@@ -37,6 +37,7 @@ from typing import (
 from flpit.json import JsonConvert, JsonSerializerOptions
 from flpit import ZipTuple
 from flpit.core._join import JoinTuple
+from flpit.core._index import IndexTuple
 
 TKey = TypeVar("TKey")
 TOther = TypeVar("TOther")
@@ -495,6 +496,20 @@ class FlpIt[TItem](Iterable[TItem]):
         if selector is None:
             raise SelectorNoneError()
         return FlpIt(_SelectIterable(self._node_source(), selector))
+
+    def index(self) -> FlpIt[IndexTuple[TItem]]:
+        """
+        Returns an enumerable that incorporates the element's index into a tuple (.NET 9 ``Index()``).
+
+        Yields ``IndexTuple(index, item)`` for every element, with ``index`` starting at 0. Execution is
+        deferred and the source is streamed element by element; being a plain ``tuple`` subclass the
+        result unpacks as ``for i, item in query.index()``.
+        """
+        def _generator() -> Iterator[IndexTuple[TItem]]:
+            for position, item in enumerate(self):
+                yield IndexTuple(position, item)
+
+        return FlpIt(_FactoryIterable(_generator))
 
     def select_many[TResult](
             self, selector: Callable[[TItem], Iterable[TResult]]
@@ -1750,6 +1765,9 @@ class FlpList[TItem](Collection[TItem]):
 
     def select[TResult](self, selector: Callable[[TItem], TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).select(selector)
+
+    def index(self) -> FlpIt[IndexTuple[TItem]]:
+        return FlpIt(self.__list.data).index()
 
     def select_many[TResult](
             self, selector: Callable[[TItem], Iterable[TResult]]

@@ -249,6 +249,38 @@ list(FlpList([1, 2, 2, 3])).count(2)  # 2
 
 This behavior is a core part of `FlpList`'s LINQ-oriented contract, not an incomplete `list` implementation.
 
+## Indexed Elements: `index()`
+
+`index()` is the **.NET 9 `Index()` operator**. It pairs every element with its zero-based position and yields `IndexTuple(index, item)`. `IndexTuple` is a `NamedTuple`, so it unpacks and compares like a plain `(index, item)` tuple:
+
+```python
+flp.it(["a", "b", "c"]).index()
+# [(0, "a"), (1, "b"), (2, "c")]                               (.NET 9 Index)
+
+for i, name in flp.it(["a", "b"]).index():
+  ...
+
+flp.it(names).index().where(lambda t: t.index % 2 == 0).select(lambda t: t.item)
+# every second name, starting with the first
+```
+
+* Execution is deferred and the source is streamed element by element; nothing is buffered.
+* The .NET `OverflowException` after `int.MaxValue` elements does not apply: Python integers do not overflow.
+
+### No indexed `select()` / `where()` overloads
+
+.NET also offers `Select((item, index) => ...)` and `Where((item, index) => ...)`. 
+With `index()` available, these overloads are **not planned** for `select()` and `where()`. 
+This is a consequence of the Python runtime rather than an oversight: .NET picks between `x => ...` and `(x, i) => ...` at compile time through overload resolution, 
+but Python has no overloads at runtime. A method receives one callable, and the only way to tell the two shapes apart would be to inspect that callable's signature on every call. 
+That is fragile (builtins, `functools.partial`, `*args`, C-implemented callables) and would make behavior depend on how a function happens to be written. 
+Keeping a single, unambiguous signature per operator and composing with `index()` expresses the same thing explicitly:
+
+```python
+flp.it(source).index().select(lambda t: f"{t.index}: {t.item}")  # instead of Select((x, i) => ...)
+flp.it(source).index().where(lambda t: t.index >= 2).select(lambda t: t.item)  # instead of Where((x, i) => ...)
+```
+
 ## 🔗 Independent Query Pipelines
 
 Query pipelines can be composed independently without mutating the queries they were derived from:
@@ -327,6 +359,7 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | Operator               | Execution deferred | Processes incrementally | Buffers input |
 | ---------------------- | ------------------ | ----------------------- | ------------- |
 | `where()` / `select()` | Yes                | Yes                     | No            |
+| `index()`              | Yes                | Yes                     | No            |
 | `order_by()`           | Yes                | No                      | Yes           |
 | `group_by()`           | Yes                | No                      | Yes           |
 | `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
@@ -471,6 +504,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_generic_list.py                                   |          95 |
 | │   ├── test_group_by.py                                       |          23 |
 | │   ├── test_group_join.py                                     |          53 |
+| │   ├── test_index.py                                          |           6 |
 | │   ├── test_intersect.py                                      |          42 |
 | │   ├── test_join.py                                           |          47 |
 | │   ├── test_last.py                                           |          29 |
@@ -503,6 +537,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        5149 |
+| GRAND TOTALS                                                   |        5155 |
 ================================================================================
 ```

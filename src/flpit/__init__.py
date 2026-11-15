@@ -7,6 +7,7 @@ __version__ = version("flpit")
 # noinspection protected-member
 from flpit.core._zip import ZipTuple
 from flpit.core._join import JoinTuple
+from flpit.core._index import IndexTuple
 
 from flpit import flp
 from flpit.core.linq import (
@@ -77,5 +78,6 @@ __all__ = [
 
     "ZipTuple",
     "JoinTuple",
+    "IndexTuple",
 ]
 
