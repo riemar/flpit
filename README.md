@@ -362,6 +362,7 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | `index()`              | Yes                | Yes                     | No            |
 | `skip_last()`          | Yes                | Yes                     | `count` elements (none on `FlpList`) |
 | `take_last()`          | Yes                | No (`FlpList`: Yes)     | `count` elements (none on `FlpList`) |
+| `default_if_empty()`   | Yes                | Yes                     | No            |
 | `order_by()`           | Yes                | No                      | Yes           |
 | `group_by()`           | Yes                | No                      | Yes           |
 | `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
@@ -373,6 +374,8 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 `order_by()` and `group_by()` therefore remain deferred at query construction time, but enumeration of either operator requires buffering its upstream input.
 
 On `FlpIt`, `skip_last()` streams with a look-ahead of `count` elements: it holds back at most `count` elements and releases each one as soon as `count` newer elements have been read. `take_last()` cannot know which elements are last before the source is exhausted, so its first element is produced only after the whole source was consumed (once); it keeps at most `count` elements in memory. `FlpList` knows its length, so both operators index directly (no buffering, no read-ahead), reading the length when enumeration starts. With `count <= 0`, `skip_last()` returns every element and `take_last()` is empty without enumerating the source.
+
+`default_if_empty(default)` streams the source unchanged and yields `default` only if the source produced no element (falsy elements such as `0` or `None` do not count as empty). The default value is mandatory: Python has no `default(T)`, so the parameterless .NET overload is not provided; pass the value explicitly (e.g. `default_if_empty(None)` for .NET's `DefaultIfEmpty()` on a reference or nullable type). On `FlpList`, emptiness is checked when enumeration starts.
 
 `join()`, `left_join()`, `full_join()` and `group_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)); `group_join()` builds it once the outer sequence yields its first element. `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
 
@@ -499,6 +502,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_contains.py                                       |         108 |
 | │   ├── test_count.py                                          |          37 |
+| │   ├── test_default_if_empty.py                               |          37 |
 | │   ├── test_distinct.py                                       |          87 |
 | │   ├── test_element_at.py                                     |          43 |
 | │   ├── test_except.py                                         |          68 |
@@ -543,6 +547,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        7597 |
+| GRAND TOTALS                                                   |        7634 |
 ================================================================================
 ```

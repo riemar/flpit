@@ -598,6 +598,25 @@ class FlpIt[TItem](Iterable[TItem]):
 
         return FlpIt(_FactoryIterable(_generator))
 
+    def default_if_empty[TResult](self, default: TResult) -> FlpIt[TItem | TResult]:
+        """
+        Returns the elements of the sequence, or a sequence containing only ``default`` if the
+        sequence is empty (.NET ``DefaultIfEmpty(defaultValue)``).
+
+        Execution is deferred and the source is streamed; it is enumerated once per enumeration of
+        the result. ``default`` is mandatory: Python has no ``default(T)``, so the parameterless
+        .NET overload is not provided.
+        """
+        def _generator() -> Iterator[TItem | TResult]:
+            iterator = iter(self)
+            for item in iterator:
+                yield item
+                yield from iterator
+                return
+            yield default
+
+        return FlpIt(_FactoryIterable(_generator))
+
     def cast[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         """Casts elements to a specified type or raises TypeError if cast fails."""
         _VALUE_TYPES = (int, float, bool, complex)
@@ -1841,6 +1860,18 @@ class FlpList[TItem](Collection[TItem]):
 
         def _generator() -> Iterator[TItem]:
             yield from islice(data, max(0, len(data) - count), None)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def default_if_empty[TResult](self, default: TResult) -> FlpIt[TItem | TResult]:
+        data = self.__list.data
+
+        def _generator() -> Iterator[TItem | TResult]:
+            # Emptiness is checked when enumeration starts, so later mutations of the list are observed.
+            if data:
+                yield from data
+            else:
+                yield default
 
         return FlpIt(_FactoryIterable(_generator))
 
