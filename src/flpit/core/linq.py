@@ -1490,6 +1490,14 @@ class FlpIt[TItem](Iterable[TItem]):
         """Explicitly materializes the query into a FlpList."""
         return FlpList[TItem](self)
 
+    def to_async_enumerable(self) -> AsyncFlpIt[TItem]:
+        """
+        Wraps the query as an ``AsyncFlpIt`` (.NET ``ToAsyncEnumerable``). Every enumeration of the
+        result enumerates this query once; nothing is buffered.
+        """
+        from flpit.core.async_linq import to_async_enumerable
+        return to_async_enumerable(self._iterable if type(self) is FlpIt else self)
+
     # =====================================================================
     # 5. json serialization
     # =====================================================================
@@ -2326,3 +2334,7 @@ class FlpList[TItem](Collection[TItem]):
 # I hate it, but Python being Python
 from ._grouping import Grouping
 from ._lookup import Lookup
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from flpit.core.async_linq import AsyncFlpIt

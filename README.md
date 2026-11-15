@@ -23,6 +23,7 @@ This makes the extensive .NET LINQ ecosystem a valuable reference for developers
 ## ⚡ Key Features
 
 * **⚡ Lazy Evaluation (`FlpIt`):** Deferred, streaming execution wrapping any standard Python `Iterable[T]`.
+* **🌊 Async Queries (`AsyncFlpIt`):** The `IAsyncEnumerable<T>` counterpart: a lazy async pipeline consumed with `async for`, terminal operators return a `Task`, and a `CancellationToken` flows through the pipeline (.NET 10 `System.Linq.AsyncEnumerable`).
 * **📦 Materialized Container (`FlpList`):** Eager collection implementing Python's `Collection` protocol (with indexing and slicing), retaining familiar collection access while providing .NET `List<T>`-style semantics and fluent LINQ query operations.
 * **🎯 LINQ Semantics:** Familiar operators like `.any()`, `.first()`, `.single()`, `.order_by()`, and `.then_by()` with predictable, composable behavior.
 * **🔀 Independent Query Pipelines:** Derived queries are independent and never mutate or retroactively affect separately created queries.
@@ -472,6 +473,53 @@ The runtime starts lazily and manages its own lifecycle. Cancellation of running
 
 See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/examples/task) for usage examples.
 
+## 🌊 Async Queries (`AsyncFlpIt`)
+⚠️ **Experimental, pre-release only.** Added in `0.3.4.dev1`; not in the current stable release.
+
+`AsyncFlpIt` is the `IAsyncEnumerable<T>` counterpart to `FlpIt`, modelled on .NET 10's `System.Linq.AsyncEnumerable`. It wraps any async iterable (an async generator, another `AsyncFlpIt`) or sync iterable, runs on the flpit task runtime and is consumed with `async for`.
+
+```python
+from flpit import AsyncFlpIt, flp
+from flpit.task import CancellationToken, CancellationTokenSource, Task
+
+
+async def fetch_pages(token: CancellationToken):
+    for page in range(1, 4):
+        await Task.delay(0.1, token=token)  # the enumeration's token reaches the producer
+        yield page
+
+
+async def is_valid(page: int, token: CancellationToken) -> bool:  # async callback
+    return page != 2
+
+
+async def main():
+    query = (
+        AsyncFlpIt.create(fetch_pages)   # or flp.ait(any async / sync iterable)
+        .where(is_valid)                 # deferred, like every intermediate operator
+        .select(lambda page: page * 10)  # sync callbacks work too
+    )
+
+    async for item in query:             # Python's `await foreach`
+        print(item)
+
+    pages = await query.to_list()        # terminal operators return a Task
+    first = await query.first(token=CancellationTokenSource().token)
+
+
+Task.run(main).result()
+flp.ait(range(10)).count().result()      # from sync code: block on the Task
+```
+
+- **Deferred & lazy:** intermediate operators never touch the source; each enumeration enumerates it again, and one-shot sources stay one-shot.
+- **Terminal operators return a `Task`** (`to_list`, `first`, `single`, `count`, `any`, `sum`, `min_by`, `to_dictionary`, `to_lookup`, `aggregate`, …): `await` them inside the runtime or call `.result()` from synchronous code. Argument errors are raised eagerly, before the `Task` is created.
+- **Sync or async callbacks:** every predicate, selector and key selector can be a plain function or an `async def` taking the `CancellationToken` as its last argument, mirroring .NET's `Func<T, CancellationToken, ValueTask<TResult>>` overloads.
+- **Cancellation:** `with_cancellation(token)` binds a token for `async for`, terminal operators take `token=`, and `AsyncFlpIt.create(factory)` hands the token to the producer (the counterpart of `[EnumeratorCancellation]`). As in .NET, operators pass the token on rather than polling it.
+- **Disposal:** every enumerator an operator opens is closed (`aclose()`, .NET `DisposeAsync`) when it completes, fails or short-circuits. Python's `async for` itself does not close an enumerator on `break`; drive `get_async_enumerator()` with `aclose()` when you need `await foreach` semantics.
+- **Bridges:** `flp.ait(source)`, `FlpIt.to_async_enumerable()`, `AsyncFlpIt.empty() / range() / repeat()`.
+
+`AsyncFlpIt` implements the operators `FlpIt` has; overloads `FlpIt` does not have (index-based selectors, comparers, `Range` / `Index` arguments) are not provided yet.
+
 ## ⚙️ Installation
 
 ```bash
@@ -487,12 +535,68 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 > Migrated from the official .NET Runtime LINQ Tests.
 > Note: The test cases exercise both core types, `FlpIt` and `FlpList`, with transitions between lazy and eager execution occurring as part of the individual test cases.
+> `async_linq/` is migrated from the .NET 10 `System.Linq.AsyncEnumerable` tests and exercises `AsyncFlpIt` on the flpit task runtime.
 
 ```
 ================================================================================
 | Test Module File                                               |  Test Cases |
 --------------------------------------------------------------------------------
 | tests/nettests/                                                |             |
+| ├── async_linq/                                                |             |
+| │   ├── test_aggregate.py                                      |          11 |
+| │   ├── test_all.py                                            |           7 |
+| │   ├── test_any.py                                            |           8 |
+| │   ├── test_append.py                                         |          20 |
+| │   ├── test_average.py                                        |          10 |
+| │   ├── test_cast.py                                           |           6 |
+| │   ├── test_chunk.py                                          |           5 |
+| │   ├── test_concat.py                                         |          24 |
+| │   ├── test_contains.py                                       |          11 |
+| │   ├── test_count.py                                          |           8 |
+| │   ├── test_default_if_empty.py                               |           7 |
+| │   ├── test_distinct.py                                       |          10 |
+| │   ├── test_distinct_by.py                                    |          11 |
+| │   ├── test_element_at.py                                     |           8 |
+| │   ├── test_empty.py                                          |           2 |
+| │   ├── test_except.py                                         |          12 |
+| │   ├── test_except_by.py                                      |          13 |
+| │   ├── test_first.py                                          |           8 |
+| │   ├── test_first_or_default.py                               |           8 |
+| │   ├── test_full_join.py                                      |          11 |
+| │   ├── test_group_by.py                                       |           5 |
+| │   ├── test_group_join.py                                     |           9 |
+| │   ├── test_index.py                                          |           8 |
+| │   ├── test_intersect.py                                      |          12 |
+| │   ├── test_join.py                                           |           9 |
+| │   ├── test_last.py                                           |           8 |
+| │   ├── test_last_or_default.py                                |           8 |
+| │   ├── test_left_join.py                                      |          10 |
+| │   ├── test_max.py                                            |          11 |
+| │   ├── test_max_by.py                                         |          13 |
+| │   ├── test_min.py                                            |          11 |
+| │   ├── test_min_by.py                                         |          13 |
+| │   ├── test_of_type.py                                        |           5 |
+| │   ├── test_order_by.py                                       |          18 |
+| │   ├── test_prepend.py                                        |          19 |
+| │   ├── test_range.py                                          |           3 |
+| │   ├── test_repeat.py                                         |           3 |
+| │   ├── test_reverse.py                                        |           8 |
+| │   ├── test_select.py                                         |           9 |
+| │   ├── test_select_many.py                                    |           5 |
+| │   ├── test_single.py                                         |           9 |
+| │   ├── test_single_or_default.py                              |           9 |
+| │   ├── test_skip.py                                           |           9 |
+| │   ├── test_skip_last.py                                      |           9 |
+| │   ├── test_sum.py                                            |          10 |
+| │   ├── test_take.py                                           |           9 |
+| │   ├── test_take_last.py                                      |           9 |
+| │   ├── test_to_async_enumerable.py                            |          10 |
+| │   ├── test_to_dictionary.py                                  |           5 |
+| │   ├── test_to_list.py                                        |           9 |
+| │   ├── test_to_lookup.py                                      |           4 |
+| │   ├── test_union.py                                          |          12 |
+| │   ├── test_where.py                                          |           9 |
+| │   └── test_zip.py                                            |          12 |
 | ├── linq/                                                      |             |
 | │   ├── test_aggregate.py                                      |          42 |
 | │   ├── test_all.py                                            |          80 |
@@ -550,6 +654,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        7660 |
+| GRAND TOTALS                                                   |        8172 |
 ================================================================================
 ```
