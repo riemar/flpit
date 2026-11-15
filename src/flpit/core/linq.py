@@ -7,7 +7,8 @@ from decimal import Decimal, Overflow, Inexact
 from contextlib import AbstractContextManager
 
 import builtins
-from collections import UserList
+import sys
+from collections import UserList, deque
 from functools import wraps, partial as _partial
 from operator import is_not as _is_not, ne as _ne, eq as _eq
 from itertools import islice, chain, compress
@@ -556,6 +557,44 @@ class FlpIt[TItem](Iterable[TItem]):
 
         def _generator() -> Iterator[TItem]:
             yield from islice(iter(self), count)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def skip_last(self, count: int) -> "FlpIt[TItem]":
+        """
+        Returns the elements of the sequence with the last ``count`` elements omitted (.NET ``SkipLast()``).
+
+        Execution is deferred and the source is streamed: at most ``count`` elements are read ahead of
+        the element currently being yielded, so the operator buffers no more than ``count`` elements.
+        A ``count`` of zero or less omits nothing and returns the sequence unchanged.
+        """
+        if count <= 0:
+            return self
+
+        def _generator() -> Iterator[TItem]:
+            queue: deque[TItem] = deque()
+            for item in self:
+                if len(queue) == count:
+                    yield queue.popleft()
+                queue.append(item)
+
+        return FlpIt(_FactoryIterable(_generator))
+
+    def take_last(self, count: int) -> "FlpIt[TItem]":
+        """
+        Returns the last ``count`` elements of the sequence (.NET ``TakeLast()``).
+
+        Execution is deferred until the returned sequence is enumerated. The last elements are only known
+        once the end of the source is reached, so enumeration first consumes the whole source (keeping
+        at most ``count`` elements in memory) and then yields the retained elements in source order.
+        A ``count`` of zero or less yields an empty sequence without touching the source.
+        """
+        if count <= 0:
+            return FlpIt(())
+
+        def _generator() -> Iterator[TItem]:
+            # deque() cannot hold a maxlen above sys.maxsize; such a count keeps everything anyway.
+            yield from deque(self, maxlen=min(count, sys.maxsize))
 
         return FlpIt(_FactoryIterable(_generator))
 
@@ -1779,6 +1818,31 @@ class FlpList[TItem](Collection[TItem]):
 
     def take(self, count: int) -> FlpIt[TItem]:
         return FlpIt(self.__list.data).take(count)
+
+    def skip_last(self, count: int) -> FlpIt[TItem]:
+        data = self.__list.data
+
+        if count <= 0:
+            return FlpIt(data)
+
+        def _generator() -> Iterator[TItem]:
+            end = max(0, len(data) - max(0, count))
+            yield from islice(data, end)
+
+        return FlpIt(
+            _FactoryIterable(_generator)
+        )
+
+    def take_last(self, count: int) -> FlpIt[TItem]:
+        data = self.__list.data
+
+        if count <= 0:
+            return FlpIt(())
+
+        def _generator() -> Iterator[TItem]:
+            yield from islice(data, max(0, len(data) - count), None)
+
+        return FlpIt(_FactoryIterable(_generator))
 
     def cast[TResult](self, target_type: Type[TResult]) -> FlpIt[TResult]:
         return FlpIt(self.__list.data).cast(target_type)

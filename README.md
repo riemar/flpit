@@ -360,6 +360,8 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | ---------------------- | ------------------ | ----------------------- | ------------- |
 | `where()` / `select()` | Yes                | Yes                     | No            |
 | `index()`              | Yes                | Yes                     | No            |
+| `skip_last()`          | Yes                | Yes                     | `count` elements (none on `FlpList`) |
+| `take_last()`          | Yes                | No (`FlpList`: Yes)     | `count` elements (none on `FlpList`) |
 | `order_by()`           | Yes                | No                      | Yes           |
 | `group_by()`           | Yes                | No                      | Yes           |
 | `join()`               | Yes                | Yes (outer)             | Yes (inner)   |
@@ -369,6 +371,8 @@ Lazy execution does not mean that every operator is streaming. Some operators mu
 | `cross_join()`         | Yes                | Yes (outer)             | Yes (inner)   |
 
 `order_by()` and `group_by()` therefore remain deferred at query construction time, but enumeration of either operator requires buffering its upstream input.
+
+On `FlpIt`, `skip_last()` streams with a look-ahead of `count` elements: it holds back at most `count` elements and releases each one as soon as `count` newer elements have been read. `take_last()` cannot know which elements are last before the source is exhausted, so its first element is produced only after the whole source was consumed (once); it keeps at most `count` elements in memory. `FlpList` knows its length, so both operators index directly (no buffering, no read-ahead), reading the length when enumeration starts. With `count <= 0`, `skip_last()` returns every element and `take_last()` is empty without enumerating the source.
 
 `join()`, `left_join()`, `full_join()` and `group_join()` build a hash lookup of the `inner` sequence when enumeration starts and stream the outer sequence (O(N + M)); `group_join()` builds it once the outer sequence yields its first element. `cross_join()` buffers `inner` into a list once (it is traversed again for every outer element) and streams the outer sequence; the output size is N × M.
 
@@ -521,8 +525,10 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_single.py                                         |          34 |
 | │   ├── test_single_or_default.py                              |          48 |
 | │   ├── test_skip.py                                           |          75 |
+| │   ├── test_skip_last.py                                      |        1221 |
 | │   ├── test_sum.py                                            |         134 |
 | │   ├── test_take.py                                           |          39 |
+| │   ├── test_take_last.py                                      |        1221 |
 | │   ├── test_then_by.py                                        |          40 |
 | │   ├── test_then_descending_by.py                             |          34 |
 | │   ├── test_to_dictionary.py                                  |          32 |
@@ -537,6 +543,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_task_rt.py                                        |          12 |
 |     └── test_task_rt_core.py                                   |          22 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        5155 |
+| GRAND TOTALS                                                   |        7597 |
 ================================================================================
 ```
