@@ -59,6 +59,7 @@ import socket
 import threading
 import time
 import warnings
+import weakref
 from collections import deque
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
@@ -2411,9 +2412,15 @@ class _Runtime:
     def __init__(self, *, min_workers: int, max_workers: int) -> None:
         self._pool = _WorkerPool(self, min_workers, max_workers)
         self._io = _IOReactor(self)
-        # Pending tasks, so shutdown can cancel them. add()/discard() are
-        # single atomic operations with the GIL and on free-threaded builds.
-        self._tasks: set[Task[Any]] = set()
+        # Pending tasks, so shutdown can cancel them. The registry is weak on
+        # purpose: a pending task that nothing references can never make
+        # progress (anything that can resume it -- the pool queue, a running
+        # worker, the timer, the selector, a continuation list -- holds it
+        # strongly), so it is garbage, exactly like an abandoned
+        # TaskCompletionSource in .NET. A strong registry would keep every
+        # such task, and the coroutine parked on it, alive for the life of
+        # the process.
+        self._tasks: weakref.WeakSet[Task[Any]] = weakref.WeakSet()
         self._state_lock = threading.Lock()
         self._shutdown_lock = threading.Lock()
         self._shutdown_requested = False
