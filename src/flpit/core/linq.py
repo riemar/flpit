@@ -290,8 +290,9 @@ def dotnet_context() -> AbstractContextManager[decimal.Context]:
     # 1. Create and configure pure Context object
     ctx = decimal.getcontext().copy()
     ctx.prec = max(ctx.prec, 29)
+    ctx.Emax = ctx.prec - 1
     ctx.traps[Overflow] = True
-    ctx.traps[Inexact] = True
+    ctx.traps[Inexact] = False
 
     return decimal.localcontext(ctx)
 
@@ -1314,11 +1315,16 @@ class FlpIt[TItem](Iterable[TItem]):
                 else:
                     try:
                         total += item
-                    except (Overflow, Inexact):
+                    except Overflow:
                         raise OverflowError(
                             "System.OverflowException: Value was either too large or too small for a Decimal."
                         )
                 count += 1
+
+        if isinstance(total, Decimal) and total.adjusted() >= decimal.getcontext().prec:
+            raise OverflowError(
+                "System.OverflowException: Value was either too large or too small for a Decimal."
+            )
 
         return total, count
 
