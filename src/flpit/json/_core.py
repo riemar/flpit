@@ -363,10 +363,11 @@ def _register_defaults() -> None:
             return
         from flpit.core.linq import FlpList
 
-        _collection_handlers.setdefault(FlpList, _CollectionHandler(FlpList, FlpList, list))
+        # _adopt: decoders build a fresh list, FlpList takes it over without copying
+        _collection_handlers.setdefault(FlpList, _CollectionHandler(FlpList, FlpList._adopt, list))
 
         try:
-            import whenever  # pyrefly: ignore [missing-import]
+            import whenever
         except ImportError:
             whenever = None
 

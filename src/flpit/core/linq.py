@@ -1635,7 +1635,22 @@ class FlpList[TItem](Collection[TItem]):
         else:
             init_list = typing_cast(Iterable[TItem], source)
 
-        self.__list: UserList[TItem] = UserList[TItem](init_list)
+        self.__list: UserList[TItem] = UserList(init_list)
+
+    @classmethod
+    def _adopt(cls, items: list[TItem]) -> FlpList[TItem]:
+        """Wrap a freshly built list without copying it (the caller hands over ownership).
+
+        Used by deserializers, which create the list themselves: skips the copy and the
+        argument handling of ``__init__``.
+        """
+        if type(items) is not list:
+            return cls(items)
+        wrapper: UserList[TItem] = UserList.__new__(UserList)
+        wrapper.data = items
+        instance = object.__new__(cls)
+        instance.__list = wrapper
+        return instance
 
     # =====================================================================
     # 1. THE ABC CONTRACT
