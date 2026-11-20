@@ -54,6 +54,9 @@ class _WireType:
     hints: dict[str, Any]
     namespace: types.ModuleType
     """the name space we are targeting"""
+    mode: str = "encode"
+    """"decode" structs hold registered collections as plain lists (decoded natively),
+    "encode" structs as _WireCollection (filled from FlpList & co. through the hook)."""
     struct: type | None = None
 
     @property
@@ -67,7 +70,7 @@ class _WireType:
     @property
     def ref_name(self: _WireType) -> str:
         identity = (
-            f"{self.source.__module__}_{self.source.__qualname__}"
+            f"{self.source.__module__}_{self.source.__qualname__}_{self.mode}"
         )
         return "_ref_" + re.sub(r"\W", "_", identity)
 
@@ -118,7 +121,7 @@ def _rewrite_type(
 
     if origin is None or origin is typing.Literal:
         if origin is None and _core.collection_handler(tp) is not None:
-            return _WireCollection[Any]
+            return list if owner.mode == "decode" else _WireCollection[Any]
         return tp
 
     args = get_args(tp)
@@ -126,7 +129,7 @@ def _rewrite_type(
     if _core.collection_handler(origin) is not None:
         # FlpList[T] & co. travel as plain lists inside the generated structs:
         # msgspec encodes them natively; _dec_hook rebuilds the real type on the dataclass side.
-        wire_generic: Any = _WireCollection
+        wire_generic: Any = list if owner.mode == "decode" else _WireCollection
         return wire_generic[_rewrite_type(args[0], owner, graph, resolve=resolve) if args else Any]
 
     if origin is typing.Annotated:
@@ -165,6 +168,7 @@ def _rewrite_type(
 
 def _discover_graph(
         roots: tuple[type, ...],
+        mode: str = "encode",
 ) -> dict[type, _WireType]:
     """Discover reachable dataclasses and resolve their annotations."""
     graph: dict[type, _WireType] = {}
@@ -180,6 +184,7 @@ def _discover_graph(
             source=source,
             hints=get_type_hints(source, include_extras=True),
             namespace=_generated_module(source),
+            mode=mode,
         )
         graph[source] = info
 
@@ -338,8 +343,9 @@ def _publish_structs(graph: dict[type, _WireType]) -> None:
 def _build_graph(
         roots: tuple[type, ...],
         jso: JsonSerializerOptions,
+        mode: str = "encode",
 ) -> dict[type, _WireType]:
-    graph = _discover_graph(roots)
+    graph = _discover_graph(roots, mode)
     _create_structs(graph, jso)
     _register_forward_refs(graph)
     _validate_structs(graph)
@@ -357,15 +363,15 @@ _registry_lock = threading.Lock()
 
 
 @lru_cache(maxsize=None)
-def _wrapped_lru(roots: tuple[type, ...], jso_id: str):
+def _wrapped_lru(roots: tuple[type, ...], jso_id: str, mode: str = "encode"):
     with _registry_lock:
         jso = _jso_registry[jso_id]
 
-    return _build_graph(roots, jso)
+    return _build_graph(roots, jso, mode)
 
 
 @lru_cache(maxsize=None)
-def _cached_wire_type(target_type: object, jso_id: str):
+def _cached_wire_type(target_type: object, jso_id: str, mode: str = "encode"):
     roots = tuple(_nested_dataclasses(target_type))
 
     if not roots:
@@ -375,7 +381,7 @@ def _cached_wire_type(target_type: object, jso_id: str):
         )
 
     graph_roots = tuple(sorted(set(roots), key=id))
-    graph = _wrapped_lru(graph_roots, jso_id)
+    graph = _wrapped_lru(graph_roots, jso_id, mode)
 
     return _rewrite_type(
         target_type,
@@ -385,13 +391,14 @@ def _cached_wire_type(target_type: object, jso_id: str):
     )
 
 
-def wire_type_for(target_type: type, jso: JsonSerializerOptions) -> type:
+def wire_type_for(target_type: type, jso: JsonSerializerOptions, mode: str = "encode") -> type:
+    """Generated struct type for ``target_type``; ``mode="decode"`` for decoding JSON."""
     jso_id = jso.fingerprint
 
     with _registry_lock:
         _jso_registry[jso_id] = jso
 
-    return _cached_wire_type(target_type, jso_id)
+    return _cached_wire_type(target_type, jso_id, mode)
 
 
 
@@ -399,48 +406,93 @@ def wire_type_for(target_type: type, jso: JsonSerializerOptions) -> type:
 # Registry hooks
 # ---------------------------------------------------------------------
 
+_PLAIN_ITEMS: frozenset[Any] = frozenset({int, float, str, bool, Any, type(None)})
+
+
+def _not_array(obj: Any) -> bool:
+    return isinstance(obj, (str, bytes, bytearray, Mapping)) or not isinstance(obj, Iterable)
+
+
+def _make_hook(tp: Any) -> typing.Callable[[Any], Any]:
+    """Build the conversion for one unknown type once; ``_dec_hook`` caches it per type."""
+    origin = get_origin(tp) or tp
+    args = get_args(tp)
+    item = args[0] if args else Any
+
+    if origin is _WireCollection:
+        # struct side of a registered collection: a validated plain list
+        as_list: Any = list[item]
+
+        def wire(obj: Any) -> Any:
+            if type(obj) is not list:
+                if _not_array(obj):
+                    raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
+                obj = list(obj)
+            return _WireCollection(msgspec.convert(obj, as_list, from_attributes=True, dec_hook=_dec_hook))
+        return wire
+
+    collection = _core.collection_handler(origin)
+    if collection is not None:
+        factory = collection.factory
+        base: Any = (collection.base if not args
+                     else tuple[item, ...] if collection.base is tuple
+                     else typing.cast(Any, collection.base)[item])
+        # Items coming from the struct side were validated already; plain values need no second pass.
+        reuse = collection.base is list and item in _PLAIN_ITEMS
+
+        def dataclass_side(obj: Any) -> Any:
+            # Lists here come from decoded structs (msgspec validated them); plain items need no second pass.
+            if reuse and (type(obj) is list or type(obj) is _WireCollection):
+                return factory(obj)
+            if type(obj) is not list:
+                if _not_array(obj):
+                    raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
+                obj = list(obj)
+            return factory(msgspec.convert(obj, base, from_attributes=True, dec_hook=_dec_hook))
+        return dataclass_side
+
+    handler = _core.value_handler(tp)
+    if handler is not None:
+        decode = handler.decode
+
+        def value(obj: Any) -> Any:
+            if isinstance(obj, tp):
+                return obj
+            try:
+                return decode(obj)
+            except (ValueError, TypeError) as exc:
+                raise msgspec.ValidationError(f"Invalid `{tp.__name__}`: {exc}") from exc
+        return value
+
+    def unsupported(obj: Any) -> Any:
+        raise msgspec.ValidationError(f"flpit.json: unsupported type {getattr(tp, '__qualname__', tp)!r}")
+    return unsupported
+
+
+_hooks: dict[Any, typing.Callable[[Any], Any]] = {}
+_hooks_version = -1
+
+
 def _dec_hook(tp: Any, obj: Any) -> Any:
     """Called by msgspec for every type it doesn't know (registry types).
 
     It runs on three occasions: decoding JSON (obj is the raw JSON value),
     converting the generated Struct into the dataclass and converting the
-    dataclass into the Struct when serializing (obj is already the target
-    kind of object in the last two).
+    dataclass into the Struct when serializing. The work per type is prepared
+    once (``_make_hook``) and cached until the registry changes.
     """
-    origin = get_origin(tp) or tp
-    if origin is _WireCollection:
-        if isinstance(obj, (str, bytes, bytearray, Mapping)) or not isinstance(obj, Iterable):
-            raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
-        args = get_args(tp)
-        items = obj if type(obj) is list else list(obj)
-        return _WireCollection(msgspec.convert(items, list[args[0]] if args else list,
-                                               from_attributes=True, dec_hook=_dec_hook))
-
-    collection = _core.collection_handler(origin)
-    if collection is not None:
-        if isinstance(obj, (str, bytes, bytearray, Mapping)) or not isinstance(obj, Iterable):
-            raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
-        args = get_args(tp)
-        if not args:
-            base: Any = collection.base
-        elif collection.base is tuple:
-            base = tuple[args[0], ...]
-        else:
-            base = typing.cast(Any, collection.base)[args[0]]
-        items = obj if type(obj) is list else list(obj)
-        converted = msgspec.convert(items, base, from_attributes=True, dec_hook=_dec_hook)
-        return collection.factory(converted)
-
-    handler = _core.value_handler(tp)
-    if handler is not None:
-        if isinstance(obj, tp):
-            return obj
-        try:
-            return handler.decode(obj)
-        except (ValueError, TypeError) as exc:
-            raise msgspec.ValidationError(f"Invalid `{tp.__name__}`: {exc}") from exc
-
-    raise msgspec.ValidationError(f"flpit.json: unsupported type {getattr(tp, '__qualname__', tp)!r}")
+    global _hooks_version
+    if _hooks_version != _core._registry_version:
+        _core.registry_version()          # loads the defaults on first use
+        _hooks.clear()
+        _hooks_version = _core._registry_version
+    try:
+        hook = _hooks[tp]
+    except KeyError:
+        hook = _hooks[tp] = _make_hook(tp)
+    except TypeError:                     # unhashable annotation
+        hook = _make_hook(tp)
+    return hook(obj)
 
 
 def _enc_hook(obj: Any) -> Any:
@@ -475,7 +527,7 @@ class Backend:
         if jso is None:
             jso = JsonSerializerOptions()
 
-        wire_type = wire_type_for(target, jso)
+        wire_type = wire_type_for(target, jso, "decode")
 
         try:
             parsed = _get_decoder(wire_type).decode(data)
