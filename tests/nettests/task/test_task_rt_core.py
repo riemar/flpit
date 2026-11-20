@@ -15,22 +15,48 @@ pytest skips so the missing contract remains visible for future decisions.
 """
 from __future__ import annotations
 
+import os
 import threading
+from datetime import timedelta
 
 import pytest
 
+from flpit.core.linq import ArgumentOutOfRangeError, InvalidOperationError
 from flpit.task import (
     AggregateError,
     CancellationTokenSource,
     InvalidStateError,
     OperationCanceledError,
     Task,
+    TaskCanceledError,
     TaskCompletionSource,
+    TaskCreationOptions,
 )
+from flpit.threading import ManualResetEvent
 
 
 def _unsupported(feature: str) -> None:
     pytest.skip(f"Upstream .NET test requires unsupported FlpIt API: {feature}")
+
+
+class _CountdownEvent:
+    """Minimal System.Threading.CountdownEvent for the ported tests."""
+
+    def __init__(self, count: int) -> None:
+        self._lock = threading.Lock()
+        self._event = threading.Event()
+        self.current_count = count
+        if count == 0:
+            self._event.set()
+
+    def signal(self) -> None:
+        with self._lock:
+            self.current_count -= 1
+            if self.current_count == 0:
+                self._event.set()
+
+    def wait(self, timeout: float) -> bool:
+        return self._event.wait(timeout)
 
 
 # TaskCompletionSource tests migrated from this .NET source file.
@@ -325,7 +351,31 @@ def test_RunTaskWaitAllTests() -> None:
 
 
 def test_RunLongRunningTaskTests() -> None:
-    _unsupported("TaskCreationOptions.LongRunning and explicit TaskScheduler behavior")
+    # This is computed such that this number of long-running tasks will result in a back-up
+    # without some assistance from TaskScheduler.RunBlocking() or TaskCreationOptions.LongRunning.
+    ntasks = (os.cpu_count() or 1) * 2
+
+    mre = ManualResetEvent(False)  # could just use a bool?
+    cde = _CountdownEvent(ntasks)  # to count the number of Tasks that successfully start
+    tasks = []
+    for _ in range(ntasks):
+        def work() -> None:
+            cde.signal()  # indicate that task has begun execution
+            mre.wait_one()
+
+        # Task.Factory.StartNew(..., CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+        tasks.append(Task.run(work, creation_options=TaskCreationOptions.LONG_RUNNING))
+
+    waitSucceeded = cde.wait(5)
+    if not waitSucceeded:
+        pytest.fail(
+            "RunLongRunningTaskTests - TaskCreationOptions.LongRunning:    > FAILED.  "
+            f"Timed out waiting for tasks to start. CDE.CurrentCount: {cde.current_count}, "
+            f"CDE.Initial Count: {ntasks}"
+        )
+
+    mre.set()
+    Task.wait_all(tasks)
 
 
 def test_RunRefactoringTests() -> None:
@@ -374,64 +424,199 @@ def test_RunTaskStatusTests_NegativeTests() -> None:
 
 
 def test_RunTaskWaitTest() -> None:
-    task = Task.run(lambda: None)
-    assert task.result() is None
-    assert task.done()
+    # wait on non-exceptional task
+    t = Task.run(lambda: None)
+    t.wait()
+
+    if not t.done():
+        pytest.fail("RunTaskWaitTest:  > error: task reported back !IsCompleted")
+
+    # wait on non-exceptional delay started task (new Task(...); t.Start()):
+    # not ported, unstarted tasks are not part of the FlpIt API, by design.
+
+    # wait on a task that has children (TaskCreationOptions.AttachedToParent):
+    # not ported, FlpIt has no parent/child tasks; every task behaves like a .NET
+    # Task.Run task, which denies child attachment.
 
 
 def test_Wait_SingleThreaded() -> None:
-    _unsupported("Task.CompletedTask, Wait/WaitAll/WaitAny, and no-thread runtime mode")
+    # Upstream: IsNotMultithreadingSupported. Every assertion but the last three holds on
+    # a multithreaded runtime too; those three are commented out below.
+    incompleteTask: Task[None] = TaskCompletionSource().task
+
+    Task.completed_task.wait()
+    assert Task.completed_task.wait(0)
+    assert not incompleteTask.wait(0)
+    assert not Task.wait_all([incompleteTask], timeout=0)
+    assert Task.wait_any([incompleteTask], timeout=0) == -1
+
+    assert not incompleteTask.wait(0.001)
+    assert not Task.wait_all([incompleteTask], timeout=0.001)
+    assert Task.wait_any([incompleteTask], timeout=0.001) == -1
+    # Assert.Throws<PlatformNotSupportedException>(() => incompleteTask.Wait());
+    # Assert.Throws<PlatformNotSupportedException>(() => Task.WaitAll([incompleteTask]));
+    # Assert.Throws<PlatformNotSupportedException>(() => Task.WaitAny([incompleteTask]));
+    # -> single-threaded runtimes only: on FlpIt these block forever, so they are not run.
 
 
 def test_RunTaskWaitTest_NegativeTests() -> None:
-    """Adapted exception part: result() re-raises the original task failure, not AggregateException."""
-    error = RuntimeError("myexception")
+    exceptionMsg = "myexception"
 
-    def fail() -> None:
-        raise error
+    # test exceptions
+    task = Task.run(lambda: None)
+    with pytest.raises(ArgumentOutOfRangeError):
+        task.wait(-0.002)
+    with pytest.raises(ArgumentOutOfRangeError):
+        task.wait(timedelta(milliseconds=-2))
+    with pytest.raises(ArgumentOutOfRangeError):
+        task.wait(timedelta(milliseconds=4_294_967_295))  # uint.MaxValue
 
-    task = Task.run(fail)
-    with pytest.raises(RuntimeError, match="myexception") as caught:
-        task.result()
-    assert caught.value is error
+    # wait on a task that gets canceled
+    cts = CancellationTokenSource()
+    ct = cts.token
+
+    taskStartedEvent = ManualResetEvent(False)
+
+    def spin_until_canceled() -> None:
+        taskStartedEvent.set()
+        while not ct.is_cancellation_requested:
+            pass
+        raise OperationCanceledError(token=ct)  # acknowledge the request
+
+    t: Task[None] = Task.run(spin_until_canceled, token=ct)
+
+    taskStartedEvent.wait_one()  # make sure the task starts running before we set the CTS
+    cts.cancel()
+
+    try:
+        t.wait()
+        pytest.fail("RunTaskWaitTest:  > error: Wait on exceptional task show have thrown.")
+    except Exception as e:
+        if (
+                not isinstance(e, AggregateError)
+                or len(e.exceptions) != 1
+                or not isinstance(e.exceptions[0], TaskCanceledError)
+        ):
+            pytest.fail("RunTaskWaitTest:  > error: Wait on exceptional task threw wrong exception.")
+
+    # wait on a task that throws
+    def throw() -> None:
+        raise Exception(exceptionMsg)
+
+    t = Task.run(throw)
+    try:
+        t.wait()
+        pytest.fail("RunTaskWaitTest:  > error: Wait on exceptional task show have thrown.")
+    except Exception as e:
+        if (
+                not isinstance(e, AggregateError)
+                or len(e.exceptions) != 1
+                or str(e.exceptions[0]) != exceptionMsg
+        ):
+            pytest.fail("RunTaskWaitTest:  > error: Wait on exceptional task threw wrong exception.")
+
+    # wait on a task that has an exceptional child task (TaskCreationOptions.AttachedToParent):
+    # not ported, FlpIt has no parent/child tasks; every task behaves like a .NET
+    # Task.Run task, which denies child attachment.
 
 
 def test_RunTaskRecursiveWaitTest() -> None:
-    """Adapted to native await composition; blocking nested .NET Wait is not portable."""
-    async def parent() -> int:
-        child = Task.run(lambda: 42)
-        return await child
+    t2: Task[None] | None = None
 
-    assert Task.run(parent).result() == 42
+    def outer() -> None:
+        nonlocal t2
+        t2 = Task.run(lambda: None)
+        t2.wait()
 
-@pytest.mark.skip(reason="FlpIt.task Task does not yet implement .wait(...)")
+    t = Task.run(outer)
+    t.wait()
+
+    if not t.done():
+        pytest.fail("RunTaskRecursiveWaitTest:  > error: task reported back !t.IsCompleted")
+
+    assert t2 is not None
+    if not t2.done():
+        pytest.fail("RunTaskRecursiveWaitTest:  > error: task reported back !t2.IsCompleted")
+
+    # Second half (new Task(...) / t.Start()): not ported, unstarted tasks are not part
+    # of the FlpIt API, by design. It repeats the first half with constructed tasks.
+
+
 def test_RunTaskWaitTimeoutTest() -> None:
-    """Adapted: wait(timeout) times out without completing/cancelling the task."""
-    started = threading.Event()
-    release = threading.Event()
+    mre = ManualResetEvent(False)
+    t = Task.run(lambda: mre.wait_one())
+    t.wait(0.1)
 
-    def blocked() -> int:
-        started.set()
-        release.wait(2)
-        return 42
+    if t.done():
+        pytest.fail("RunTaskWaitTimeoutTest:  > error: task reported back IsCompleted")
 
-    task = Task.run(blocked)
-    try:
-        assert started.wait(1)
-        assert not task.wait(0.05)
-        assert not task.done()
-    finally:
-        release.set()
-    assert task.result() == 42
-    assert task.done()
+    mre.set()
+    t.wait()
+
+    if not t.done():
+        pytest.fail("RunTaskWaitTimeoutTest:  > error: task reported back !IsCompleted")
 
 
 def test_RunTaskRecursiveWaitTimeoutTest() -> None:
-    _unsupported("Nested blocking waits and ThreadPool worker-injection behavior")
+    taskStartedMRE = ManualResetEvent(False)
+    mre = ManualResetEvent(False)
+    t2: Task[bool] | None = None
+
+    def outer() -> None:
+        nonlocal t2
+        taskStartedMRE.set()
+        t2 = Task.run(lambda: mre.wait_one())
+        t2.wait()
+
+    t = Task.run(outer)
+
+    taskStartedMRE.wait_one()  # wait for the outer task to start executing
+    t.wait(0.1)
+
+    if t.done():
+        pytest.fail("RunTaskRecursiveWaitTimeoutTest:  > error: task reported back t.IsCompleted")
+
+    assert t2 is not None
+    if t2.done():
+        pytest.fail("RunTaskRecursiveWaitTimeoutTest:  > error: task reported back t2.IsCompleted")
+
+    mre.set()
+    t.wait()
+
+    if not t.done():
+        pytest.fail("RunTaskRecursiveWaitTimeoutTest:  > error: task reported back !t.IsCompleted")
+
+    if not t2.done():
+        pytest.fail("RunTaskRecursiveWaitTimeoutTest:  > error: task reported back !t2.IsCompleted")
+
+    # Second half (new Task(...) / t.Start()): not ported, unstarted tasks are not part
+    # of the FlpIt API, by design. It repeats the first half with constructed tasks.
 
 
 def test_RunTaskCanceledExceptionTests() -> None:
-    _unsupported("TaskCanceledException constructors and .NET Task property on that exception")
+    tce: TaskCanceledError
+
+    # Test empty constructor
+    tce = TaskCanceledError()
+    assert tce.task is None  # "Expected null Task prop after empty ctor"
+    assert tce.inner_exception is None  # "Expected null InnerException prop after empty ctor"
+
+    message = "my exception message"
+    tce = TaskCanceledError(message)
+    assert str(tce) == message, "RunTaskCanceledExceptionTests:  Message != string passed to ctor(string)"
+    assert tce.task is None  # "Expected null Task prop after ctor(string)"
+    assert tce.inner_exception is None  # "Expected null InnerException prop after ctor(string)"
+
+    t1 = Task.run(lambda: None)
+    tce = TaskCanceledError(t1)
+    assert tce.task is t1, "RunTaskCanceledExceptionTests:  Task != task passed to ctor(Task)"
+    assert tce.inner_exception is None  # "Expected null InnerException prop after ctor(Task)"
+
+    ioe = InvalidOperationError()
+    tce = TaskCanceledError(message, ioe)
+    assert str(tce) == message, "RunTaskCanceledExceptionTests:  Message != string passed to ctor(string, exception)"
+    assert tce.task is None  # "Expected null Task prop after ctor(string, exception)"
+    assert tce.inner_exception is ioe, "RunTaskCanceledExceptionTests:  InnerException != exception passed to ctor(string, exception)"
 
 
 def test_RunTaskSchedulerExceptionTests() -> None:

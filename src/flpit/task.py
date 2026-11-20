@@ -70,7 +70,10 @@ import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import Context, copy_context
-from .threading import AsyncLocal, _run_with_context
+from enum import IntFlag
+from datetime import timedelta
+from .threading import AsyncLocal, _run_with_context, _to_seconds
+from flpit.core.linq import ArgumentError, ArgumentNullError, ArgumentOutOfRangeError
 
 import flpit
 
@@ -141,7 +144,106 @@ class AggregateError(Exception):
         super().__init__(message)
 
 
+class TaskCanceledError(OperationCanceledError):
+    """A task was canceled (.NET ``TaskCanceledException``).
+
+    ``TaskCanceledError()``, ``TaskCanceledError(message)``, ``TaskCanceledError(task)`` and
+    ``TaskCanceledError(message, inner_exception)`` mirror the .NET constructors.
+    ``task`` is the canceled task, when known; ``Task.wait`` / ``wait_all`` report a
+    canceled task as one of these inside their ``AggregateError``.
+    """
+
+    def __init__(
+            self,
+            message_or_task: "str | Task[Any] | None" = None,
+            inner_exception: BaseException | None = None,
+            *,
+            token: CancellationToken | None = None,
+    ) -> None:
+        task: Task[Any] | None = None
+        message = "A task was canceled."
+        if isinstance(message_or_task, Task):
+            task = message_or_task
+        elif message_or_task is not None:
+            message = message_or_task
+        super().__init__(message, token=token)
+        self.task = task
+        self.inner_exception = inner_exception
+        if inner_exception is not None:
+            self.__cause__ = inner_exception
+
+
+class TaskCreationOptions(IntFlag):
+    """Options for ``Task.run`` (.NET ``TaskCreationOptions``).
+
+    ``LONG_RUNNING`` runs the task on a dedicated thread instead of a pool worker (a
+    coroutine runs its first step there and resumes on the pool, as in .NET).
+    ``RUN_CONTINUATIONS_ASYNCHRONOUSLY`` makes even synchronous continuations
+    (``continue_with(..., EXECUTE_SYNCHRONOUSLY)``) run on the pool. flpit has no task
+    schedulers and no parent/child tasks: ``PREFER_FAIRNESS`` and ``HIDE_SCHEDULER`` have
+    nothing to act on, and every task behaves like a ``Task.Run`` task in .NET, which
+    denies child attachment, so ``ATTACHED_TO_PARENT`` and ``DENY_CHILD_ATTACH`` change nothing.
+    """
+
+    NONE = 0
+    PREFER_FAIRNESS = 0x01
+    LONG_RUNNING = 0x02
+    ATTACHED_TO_PARENT = 0x04
+    DENY_CHILD_ATTACH = 0x08
+    HIDE_SCHEDULER = 0x10
+    RUN_CONTINUATIONS_ASYNCHRONOUSLY = 0x40
+
+
+class TaskContinuationOptions(IntFlag):
+    """Options for ``Task.continue_with`` (.NET ``TaskContinuationOptions``).
+
+    The ``NOT_ON_*`` / ``ONLY_ON_*`` filters cancel the continuation when the antecedent
+    ends in an excluded state. ``EXECUTE_SYNCHRONOUSLY`` runs it on the thread that
+    completes the antecedent (or the calling thread, if it already has; the runtime's
+    timer and IO threads hand it to the pool instead). ``LAZY_CANCELLATION`` keeps a
+    cancelled continuation pending until its antecedent completes. The creation flags
+    behave as in ``TaskCreationOptions``.
+    """
+
+    NONE = 0
+    PREFER_FAIRNESS = 0x01
+    LONG_RUNNING = 0x02
+    ATTACHED_TO_PARENT = 0x04
+    DENY_CHILD_ATTACH = 0x08
+    HIDE_SCHEDULER = 0x10
+    LAZY_CANCELLATION = 0x20
+    RUN_CONTINUATIONS_ASYNCHRONOUSLY = 0x40
+    NOT_ON_RAN_TO_COMPLETION = 0x10000
+    NOT_ON_FAULTED = 0x20000
+    NOT_ON_CANCELED = 0x40000
+    ONLY_ON_RAN_TO_COMPLETION = NOT_ON_FAULTED | NOT_ON_CANCELED
+    ONLY_ON_FAULTED = NOT_ON_RAN_TO_COMPLETION | NOT_ON_CANCELED
+    ONLY_ON_CANCELED = NOT_ON_RAN_TO_COMPLETION | NOT_ON_FAULTED
+    EXECUTE_SYNCHRONOUSLY = 0x80000
+
+
+_CREATION_OPTIONS_MASK: Final = int(
+    TaskCreationOptions.PREFER_FAIRNESS | TaskCreationOptions.LONG_RUNNING
+    | TaskCreationOptions.ATTACHED_TO_PARENT | TaskCreationOptions.DENY_CHILD_ATTACH
+    | TaskCreationOptions.HIDE_SCHEDULER | TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY
+)
+_NOT_ON_ANYTHING: Final = int(
+    TaskContinuationOptions.NOT_ON_RAN_TO_COMPLETION | TaskContinuationOptions.NOT_ON_FAULTED
+    | TaskContinuationOptions.NOT_ON_CANCELED
+)
+
+
 class _TaskMeta(type):
+
+    @property
+    def completed_task(cls) -> "Task[None]":
+        """A task that has already completed successfully (.NET ``Task.CompletedTask``)."""
+        task = _completed_task[0]
+        if task is None:
+            task = cast("Task[None]", Task._promise(_get_runtime()))
+            task._finish(_SUCCEEDED)
+            _completed_task[0] = task
+        return task
 
     @property
     def asyncio_interop(cls: "_TaskMeta") -> bool:
@@ -194,6 +296,15 @@ class _ThreadState(threading.local):
 
 
 _thread_state = _ThreadState()
+
+
+def _start_dedicated_thread(task: "Task[Any]") -> None:
+    """Run ``task._start`` on a new background thread (.NET LongRunning)."""
+    threading.Thread(
+        target=task._start, name=f"{task.name}-long-running", daemon=True, **_fresh_context()
+    ).start()
+
+_completed_task: list["Task[None] | None"] = [None]
 
 # A worker may keep feeding itself continuations this many times before it
 # has to go back to the shared queue.
@@ -681,6 +792,16 @@ class Task(Generic[T], metaclass=_TaskMeta):
     FAILED = _FAILED
     CANCELLED = _CANCELLED
 
+    # TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY: hand even synchronous
+    # continuations to the pool instead of running them on the completing thread.
+    _async_continuations: bool = False
+    _creation_options: "TaskCreationOptions" = TaskCreationOptions.NONE
+
+    @property
+    def creation_options(self) -> "TaskCreationOptions":
+        """The options the task was created with (.NET ``Task.CreationOptions``)."""
+        return self._creation_options
+
     def __init__(
             self,
             runtime: "_Runtime",
@@ -810,6 +931,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             *args: Any,
             token: CancellationToken | None = None,
             pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
             **kwargs: Any,
     ) -> Task[R]: ...
 
@@ -822,6 +944,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             *args: Any,
             token: CancellationToken | None = None,
             pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
             **kwargs: Any,
     ) -> Task[R]: ...
 
@@ -833,6 +956,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             *args: Any,
             token: CancellationToken | None = None,
             pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
             **kwargs: Any,
     ) -> Task[Any]:
         """Schedule a coroutine/awaitable or ordinary callable on the pool.
@@ -841,6 +965,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
         before the work starts. With ``pass_token=True``, that same token is
         also supplied to the target callable as the keyword argument ``token``
         (useful for cooperative worker functions).
+
+        ``creation_options`` (.NET ``TaskFactory.StartNew``): ``LONG_RUNNING`` runs
+        the work on a dedicated thread instead of a pool worker, for work that
+        blocks for a long time; see ``TaskCreationOptions`` for the others.
         """
         kind = type(work)
         is_coroutine = kind is CoroutineType
@@ -861,10 +989,22 @@ class Task(Generic[T], metaclass=_TaskMeta):
             if is_coroutine:
                 cast(Any, work).close()
             raise ValueError("pass_token=True requires an explicit token")
+        if creation_options and (
+                not isinstance(creation_options, int) or int(creation_options) & ~_CREATION_OPTIONS_MASK
+        ):
+            if is_coroutine:
+                cast(Any, work).close()
+            raise ArgumentOutOfRangeError("creationOptions", "The value needs to be a valid TaskCreationOptions.")
         runtime = _get_runtime()
         task = cls(runtime, token=token)
         task._pass_token = pass_token
-        runtime._submit(task, work, args, kwargs)
+        task._creation_options = TaskCreationOptions(creation_options)
+        if creation_options & TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY:
+            task._async_continuations = True
+        if creation_options & TaskCreationOptions.LONG_RUNNING:
+            runtime._submit_long_running(task, work, args, kwargs)
+        else:
+            runtime._submit(task, work, args, kwargs)
         return task
 
     @classmethod
@@ -1002,6 +1142,9 @@ class Task(Generic[T], metaclass=_TaskMeta):
         self._finish(_SUCCEEDED)
 
     def _delay_cancelled(self) -> None:
+        # As .NET's DelayPromiseWithCancellation: never run continuations (such as
+        # continue_with(..., EXECUTE_SYNCHRONOUSLY)) inside the caller's cancel().
+        self._async_continuations = True
         self._finish(
             _CANCELLED,
             exception=OperationCanceledError("Operation token was cancelled", token=self._token),
@@ -1079,6 +1222,151 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if self._state is _PENDING:
             self._wait()
         return self._raise_or_return()
+
+    # ------------------------------------------------------------------
+    # Blocking waits (.NET Task.Wait / Task.WaitAll / Task.WaitAny)
+    # ------------------------------------------------------------------
+
+    def wait(
+            self,
+            timeout: "float | timedelta | CancellationToken | None" = None,
+            token: CancellationToken | None = None,
+    ) -> bool:
+        """Block until the task completes; ``False`` if ``timeout`` (seconds) elapses first.
+
+        Like .NET ``Task.Wait`` and unlike ``result()``, a faulted or canceled task raises
+        ``AggregateError`` (a canceled task contributes a ``TaskCanceledError``). A cancelled
+        ``token`` raises ``OperationCanceledError``; it does not cancel the task.
+        ``wait(token)`` is accepted as the token-only overload.
+        """
+        if isinstance(timeout, CancellationToken):
+            timeout, token = None, timeout
+        seconds = _to_seconds(timeout, "millisecondsTimeout", bounded=True)
+        token = _validate_token(token)
+        if self._state is _SUCCEEDED:
+            return True
+        if not self._internal_wait(seconds, token):
+            return False
+        # Cancellation of the wait wins over the task's own outcome when both happened
+        # (.NET makes the same choice for determinism when one token cancels both).
+        if self._state is _CANCELLED:
+            token.throw_if_cancellation_requested()
+        if self._state is not _SUCCEEDED:
+            raise AggregateError(_exceptions_of(self))
+        return True
+
+    def _internal_wait(self, seconds: float | None, token: CancellationToken) -> bool:
+        if self._state is not _PENDING:
+            return True
+        if seconds is None and not token.can_be_cancelled:
+            self._wait()  # may run a not-yet-started task inline, as .NET does
+            return True
+        return _block_until((self,), seconds, token, wait_any=False) is not None
+
+    @classmethod
+    def wait_all(
+            cls,
+            *tasks: "Task[Any] | Iterable[Task[Any]]",
+            timeout: "float | timedelta | None" = None,
+            token: CancellationToken | None = None,
+    ) -> bool:
+        """Block until every task completes (.NET ``Task.WaitAll``).
+
+        Accepts tasks as arguments or one iterable. Returns ``False`` if ``timeout``
+        (seconds) elapses first. If any task faulted or was canceled, raises one
+        ``AggregateError`` with all their exceptions, in task order. A cancelled ``token``
+        raises ``OperationCanceledError``.
+        """
+        items = _tasks_argument(tasks)
+        seconds = _to_seconds(timeout, "millisecondsTimeout", bounded=True)
+        token = _validate_token(token)
+        token.throw_if_cancellation_requested()
+
+        pending = [task for task in items if task._state is _PENDING]
+        if pending:
+            if seconds is None and not token.can_be_cancelled:
+                for task in reversed(pending):
+                    task._wait()  # runs not-yet-started tasks inline, then blocks
+            elif _block_until(pending, seconds, token, wait_any=False) is None:
+                return False
+
+        exception_seen = any(task._state is _FAILED for task in items)
+        if exception_seen or any(task._state is _CANCELLED for task in items):
+            if not exception_seen:
+                token.throw_if_cancellation_requested()
+            raise AggregateError([error for task in items for error in _exceptions_of(task)])
+        return True
+
+    @classmethod
+    def wait_any(
+            cls,
+            *tasks: "Task[Any] | Iterable[Task[Any]]",
+            timeout: "float | timedelta | None" = None,
+            token: CancellationToken | None = None,
+    ) -> int:
+        """Block until any task completes and return its index (.NET ``Task.WaitAny``).
+
+        Returns ``-1`` if ``timeout`` (seconds) elapses first, or at once for no tasks.
+        Never raises for the task's own failure. A cancelled ``token`` raises
+        ``OperationCanceledError``.
+        """
+        items = _tasks_argument(tasks)
+        seconds = _to_seconds(timeout, "millisecondsTimeout", bounded=True)
+        token = _validate_token(token)
+        token.throw_if_cancellation_requested()
+
+        for index, task in enumerate(items):
+            if task._state is not _PENDING:
+                return index
+        if not items:
+            return -1
+        first = _block_until(items, seconds, token, wait_any=True)
+        if first is None:
+            return -1
+        return next(index for index, task in enumerate(items) if task is first)
+
+    # ------------------------------------------------------------------
+    # Continuations (.NET Task.ContinueWith)
+    # ------------------------------------------------------------------
+
+    def continue_with[R](
+            self,
+            continuation: Callable[..., R | Awaitable[R]],
+            state: Any = _MISSING,
+            *,
+            token: CancellationToken | None = None,
+            options: TaskContinuationOptions = TaskContinuationOptions.NONE,
+    ) -> "Task[R]":
+        """Run ``continuation(antecedent)`` (or ``continuation(antecedent, state)``) once this
+        task completes, and return a task for its result (.NET ``Task.ContinueWith``).
+
+        The continuation runs on the pool, whatever the antecedent's outcome, unless
+        ``options`` filter it out (``NOT_ON_*`` / ``ONLY_ON_*``): then the returned task
+        is canceled. ``EXECUTE_SYNCHRONOUSLY`` runs it on the completing thread,
+        ``LONG_RUNNING`` on a dedicated thread. Cancelling ``token`` cancels a continuation
+        that has not started yet; with ``LAZY_CANCELLATION`` only once the antecedent has
+        completed. ``state`` becomes the returned task's ``async_state``.
+
+        Deviation: an ``async def`` continuation is awaited and the returned task carries
+        its result (as ``Task.run`` does); .NET returns a ``Task<Task<T>>`` here.
+        """
+        if continuation is None:
+            raise ArgumentNullError("continuationFunction")
+        if not callable(continuation):
+            raise TypeError("continuation must be callable")
+        token = _validate_token(token)
+        options = _validate_continuation_options(options)
+
+        runtime = _get_runtime()
+        follower: Task[R] = Task(runtime, token=token)
+        if state is not _MISSING:
+            follower.async_state = state
+        follower._creation_options = TaskCreationOptions(options & _CREATION_OPTIONS_MASK)
+        if options & TaskContinuationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY:
+            follower._async_continuations = True
+        runtime._track(follower)
+        _ContinueWith(self, follower, continuation, state, token, options).attach()
+        return follower
 
     def exception(self) -> BaseException | None:
         if self._state is _PENDING:
@@ -1266,7 +1554,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             event.set()
         if continuations is not None:
             thread = _thread_state
-            if thread.depth >= _MAX_COMPLETION_DEPTH and runtime._pool.queue(
+            if (thread.depth >= _MAX_COMPLETION_DEPTH or self._async_continuations) and runtime._pool.queue(
                     functools.partial(self._run_continuations, continuations)
             ):
                 return True
@@ -1522,6 +1810,222 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
 
 _current_task: AsyncLocal[Task[Any] | None] = AsyncLocal()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for wait / wait_all / wait_any / continue_with
+# ---------------------------------------------------------------------------
+
+def _validate_token(token: CancellationToken | None) -> CancellationToken:
+    if token is None:
+        return _NONE_TOKEN
+    if not isinstance(token, CancellationToken):
+        raise TypeError("token must be a CancellationToken or None")
+    return token
+
+
+def _tasks_argument(tasks: tuple[Any, ...]) -> list[Task[Any]]:
+    """Normalize ``wait_all(t1, t2)`` / ``wait_all([t1, t2])`` and validate like .NET."""
+    if len(tasks) == 1 and not isinstance(tasks[0], Task):
+        if tasks[0] is None:
+            raise ArgumentNullError("tasks")
+        tasks = tuple(tasks[0])
+    items = list(tasks)
+    for task in items:
+        if not isinstance(task, Task):
+            raise ArgumentError(
+                "The tasks argument included a null value. (Parameter 'tasks')"
+                if task is None
+                else f"The tasks argument must contain Task instances, not {type(task).__name__}. (Parameter 'tasks')"
+            )
+    return items
+
+
+def _exceptions_of(task: Task[Any]) -> list[Exception]:
+    """A completed task's exceptions as .NET ``Task.Exception.InnerExceptions`` lists them."""
+    if task._state is _CANCELLED:
+        cancellation = task._cancellation_exception()
+        if isinstance(cancellation, TaskCanceledError) and cancellation.task is task:
+            return [cancellation]
+        return [TaskCanceledError(task, inner_exception=None, token=cancellation.token)]
+    error = task._exception
+    if error is None or task._state is not _FAILED:
+        return []
+    if isinstance(error, AggregateError):
+        return list(error.exceptions)
+    if isinstance(error, Exception):
+        return [error]
+    return [Exception(error)]  # BaseException (e.g. KeyboardInterrupt) from the task body
+
+
+def _block_until(
+        tasks: "Iterable[Task[Any]]", seconds: float | None, token: CancellationToken, *, wait_any: bool
+) -> "Task[Any] | None":
+    """Block the calling thread until all (or any) of ``tasks`` complete.
+
+    Returns the task that satisfied the wait (the last one for all, the first one for
+    any) or ``None`` on timeout; raises ``OperationCanceledError`` if ``token`` is
+    cancelled first. Like ``Task.result()``, a blocked pool worker is reported to the
+    pool so that it can inject a replacement.
+    """
+    state = _thread_state
+    if state.internal:
+        raise RuntimeError("Task.wait() would block the runtime's timer/IO thread; use 'await task'")
+    items = list(tasks)
+    signal = threading.Event()
+    lock = threading.Lock()
+    remaining = [len(items)]
+    winner: list[Task[Any] | None] = [None]
+
+    def on_completed(task: Task[Any]) -> None:
+        with lock:
+            remaining[0] -= 1
+            if winner[0] is None and (wait_any or remaining[0] == 0):
+                winner[0] = task
+            else:
+                return
+        signal.set()
+
+    attached: list[Task[Any]] = []
+    for task in items:
+        if task._add_continuation(on_completed):
+            attached.append(task)
+        else:
+            on_completed(task)
+    registration = token.register(signal.set) if token.can_be_cancelled else None
+    try:
+        if winner[0] is None:
+            pool = state.pool
+            if pool is not None:
+                pool._worker_blocked()
+            try:
+                deadline = None if seconds is None else time.monotonic() + seconds
+                while winner[0] is None and not token.is_cancellation_requested:
+                    if deadline is None:
+                        wait_for = _TimerQueue._MAX_WAIT
+                    else:
+                        wait_for = deadline - time.monotonic()
+                        if wait_for <= 0:
+                            break
+                        wait_for = min(wait_for, _TimerQueue._MAX_WAIT)
+                    signal.wait(wait_for)
+            finally:
+                if pool is not None:
+                    pool._worker_unblocked()
+        if winner[0] is not None:
+            return winner[0]
+        token.throw_if_cancellation_requested()
+        return None
+    finally:
+        if registration is not None:
+            registration.dispose()
+        for task in attached:
+            if task._state is _PENDING:
+                task._remove_continuation(on_completed)
+
+
+def _validate_continuation_options(options: Any) -> TaskContinuationOptions:
+    """.NET ``CreationOptionsFromContinuationOptions`` validation."""
+    if not isinstance(options, int) or isinstance(options, bool):
+        raise TypeError("options must be TaskContinuationOptions")
+    illegal = TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY | TaskContinuationOptions.LONG_RUNNING
+    if options & illegal == illegal:
+        raise ArgumentOutOfRangeError(
+            "continuationOptions",
+            "The specified TaskContinuationOptions combined LongRunning and ExecuteSynchronously.  "
+            "Synchronous continuations should not be long running.",
+        )
+    # Plain ints: ``~`` on an IntFlag only complements its defined members, so unknown
+    # bits would pass unnoticed.
+    allowed = int(
+        _CREATION_OPTIONS_MASK | _NOT_ON_ANYTHING
+        | TaskContinuationOptions.LAZY_CANCELLATION | TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY
+    )
+    if int(options) & ~allowed:
+        raise ArgumentOutOfRangeError("continuationOptions", "The value needs to be a valid TaskContinuationOptions.")
+    if options & _NOT_ON_ANYTHING == _NOT_ON_ANYTHING:
+        raise ArgumentOutOfRangeError(
+            "continuationOptions",
+            "The specified TaskContinuationOptions excluded all continuation kinds.",
+        )
+    return TaskContinuationOptions(options)
+
+
+class _ContinueWith:
+    """Wires one ``continue_with`` call: antecedent -> follower (.NET ``ContinueWithTaskContinuation``).
+
+    The follower is an ordinary flpit task whose work is only handed out once the
+    antecedent completes, so ``Task._start`` provides cancellation-before-start, the
+    captured context and coroutine driving. ``_lock`` decides the race between the
+    antecedent completing (schedule) and the token being cancelled (cancel early).
+    """
+
+    __slots__ = ("antecedent", "follower", "continuation", "state", "token", "options", "_lock", "_decided")
+
+    def __init__(
+            self, antecedent: Task[Any], follower: Task[Any], continuation: Callable[..., Any],
+            state: Any, token: CancellationToken, options: TaskContinuationOptions,
+    ) -> None:
+        self.antecedent = antecedent
+        self.follower = follower
+        self.continuation = continuation
+        self.state = state
+        self.token = token
+        self.options = options
+        self._lock = threading.Lock()
+        self._decided = False
+
+    def attach(self) -> None:
+        lazy = bool(self.options & TaskContinuationOptions.LAZY_CANCELLATION)
+        if self.token.can_be_cancelled and not lazy:
+            if self.token.is_cancellation_requested:
+                self._cancel_early()
+                return
+            # Disposed by the follower's _finish().
+            self.follower._token_registration = self.token.register(self._cancel_early)
+        if not self.antecedent._add_continuation(self):
+            self(self.antecedent)  # already complete: run (or schedule) it now
+
+    def _decide(self) -> bool:
+        with self._lock:
+            if self._decided:
+                return False
+            self._decided = True
+            return True
+
+    def _cancel_early(self) -> None:
+        if self._decide():
+            self.antecedent._remove_continuation(self)
+            self.follower._finish(
+                _CANCELLED, exception=TaskCanceledError(self.follower, token=self.token)
+            )
+
+    def __call__(self, antecedent: Task[Any]) -> None:
+        """Runs when the antecedent completes (possibly on the completing thread)."""
+        if not self._decide():
+            return
+        options = self.options
+        follower = self.follower
+        outcome = antecedent._state
+        if (
+                (outcome is _SUCCEEDED and options & TaskContinuationOptions.NOT_ON_RAN_TO_COMPLETION)
+                or (outcome is _FAILED and options & TaskContinuationOptions.NOT_ON_FAULTED)
+                or (outcome is _CANCELLED and options & TaskContinuationOptions.NOT_ON_CANCELED)
+        ):
+            follower._finish(_CANCELLED, exception=TaskCanceledError(follower))
+            return
+        continuation, state = self.continuation, self.state
+        if state is _MISSING:
+            follower._work = (continuation, (antecedent,), {})
+        else:
+            follower._work = (continuation, (antecedent, state), {})
+        if options & TaskContinuationOptions.LONG_RUNNING:
+            _start_dedicated_thread(follower)
+        elif options & TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY and not _thread_state.internal:
+            follower._start()
+        else:
+            # If the pool closes in between, shutdown's final sweep cancels the task.
+            follower._runtime._pool.queue(follower._start)
 
 
 class TaskCompletionSource(Generic[T]):
@@ -2483,6 +2987,19 @@ class _Runtime:
             raise
         # If the pool closes in between, shutdown's final sweep cancels the task.
         self._pool.queue(task._start)
+
+    def _submit_long_running(
+            self, task: Task[Any], work: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
+        """TaskCreationOptions.LONG_RUNNING: start the task on a dedicated thread."""
+        task._work = (work, args, kwargs)
+        try:
+            self._track(task)
+        except BaseException:
+            task._work = None
+            _close_if_coroutine(work)
+            raise
+        _start_dedicated_thread(task)
 
     def _enqueue_task(self, task: Task[Any]) -> None:
         """Make a claimed task runnable."""

@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from flpit.task import CancellationTokenSource, OperationCanceledError, Task
+from flpit.task import CancellationTokenSource, OperationCanceledError, Task, TaskContinuationOptions
+from flpit.threading import ThreadLocal
 
 
 def _unsupported(feature: str) -> None:
@@ -144,7 +145,22 @@ def test_RunDelayTests_NegativeCases() -> None:
 
 
 def test_TaskDelay_Cancellation_ContinuationsInvokedAsynchronously() -> None:
-    _unsupported("ContinueWith, ExecuteSynchronously, thread-local continuation assertions")
+    cts = CancellationTokenSource()
+
+    tl: ThreadLocal[int] = ThreadLocal(default=0)
+    seen: list[int] = []
+    # Task.Delay(-1, token): FlpIt's Task.delay has no infinite delay; an hour stands in.
+    c = Task.delay(3600, token=cts.token).continue_with(
+        lambda _: seen.append(tl.value),  # Assert.Equal(0, tl.Value), checked below
+        options=TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY,
+    )
+
+    tl.value = 42
+    cts.cancel()
+    tl.value = 0
+
+    c.result()  # c.GetAwaiter().GetResult()
+    assert seen == [0]
 
 
 def test_RunExceptionWrappingTest() -> None:

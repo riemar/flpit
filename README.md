@@ -490,6 +490,9 @@ Key features:
 
 - **Task scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
 - **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
+- **Blocking waits:** `task.wait()`, `Task.wait_all()` and `Task.wait_any()` block with an optional timeout and token, and return `False` / `-1` on timeout. As in .NET, a faulted or canceled task raises one `AggregateError` (canceled tasks contribute a `TaskCanceledError`); `result()` keeps raising the original exception.
+- **Continuations:** `task.continue_with(fn, [state], token=..., options=TaskContinuationOptions...)` runs `fn(antecedent)` when the task completes, with the `NOT_ON_*` / `ONLY_ON_*` filters, `EXECUTE_SYNCHRONOUSLY`, `LAZY_CANCELLATION` and `LONG_RUNNING`.
+- **Long-running work:** `Task.run(fn, creation_options=TaskCreationOptions.LONG_RUNNING)` runs blocking work on a dedicated thread instead of a pool worker.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation, cancellation callbacks, timeouts, and linked cancellation tokens.
 - **Resource management:** Configure worker capacity with `Task.configure(min_workers=..., max_workers=...)`; work beyond that queues up (the queue is unbounded) and workers are added when the pool is starved or blocked in `Task.result()`. Calling `Task.result()` inside a task on a task that has not started yet runs it inline, as .NET does. Shut down the process-wide runtime with an observable shutdown report.
 - **Asyncio interoperability:** FlpIt Tasks can be awaited directly inside asyncio coroutines when Task.asyncio_interop is enabled. 
@@ -501,6 +504,8 @@ Key features:
 The runtime starts lazily and manages its own lifecycle. Cancellation of running synchronous functions is cooperative.
 
 See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/examples/task) for usage examples.
+
+`flpit.threading` adds the matching .NET threading primitives: `SemaphoreSlim` (`wait()` / `await wait_async()`, for example to limit parallelism; see the [throttling example](https://github.com/riemar/flpit/tree/main/examples/threading)), `ThreadLocal[T]` (per-thread values with a value factory and `values` tracking, the counterpart of `AsyncLocal[T]`), and `ManualResetEvent`.
 
 ## 🌊 Async Queries (`AsyncFlpIt`)
 ⚠️ **Experimental, pre-release only.** Added in `0.3.4.dev1`; not in the current stable release.
@@ -680,13 +685,21 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_union.py                                          |          62 |
 | │   ├── test_where.py                                          |          76 |
 | │   └── test_zip.py                                            |         101 |
-| └── task/                                                      |             |
-|     ├── test_cancellation.py                                   |          69 |
-|     ├── test_task_completion_source.py                         |          26 |
-|     ├── test_task_factory.py                                   |           3 |
-|     ├── test_task_rt.py                                        |          12 |
-|     └── test_task_rt_core.py                                   |          22 |
+| ├── task/                                                      |             |
+| │   ├── test_cancellation.py                                   |          69 |
+| │   ├── test_task_completion_source.py                         |          26 |
+| │   ├── test_task_continue_with.py                             |          15 |
+| │   ├── test_task_continue_with_func_and_action.py             |          16 |
+| │   ├── test_task_continue_with_func_and_action_args.py        |          20 |
+| │   ├── test_task_factory.py                                   |           3 |
+| │   ├── test_task_rt.py                                        |          13 |
+| │   ├── test_task_rt_core.py                                   |          27 |
+| │   └── test_task_wait_all_any.py                              |          62 |
+| └── threading/                                                 |             |
+|     ├── test_semaphore_slim.py                                 |          39 |
+|     ├── test_semaphore_slim_cancellation.py                    |           4 |
+|     └── test_thread_local.py                                   |          15 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        8172 |
+| GRAND TOTALS                                                   |        8349 |
 ================================================================================
 ```
