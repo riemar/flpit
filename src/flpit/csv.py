@@ -6,17 +6,19 @@ from csv import DictReader
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator, TextIO
-
-import msgspec
+from typing import Any, Callable, Iterator, TextIO
 
 from flpit import FlpIt, FlpList
 from flpit.json import (
+    ConversionError,
     JProp,
     JsonNamingPolicy,
     JsonSerializerOptions,
-    wire_type_for,
+    _impl as _json_backend,
 )
+
+CsvConversionError = ConversionError
+"""Raised when a CSV value cannot be converted to the field type (a ValueError)."""
 
 
 class CsvCol(JProp):
@@ -82,19 +84,12 @@ class CsvLoader:
         """
         opts = options or CsvOptions()
         jso = _json_options_for_csv(opts.naming_policy)
-        target: type[list[T]] = list[item_type]
-        wire_type = wire_type_for(target, jso)
 
         with CsvLoader._open_text(data, opts) as stream:
             reader: DictReader[Any] = CsvLoader._reader(stream, opts)
             rows = CsvLoader._read_rows(reader)
 
-        output = msgspec.convert(
-            rows,
-            wire_type,
-            from_attributes=True,
-            strict=False,
-        )
+        output = _json_backend().csv_list(rows, item_type, jso)
         del rows
 
         return FlpList[T](output)
@@ -113,10 +108,10 @@ class CsvLoader:
         """
         opts = options or CsvOptions()
         jso = _json_options_for_csv(opts.naming_policy)
-        wire_item_type = wire_type_for(item_type, jso)
+        convert = _json_backend().csv_item_converter(item_type, jso)
 
         return FlpIt[T](
-            CsvLoader._iter_items(data, item_type, wire_item_type, opts)
+            CsvLoader._iter_items(data, convert, opts)
         )
 
     @staticmethod
@@ -166,8 +161,7 @@ class CsvLoader:
     @staticmethod
     def _iter_items[T](
             data: str | Path,
-            item_type: type[T],
-            wire_item_type: Any,
+            convert: Callable[[dict[str, Any]], T],
             options: CsvOptions,
     ) -> Iterator[T]:
         with CsvLoader._open_text(data, options) as stream:
@@ -180,9 +174,4 @@ class CsvLoader:
                         "contains more values than the header"
                     )
 
-                yield msgspec.convert(
-                    row,
-                    wire_item_type,
-                    from_attributes=True,
-                    strict=False,
-                )
+                yield convert(row)

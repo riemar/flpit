@@ -3,7 +3,11 @@ from datetime import datetime, date
 import json
 
 from flpit import FlpList
+import pytest
+
 from flpit.json import JsonSerializerOptions
+
+pytestmark = pytest.mark.usefixtures("json_backend")
 
 @dataclass(slots=True)
 class Member:

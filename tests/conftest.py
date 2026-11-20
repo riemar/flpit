@@ -104,3 +104,22 @@ def non_collection():
     def _create(source: Iterable[Any]) -> NonCollectionIterable:
         return NonCollectionIterable(source)
     return _create
+
+# ---------------------------------------------------------------------------
+# flpit.json backends: modules opt in with
+#     pytestmark = pytest.mark.usefixtures("json_backend")
+# and then run once per backend available in this environment.
+# ---------------------------------------------------------------------------
+from flpit.json import available_backends as _available_json_backends
+
+
+@pytest.fixture(params=_available_json_backends())
+def json_backend(request: pytest.FixtureRequest):
+    import flpit.json as flpit_json
+
+    previous = flpit_json.get_backend()
+    flpit_json.set_backend(request.param)
+    try:
+        yield request.param
+    finally:
+        flpit_json.set_backend(previous)

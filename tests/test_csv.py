@@ -2,11 +2,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
-import msgspec
 import pytest
 
-from flpit.csv import CsvCol, CsvLoader, CsvOptions
+from flpit.csv import CsvCol, CsvConversionError, CsvLoader, CsvOptions
 from flpit.json import JsonNamingPolicy
+
+pytestmark = pytest.mark.usefixtures("json_backend")
 
 
 @dataclass
@@ -84,7 +85,7 @@ class TestCsvLoader:
         assert next(iterator) == CsvTestModel("Ada", 3)
 
         # The invalid second row fails only when requested.
-        with pytest.raises(msgspec.ValidationError):
+        with pytest.raises(CsvConversionError):
             next(iterator)
 
     def test_empty_input_requires_header(self) -> None:

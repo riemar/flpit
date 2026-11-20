@@ -133,8 +133,9 @@ print(list(backend_engineers))
 
 ## JSON Serialization
 
-FlpIt provides typed JSON serialization and deserialization through `flpit.json.JsonConvert`, 
-backed by [`msgspec`](https://github.com/jcrist/msgspec). 
+FlpIt provides typed JSON serialization and deserialization through `flpit.json.JsonConvert`.
+It uses [`msgspec`](https://github.com/jcrist/msgspec) when available and falls back to a
+pure-Python backend on the standard library `json` module everywhere else (see *Backends* below).
 
 It supports dataclasses, nested models, generic containers, configurable property naming, and explicit field metadata.
 
@@ -175,7 +176,35 @@ people: FlpList[Person] = FlpList.from_json(people_json, Person)
 
 For large outputs, `JsonConvert.serialize_to()` writes a JSON array to a file-like stream without first materializing the entire serialized document.
 
-By default, deserialization returns instances of the requested model type. Setting `native=True` opts into the generated `msgspec.Struct` representation instead, trading the original model type for the native representation and its performance characteristics.
+By default, deserialization returns instances of the requested model type. Setting `native=True` opts into the generated `msgspec.Struct` representation instead, trading the original model type for the native representation and its performance characteristics (msgspec backend only; the native backend ignores it).
+
+### Custom types
+
+`FlpList[T]` fields work out of the box. Other types are added through the type registry:
+
+```python
+from flpit.json import register_type, register_collection
+
+register_type(Money, decode=Money.parse, encode=Money.format)   # stored as one JSON value
+register_collection(Bag, base=set)                              # Bag[T] stored as a JSON array
+```
+
+When [`whenever`](https://github.com/ariebovenberg/whenever) is installed, its date/time types
+(`Instant`, `ZonedDateTime`, `Date`, `Time`, `TimeDelta`, `ItemizedDelta`, ...) are registered
+automatically and use whenever's ISO 8601 parsing and formatting.
+
+### Backends
+
+| Backend   | Used when                                     | Notes                                       |
+|-----------|-----------------------------------------------|---------------------------------------------|
+| `msgspec` | msgspec is installed (default on CPython)     | fastest                                     |
+| `native`  | msgspec is not available (PyPy, Pyodide, ...) | stdlib `json`, roughly 2x slower, no deps   |
+
+Both backends implement the same contract and run the same test suite. Choose explicitly with
+`flpit.json.set_backend("native")` or the `FLPIT_JSON_BACKEND` environment variable; `get_backend()`
+reports the active one. Float output may differ in exponent spelling (`1e16` vs `1e+16`); the values are identical.
+
+`import flpit` does not load the JSON support at all; it is loaded on first use.
 
 ## 🔬 LINQ Semantics, Python Runtime
 
@@ -525,6 +554,10 @@ flp.ait(range(10)).count().result()      # from sync code: block on the Task
 ```bash
 uv add flpit
 ```
+
+msgspec is installed automatically on CPython. On other interpreters (PyPy, Pyodide) flpit
+installs without it and uses the native JSON backend. Free-threaded CPython 3.13t is not
+supported by msgspec: install there with `--no-deps`, or use 3.14t.
 
 ## 📜 License
 

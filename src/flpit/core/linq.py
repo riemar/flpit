@@ -15,6 +15,7 @@ from itertools import islice, chain, compress
 from numbers import Real as _Real
 
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Iterable,
@@ -35,7 +36,9 @@ from typing import (
     Sized
 )
 
-from flpit.json import JsonConvert, JsonSerializerOptions
+if TYPE_CHECKING:
+    # imported lazily at runtime: JSON support must not be loaded for plain LINQ use
+    from flpit.json import JsonSerializerOptions
 from flpit import ZipTuple
 from flpit.core._join import JoinTuple
 from flpit.core._index import IndexTuple
@@ -1510,14 +1513,17 @@ class FlpIt[TItem](Iterable[TItem]):
 
     @classmethod
     def from_json[T](cls, data: str | bytes, item_type: type[T], jso: JsonSerializerOptions|None=None) -> FlpIt[T]:
+        from flpit.json import JsonConvert
         return FlpIt[T](JsonConvert.deserialize(data, list[item_type], jso))
 
     def to_json_bytes[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> bytes:
+        from flpit.json import JsonConvert
         writer = BytesIO()
         JsonConvert.serialize_to(self, item_type, writer, jso)
         return writer.getvalue()
 
     def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
+        from flpit.json import JsonConvert
         writer = StringIO()
         JsonConvert.serialize_to(self, item_type, writer, jso)
         return writer.getvalue()
@@ -1528,6 +1534,7 @@ class FlpIt[TItem](Iterable[TItem]):
             output: BinaryIO,
             jso: JsonSerializerOptions | None = None,
     ) -> None:
+        from flpit.json import JsonConvert
         JsonConvert.serialize_to(self, item_type, output, jso)
 
 
@@ -2321,12 +2328,15 @@ class FlpList[TItem](Collection[TItem]):
 
     @classmethod
     def from_json[T](cls, data: str | bytes, item_type: type[T], jso: JsonSerializerOptions|None=None) -> FlpList[T]:
+        from flpit.json import JsonConvert
         return FlpList[T](JsonConvert.deserialize(data, list[item_type], jso))
 
     def to_json_bytes[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> bytes:
+        from flpit.json import JsonConvert
         return JsonConvert.serialize_bytes(self.__list.data, list[item_type], jso)
 
     def to_json[T](self, item_type: type[T], jso: JsonSerializerOptions|None=None) -> str:
+        from flpit.json import JsonConvert
         return JsonConvert.serialize(self.__list.data, list[item_type], jso)
 
     def write_json[T](
@@ -2335,6 +2345,7 @@ class FlpList[TItem](Collection[TItem]):
             output: BinaryIO,
             jso: JsonSerializerOptions | None = None,
     ) -> None:
+        from flpit.json import JsonConvert
         JsonConvert.serialize_to(self, item_type, output, jso)
 
 # I hate it, but Python being Python

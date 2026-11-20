@@ -1,6 +1,6 @@
 [project]
 name = "flpit"
-version = "0.4.0.dev3"
+version = "0.4.0.dev4"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,8 +19,16 @@ classifiers = [
     "Typing :: Typed"
 ]
 dependencies = [
-    "msgspec>=0.22.0",
+    # Fast JSON/CSV backend. Optional at runtime: without it flpit.json uses its
+    # pure-Python backend (PyPy, Pyodide and platforms without msgspec wheels).
+    "msgspec>=0.22.0; platform_python_implementation == 'CPython' and sys_platform != 'emscripten'",
 ]
+
+[project.optional-dependencies]
+# Ensure the fast backend explicitly, e.g. `pip install flpit[msgspec]`.
+msgspec = ["msgspec>=0.22.0"]
+# Typed date/time values (whenever) are picked up automatically when installed.
+whenever = ["whenever>=0.11"]
 
 [project.urls]
 Homepage = "https://github.com/riemar/flpit"
@@ -36,6 +44,7 @@ dev = [
     "pytest-benchmark>=5.3.0",
     "mypy>=2.4.0",
     "httpx>=0.28.1",
+    "whenever>=0.11.0",
 ]
 
 

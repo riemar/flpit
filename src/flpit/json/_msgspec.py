@@ -1,6 +1,13 @@
+"""msgspec backend for flpit.json.
+
+Builds msgspec Structs mirroring the dataclasses (renamed fields, omitted
+defaults, unknown-field policy), decodes into them and converts the result into
+the real dataclasses. Types msgspec does not know go through the registry via
+dec_hook / enc_hook.
+"""
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import dataclasses
 import re
 import sys
@@ -8,110 +15,33 @@ import threading
 import types
 import typing
 from dataclasses import MISSING, dataclass
-from enum import StrEnum
 from functools import lru_cache
-from hashlib import blake2s
-from typing import Annotated, TYPE_CHECKING, Any, ForwardRef, get_args, get_origin, get_type_hints, Callable
+from typing import Any, ForwardRef, get_args, get_origin, get_type_hints
 
 import msgspec
 
+from flpit.json import _core
+from flpit.json._core import (
+    JsonDefaultHandling,
+    JsonDeserializationError,
+    JsonSerializationError,
+    JsonSerializerOptions,
+    JsonUnknownFieldHandling,
+    _allows_none,
+    _apply_naming_policy,
+    _field_directives,
+    _get_property_directive,
+    _is_dataclass_type,
+    _nested_dataclasses,
+)
 
-class JsonNamingPolicy(StrEnum):
-    none = "None"
-    lower = "lower" # pyrefly: ignore [bad-override-mutable-attribute]
-    upper = "upper" # pyrefly: ignore [bad-override-mutable-attribute]
-    camel = "camel"
-    pascal = "pascal"
-    kebap = "kebab"
+class _WireCollection[T](list):  # type: ignore[type-arg]
+    """Stand-in for registered collections (e.g. FlpList) inside generated structs.
 
-
-class JsonDefaultHandling(StrEnum):
-    include = "include"
-    exclude = "exclude"
-
-class JsonUnknownFieldHandling(StrEnum):
-    allow = "allow"
-    disallow = "disallow"
-
-
-@dataclass(slots=True, frozen=True)
-class JsonSerializerOptions:
-    naming_policy: JsonNamingPolicy = JsonNamingPolicy.camel
-    default_handling: JsonDefaultHandling = JsonDefaultHandling.exclude
-    unknown_field_handling: JsonUnknownFieldHandling = JsonUnknownFieldHandling.allow
-
-    # write_indented: bool = False # will be supported later
-    native: bool = False
-    """
-    | Set to true for the native speed of msgspec
-    
-    !! only set to true if you know what you are doing !!
-    You'll receive the msgspec.msgstruct object that will try to do it's best to behave like your dataclass.
-    But remember !! "It's NOT your dataclass" !!
+    A list subclass, so msgspec encodes it natively; the dataclass side gets the
+    registered collection type back through ``_dec_hook``.
     """
 
-    @property
-    def fingerprint(self) -> str:
-        """
-        Identifies a unique jso instance for building a struct
-        !! All parts of a jso that don't influence the defstruct MUST be ignored!
-        """
-        settings = (f"jpn-{self.naming_policy.value}:"
-                   f"dh-{self.default_handling}:"
-                   f"ufh-{self.unknown_field_handling}:"
-                   ).encode("utf-8")
-        return blake2s(settings, digest_size=6).hexdigest()
-
-# ---------------------------------------------------------------------------
-# Metadata Annotation Markers
-# ---------------------------------------------------------------------------
-
-class JIgnore:
-    def __class_getitem__[T](cls, item: type[T]) -> Annotated[type[T], JIgnore]:
-        return typing.cast(Annotated[type[T], JIgnore], Annotated[item, cls])
-
-class JInclude:
-    def __class_getitem__[T](cls, item: type[T]) -> Annotated[type[T], JInclude]:
-        return typing.cast(Annotated[type[T], JInclude], Annotated[item, cls])
-
-
-class JPropMeta(type):
-    def __getattr__(cls, name: str) -> Any:
-        class SpecializedJProp:
-            def __class_getitem__[T](sub_cls, item: type[T]) -> Annotated[type[T], JProp]:
-                return typing.cast(Annotated[type[T], JProp], Annotated[item, JProp(json_name=name)])
-        return SpecializedJProp
-
-class JProp:
-    __slots__ = ("json_name",)
-    json_name: str
-
-    def __init__(self, json_name: str):
-        self.json_name = json_name
-
-    # 1. This handles the standard initialization/metadata if needed
-    def __repr__(self):
-        return f"JProp(json_name={self.json_name!r})"
-
-    # 2. This intercepts JProp[str] (the type subscription first)
-    def __class_getitem__[T](cls, item: type[T]) -> Any:
-        # We return a proxy class that remembers the type 'item' (e.g., str | None)
-        class JPropTypeProxy:
-            def __getattr__(self, name: str) -> Annotated[type[T], JProp]:
-                # 3. This intercepts .JsonPropNameToUse and returns the Annotated type
-                return typing.cast(
-                    Annotated[type[T], JProp],
-                    Annotated[item, JProp(json_name=name)]
-                )
-
-        return JPropTypeProxy()
-
-@dataclass
-class AnnotationModel:
-    other_name: Annotated[str, JProp("WorksToo")]
-    display_name: JProp[str].meta
-    secret: JIgnore[str] = ""
-    always_emit: JInclude[int] = 0
 
 # ---------------------------------------------------------------------
 # Generated type metadata
@@ -143,53 +73,6 @@ class _WireType:
 
 
 # ---------------------------------------------------------------------
-# Never imagined this would be required to have a proper lib behavior
-# ---------------------------------------------------------------------
-
-def _apply_naming_policy(name: str, policy: JsonNamingPolicy) -> str:
-    """
-    Tokenizes snake_case, camelCase, PascalCase, UPPER_CASE, and kebab-case
-    identifiers, then formats the tokens according to the target policy.
-    Preserves leading underscores.
-    """
-    if policy == JsonNamingPolicy.none:
-        return name
-
-    # Preserve all leading underscores.
-    prefix = name[: len(name) - len(name.lstrip("_"))]
-    clean_name = name[len(prefix):]
-
-    # Split on existing separators first, then tokenize each segment.
-    # This also correctly handles acronyms such as XMLParser and UPPER_CASE.
-    token_pattern = r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+"
-
-    tokens = [
-        token
-        for part in re.split(r"[_-]+", clean_name)
-        for token in re.findall(token_pattern, part)
-    ]
-
-    if not tokens:
-        return name
-
-    if policy == JsonNamingPolicy.lower:
-        result = "".join(token.lower() for token in tokens)
-    elif policy == JsonNamingPolicy.upper:
-        result = "".join(token.upper() for token in tokens)
-    elif policy == JsonNamingPolicy.pascal:
-        result = "".join(token.capitalize() for token in tokens)
-    elif policy == JsonNamingPolicy.camel:
-        result = tokens[0].lower() + "".join(
-            token.capitalize() for token in tokens[1:]
-        )
-    elif policy == JsonNamingPolicy.kebap:
-        result = "-".join(token.lower() for token in tokens)
-    else:
-        raise ValueError(f"Unsupported naming policy: {policy!r}")
-
-    return prefix + result
-
-
 
 def _generated_module(source: type) -> types.ModuleType:
     """Generates the required module definition for our runtime only dynamic msgspec.struct"""
@@ -201,75 +84,6 @@ def _generated_module(source: type) -> types.ModuleType:
         sys.modules[name] = module
 
     return module
-
-
-def _is_dataclass_type(tp: Any) -> bool:
-    return isinstance(tp, type) and dataclasses.is_dataclass(tp)
-
-
-def _field_directives(
-        annotation: Any,
-) -> tuple[Any, bool, bool, str | None]:
-    """Extract JIgnore, JInclude, and JProp directives from a field annotation."""
-
-    if get_origin(annotation) is not typing.Annotated:
-        return annotation, False, False, None
-
-    args = get_args(annotation)
-    base_type = args[0]
-    metadata = args[1:]
-    ignored = any(item is JIgnore for item in metadata)
-    included = any(item is JInclude for item in metadata)
-    json_name = next(
-        (item.json_name for item in metadata if isinstance(item, JProp)),
-        None,
-    )
-    remaining = tuple(
-        item
-        for item in metadata
-        if item is not JIgnore
-        and item is not JInclude
-        and not isinstance(item, JProp)
-    )
-
-    if remaining:
-        base_type = Annotated[(base_type, *remaining)]
-
-    return base_type, ignored, included, json_name
-
-
-def _get_property_directive(prop_func: Callable[[Any, Any], None] | Callable[[Any], Any] | None):
-    if prop_func is not None:
-        getter_hints = get_type_hints(prop_func, include_extras=True)
-        source_annotation = getter_hints.get("return", Any)
-    else:
-        source_annotation = Any
-
-    return  _field_directives(source_annotation)
-
-
-def _nested_dataclasses(tp: Any):
-    """Yield dataclass types referenced by an annotation."""
-    if _is_dataclass_type(tp):
-        yield tp
-        return
-
-    if isinstance(tp, (list, tuple)):
-        for item in tp:
-            yield from _nested_dataclasses(item)
-        return
-
-    origin = get_origin(tp)
-
-    if origin is typing.Annotated:
-        yield from _nested_dataclasses(get_args(tp)[0])
-        return
-
-    if origin is typing.Literal:
-        return
-
-    for arg in get_args(tp):
-        yield from _nested_dataclasses(arg)
 
 
 def _rewrite_type(
@@ -303,9 +117,17 @@ def _rewrite_type(
     origin = get_origin(tp)
 
     if origin is None or origin is typing.Literal:
+        if origin is None and _core.collection_handler(tp) is not None:
+            return _WireCollection[Any]
         return tp
 
     args = get_args(tp)
+
+    if _core.collection_handler(origin) is not None:
+        # FlpList[T] & co. travel as plain lists inside the generated structs:
+        # msgspec encodes them natively; _dec_hook rebuilds the real type on the dataclass side.
+        wire_generic: Any = _WireCollection
+        return wire_generic[_rewrite_type(args[0], owner, graph, resolve=resolve) if args else Any]
 
     if origin is typing.Annotated:
         base = _rewrite_type(
@@ -372,12 +194,6 @@ def _discover_graph(
 
     return graph
 
-
-def _allows_none(tp: Any) -> bool:
-    if get_origin(tp) is typing.Annotated:
-        tp = get_args(tp)[0]
-
-    return type(None) in get_args(tp)
 
 # ---------------------------------------------------------------------
 # Struct construction
@@ -501,7 +317,7 @@ def _create_structs(
             module=wt.module_name,
             namespace=_behavior_namespace(wt.source),
             rename=None,
-            kw_only=False,
+            kw_only=True,  # optional fields may precede required ones (dataclass order)
             omit_defaults=jso.default_handling.value == JsonDefaultHandling.exclude,
             forbid_unknown_fields=jso.unknown_field_handling.value == JsonUnknownFieldHandling.disallow,
         )
@@ -578,22 +394,74 @@ def wire_type_for(target_type: type, jso: JsonSerializerOptions) -> type:
     return _cached_wire_type(target_type, jso_id)
 
 
+
+# ---------------------------------------------------------------------
+# Registry hooks
+# ---------------------------------------------------------------------
+
+def _dec_hook(tp: Any, obj: Any) -> Any:
+    """Called by msgspec for every type it doesn't know (registry types).
+
+    It runs on three occasions: decoding JSON (obj is the raw JSON value),
+    converting the generated Struct into the dataclass and converting the
+    dataclass into the Struct when serializing (obj is already the target
+    kind of object in the last two).
+    """
+    origin = get_origin(tp) or tp
+    if origin is _WireCollection:
+        if isinstance(obj, (str, bytes, bytearray, Mapping)) or not isinstance(obj, Iterable):
+            raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
+        args = get_args(tp)
+        items = obj if type(obj) is list else list(obj)
+        return _WireCollection(msgspec.convert(items, list[args[0]] if args else list,
+                                               from_attributes=True, dec_hook=_dec_hook))
+
+    collection = _core.collection_handler(origin)
+    if collection is not None:
+        if isinstance(obj, (str, bytes, bytearray, Mapping)) or not isinstance(obj, Iterable):
+            raise msgspec.ValidationError(f"Expected `array`, got `{type(obj).__name__}`")
+        args = get_args(tp)
+        if not args:
+            base: Any = collection.base
+        elif collection.base is tuple:
+            base = tuple[args[0], ...]
+        else:
+            base = typing.cast(Any, collection.base)[args[0]]
+        items = obj if type(obj) is list else list(obj)
+        converted = msgspec.convert(items, base, from_attributes=True, dec_hook=_dec_hook)
+        return collection.factory(converted)
+
+    handler = _core.value_handler(tp)
+    if handler is not None:
+        if isinstance(obj, tp):
+            return obj
+        try:
+            return handler.decode(obj)
+        except (ValueError, TypeError) as exc:
+            raise msgspec.ValidationError(f"Invalid `{tp.__name__}`: {exc}") from exc
+
+    raise msgspec.ValidationError(f"flpit.json: unsupported type {getattr(tp, '__qualname__', tp)!r}")
+
+
+def _enc_hook(obj: Any) -> Any:
+    handler = _core.value_handler(type(obj))
+    if handler is not None:
+        return handler.encode(obj)
+    if _core.collection_handler(type(obj)) is not None:
+        return list(obj)
+    raise NotImplementedError(f"flpit.json: cannot serialize {type(obj).__qualname__}")
+
+
 @lru_cache(maxsize=256)
 def _get_decoder(wire_type: Any):
-    return msgspec.json.Decoder(type=wire_type)
+    return msgspec.json.Decoder(type=wire_type, dec_hook=_dec_hook)
 
 
-_JSON_ENCODER = msgspec.json.Encoder()
+_JSON_ENCODER = msgspec.json.Encoder(enc_hook=_enc_hook)
 
+class Backend:
+    name = "msgspec"
 
-class JsonSerializationError(Exception):
-    pass
-
-class JsonDeserializationError(Exception):
-    pass
-
-
-class JsonConvert:
 
     @staticmethod
     def deserialize[T](
@@ -619,6 +487,7 @@ class JsonConvert:
                 parsed,
                 target,
                 from_attributes=True,
+                dec_hook=_dec_hook,
             )
 
             return result
@@ -634,7 +503,7 @@ class JsonConvert:
         if data is None:
             raise JsonSerializationError("data must not be None")
 
-        return JsonConvert.serialize_bytes(data, target, jso).decode("utf-8")
+        return Backend.serialize_bytes(data, target, jso).decode("utf-8")
 
     @staticmethod
     def serialize_bytes[T](
@@ -647,7 +516,7 @@ class JsonConvert:
 
         wire_type = wire_type_for(target, jso)
         try:
-            wire_obj = msgspec.convert(data, wire_type, from_attributes=True)
+            wire_obj = msgspec.convert(data, wire_type, from_attributes=True, dec_hook=_dec_hook)
             return _JSON_ENCODER.encode(wire_obj)
         except msgspec.MsgspecError as exc:
             raise JsonSerializationError(str(exc)) from exc
@@ -685,10 +554,35 @@ class JsonConvert:
             if not first:
                 write(b",")
 
-            wire_obj = msgspec.convert(item, wire_type, from_attributes=True)
+            wire_obj = msgspec.convert(item, wire_type, from_attributes=True, dec_hook=_dec_hook)
             write(_JSON_ENCODER.encode(wire_obj))
             first = False
 
         write(b']')
 
 
+
+
+    # -----------------------------------------------------------------
+    # CSV support: rows are dicts of strings, converted leniently
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def csv_list(rows: list[dict[str, Any]], item_type: Any, jso: JsonSerializerOptions) -> list[Any]:
+        wire_type = wire_type_for(list[item_type], jso)
+        try:
+            return msgspec.convert(rows, wire_type, from_attributes=True, strict=False, dec_hook=_dec_hook)
+        except msgspec.ValidationError as exc:
+            raise _core.ConversionError(str(exc)) from exc
+
+    @staticmethod
+    def csv_item_converter(item_type: Any, jso: JsonSerializerOptions) -> typing.Callable[[dict[str, Any]], Any]:
+        wire_item_type = wire_type_for(item_type, jso)
+
+        def convert(row: dict[str, Any]) -> Any:
+            try:
+                return msgspec.convert(row, wire_item_type, from_attributes=True, strict=False, dec_hook=_dec_hook)
+            except msgspec.ValidationError as exc:
+                raise _core.ConversionError(str(exc)) from exc
+
+        return convert

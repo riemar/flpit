@@ -41,6 +41,9 @@ from flpit.json import (
 )
 
 
+# Every test in this module runs once per available backend (msgspec, native).
+pytestmark = pytest.mark.usefixtures("json_backend")
+
 # ---------------------------------------------------------------------------
 # Test models: all supported values are fields on dataclasses
 # ---------------------------------------------------------------------------
