@@ -7,8 +7,6 @@ import pytest
 from flpit.csv import CsvCol, CsvConversionError, CsvLoader, CsvOptions
 from flpit.json import JsonNamingPolicy
 
-pytestmark = pytest.mark.usefixtures("json_backend")
-
 
 @dataclass
 class CsvTestModel:

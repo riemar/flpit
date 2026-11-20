@@ -213,37 +213,7 @@ def _format_timedelta(value: dt.timedelta) -> str:
     return text
 
 
-# ---------------------------------------------------------------------
-# Lenient string conversions (CSV)
-# ---------------------------------------------------------------------
-
-_INT_RE = re.compile(r"[+-]?\d+\Z")
-_FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\Z")
-
-
-def _lax_int(value: str) -> int:
-    if _INT_RE.match(value):
-        return int(value)
-    if _FLOAT_RE.match(value):
-        number = float(value)
-        if number.is_integer():
-            return int(number)
-    raise ValueError
-
-
-def _lax_float(value: str) -> float:
-    if _FLOAT_RE.match(value):
-        return float(value)
-    raise ValueError
-
-
-def _lax_bool(value: str) -> bool:
-    lowered = value.lower()
-    if lowered in ("true", "1"):
-        return True
-    if lowered in ("false", "0"):
-        return False
-    raise ValueError
+_INT_RE = re.compile(r"[+-]?\d+\Z")   # integer dict keys
 
 
 # ---------------------------------------------------------------------
@@ -333,9 +303,8 @@ def _is_union(origin: Any) -> bool:
 # ---------------------------------------------------------------------
 
 class _DecoderBuilder:
-    def __init__(self, jso: JsonSerializerOptions, lax: bool) -> None:
+    def __init__(self, jso: JsonSerializerOptions) -> None:
         self.jso = jso
-        self.lax = lax
         self.memo: dict[Any, Converter] = {}
 
     def build(self, tp: Any) -> Converter:
@@ -360,13 +329,12 @@ class _DecoderBuilder:
 
     def _make(self, tp: Any) -> Converter:
         tp = _strip_annotated(tp)
-        lax = self.lax
 
         if tp is Any or tp is object:
             return lambda v: v
         if tp is None or tp is type(None):
             def dec_none(v: Any) -> None:
-                if v is None or (lax and v == "null"):
+                if v is None:
                     return None
                 raise _expected("null", v)
             return dec_none
@@ -386,22 +354,12 @@ class _DecoderBuilder:
             def dec_bool(v: Any) -> bool:
                 if v is True or v is False:
                     return v
-                if lax and type(v) is str:
-                    try:
-                        return _lax_bool(v)
-                    except ValueError:
-                        pass
                 raise _expected("bool", v)
             return dec_bool
         if tp is int:
             def dec_int(v: Any) -> int:
                 if type(v) is int:
                     return v
-                if lax and type(v) is str:
-                    try:
-                        return _lax_int(v)
-                    except ValueError:
-                        pass
                 raise _expected("int", v)
             return dec_int
         if tp is float:
@@ -413,11 +371,6 @@ class _DecoderBuilder:
                     return v
                 if t is int:
                     return float(v)
-                if lax and t is str:
-                    try:
-                        return _lax_float(v)
-                    except ValueError:
-                        pass
                 raise _expected("float", v)
             return dec_float
         if tp is str:
@@ -507,10 +460,6 @@ class _DecoderBuilder:
         def dec_enum(v: Any) -> Any:
             member = by_value.get(v) if not isinstance(v, (list, dict)) else None
             if member is None or type(member.value) is not type(v):
-                if self.lax and type(v) is str:
-                    for candidate in tp:
-                        if str(candidate.value) == v:
-                            return candidate
                 raise _Invalid(f"Invalid enum value {v!r}")
             return member
         return dec_enum
@@ -532,10 +481,9 @@ class _DecoderBuilder:
             inner = self.build(non_none[0])
             if not nullable:
                 return inner
-            lax = self.lax
 
             def dec_optional(v: Any) -> Any:
-                if v is None or (lax and v == "null"):
+                if v is None:
                     return None
                 return inner(v)
             return dec_optional
@@ -1020,7 +968,7 @@ def _compiled(kind: str, target: Any, jso: JsonSerializerOptions) -> Converter:
     if kind == "enc":
         converter = _EncoderBuilder(jso).build(target)
     else:
-        converter = _DecoderBuilder(jso, lax=(kind == "lax")).build(target)
+        converter = _DecoderBuilder(jso).build(target)
     with _cache_lock:
         if _cache_version != version:
             _cache.clear()
@@ -1126,27 +1074,3 @@ class Backend:
                 raise JsonSerializationError(str(exc)) from None
             first = False
         write(b"]")
-
-    # -- CSV -------------------------------------------------------------
-
-    @staticmethod
-    def csv_list(rows: list[dict[str, Any]], item_type: Any, jso: JsonSerializerOptions) -> list[Any]:
-        convert = _compiled("lax", item_type, jso)
-        out = []
-        for index, row in enumerate(rows):
-            try:
-                out.append(convert(row))
-            except _Invalid as exc:
-                raise _core.ConversionError(str(exc.at(index))) from None
-        return out
-
-    @staticmethod
-    def csv_item_converter(item_type: Any, jso: JsonSerializerOptions) -> Callable[[dict[str, Any]], Any]:
-        convert = _compiled("lax", item_type, jso)
-
-        def convert_row(row: dict[str, Any]) -> Any:
-            try:
-                return convert(row)
-            except _Invalid as exc:
-                raise _core.ConversionError(str(exc)) from None
-        return convert_row

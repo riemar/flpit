@@ -559,30 +559,3 @@ class Backend:
             first = False
 
         write(b']')
-
-
-
-
-    # -----------------------------------------------------------------
-    # CSV support: rows are dicts of strings, converted leniently
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    def csv_list(rows: list[dict[str, Any]], item_type: Any, jso: JsonSerializerOptions) -> list[Any]:
-        wire_type = wire_type_for(list[item_type], jso)
-        try:
-            return msgspec.convert(rows, wire_type, from_attributes=True, strict=False, dec_hook=_dec_hook)
-        except msgspec.ValidationError as exc:
-            raise _core.ConversionError(str(exc)) from exc
-
-    @staticmethod
-    def csv_item_converter(item_type: Any, jso: JsonSerializerOptions) -> typing.Callable[[dict[str, Any]], Any]:
-        wire_item_type = wire_type_for(item_type, jso)
-
-        def convert(row: dict[str, Any]) -> Any:
-            try:
-                return msgspec.convert(row, wire_item_type, from_attributes=True, strict=False, dec_hook=_dec_hook)
-            except msgspec.ValidationError as exc:
-                raise _core.ConversionError(str(exc)) from exc
-
-        return convert

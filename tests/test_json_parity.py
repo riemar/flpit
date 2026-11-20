@@ -206,28 +206,3 @@ def test_float_value_parity(value: float) -> None:
     for backend in BACKENDS:
         for other in BACKENDS:
             assert backend.deserialize(other.serialize(Leaf("x", value), Leaf), Leaf).weight == value
-
-
-def test_csv_parity() -> None:
-    from flpit.csv import CsvLoader
-
-    @dataclass
-    class Row:
-        name: str
-        count: int
-        ratio: float
-        active: bool
-        when: date
-        note: str | None = None
-
-    raw = "name,count,ratio,active,when\nAda,3,1.5,true,2025-06-15\nBob,1e3,2,FALSE,2024-02-29\n"
-    results = []
-    previous = flpit_json.get_backend()
-    try:
-        for name in ("msgspec", "native"):
-            flpit_json.set_backend(name)
-            results.append([(r.name, r.count, r.ratio, r.active, r.when, r.note)
-                            for r in CsvLoader.load_list(raw, Row)])
-    finally:
-        flpit_json.set_backend(previous)
-    assert results[0] == results[1]
