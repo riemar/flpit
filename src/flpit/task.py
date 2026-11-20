@@ -1337,14 +1337,55 @@ class Task(Generic[T], metaclass=_TaskMeta):
     # Continuations (.NET Task.ContinueWith)
     # ------------------------------------------------------------------
 
+    # Overloads, so that type checkers know what the continuation receives: the
+    # antecedent as Task[T] and, with ``state``, the state's own type. An async
+    # continuation's Task carries its awaited result.
+    @overload
     def continue_with[R](
             self,
-            continuation: Callable[..., R | Awaitable[R]],
+            continuation: Callable[["Task[T]"], Awaitable[R]],
+            *,
+            token: CancellationToken | None = None,
+            options: TaskContinuationOptions = TaskContinuationOptions.NONE,
+    ) -> "Task[R]": ...
+
+    @overload
+    def continue_with[R](
+            self,
+            continuation: Callable[["Task[T]"], R],
+            *,
+            token: CancellationToken | None = None,
+            options: TaskContinuationOptions = TaskContinuationOptions.NONE,
+    ) -> "Task[R]": ...
+
+    @overload
+    def continue_with[R, S](
+            self,
+            continuation: Callable[["Task[T]", S], Awaitable[R]],
+            state: S,
+            *,
+            token: CancellationToken | None = None,
+            options: TaskContinuationOptions = TaskContinuationOptions.NONE,
+    ) -> "Task[R]": ...
+
+    @overload
+    def continue_with[R, S](
+            self,
+            continuation: Callable[["Task[T]", S], R],
+            state: S,
+            *,
+            token: CancellationToken | None = None,
+            options: TaskContinuationOptions = TaskContinuationOptions.NONE,
+    ) -> "Task[R]": ...
+
+    def continue_with(
+            self,
+            continuation: Callable[..., Any],
             state: Any = _MISSING,
             *,
             token: CancellationToken | None = None,
             options: TaskContinuationOptions = TaskContinuationOptions.NONE,
-    ) -> "Task[R]":
+    ) -> "Task[Any]":
         """Run ``continuation(antecedent)`` (or ``continuation(antecedent, state)``) once this
         task completes, and return a task for its result (.NET ``Task.ContinueWith``).
 
@@ -1366,7 +1407,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
         options = _validate_continuation_options(options)
 
         runtime = _get_runtime()
-        follower: Task[R] = Task(runtime, token=token)
+        follower: Task[Any] = Task(runtime, token=token)
         if state is not _MISSING:
             follower.async_state = state
         follower._creation_options = TaskCreationOptions(options & _CREATION_OPTIONS_MASK)

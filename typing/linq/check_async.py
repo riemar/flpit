@@ -1,9 +1,12 @@
 """Static inference checks for AsyncFlpIt (run: uv run pyrefly check typing/linq/check_async.py)."""
-from collections.abc import AsyncIterator
-from typing import assert_type
+from collections.abc import AsyncIterator, Coroutine
+from typing import Any, Protocol, assert_type
 
-from flpit import AsyncFlpIt, FlpIt, FlpList, Grouping, IndexTuple, JoinTuple, Lookup, OrderedAsyncIt, ZipTuple, flp
-from flpit.task import CancellationToken, Task
+from flpit import (
+    AsyncEnumerator, AsyncFlpIt, FlpIt, FlpList, Grouping, IndexTuple, JoinTuple, Lookup, OrderedAsyncIt, ZipTuple,
+    async_flpit, flp,
+)
+from flpit.task import CancellationToken, Task, await_using
 
 
 class Record:
@@ -72,6 +75,58 @@ async def consume() -> None:
         assert_type(record, Record)
     assert_type(await QUERY.to_list(), FlpList[Record])
     assert_type(await NUMBERS.count(), int)
+
+
+# --- @async_flpit: async generator function -> AsyncFlpIt -------------------------------------------
+@async_flpit
+async def rows(n: int, token: CancellationToken = CancellationToken.none()) -> AsyncIterator[Record]:
+    yield RECORD
+
+
+@async_flpit
+async def unannotated(n: int):  # the element type is inferred from the yields
+    yield n
+
+
+class ExpectedRows(Protocol):
+    def __call__(self, n: int, token: CancellationToken = ...) -> AsyncFlpIt[Record]: ...
+
+
+assert_type(rows, ExpectedRows)  # parameters kept, AsyncFlpIt returned
+assert_type(rows(3), AsyncFlpIt[Record])
+assert_type(rows(3, token=CancellationToken.none()), AsyncFlpIt[Record])
+assert_type(unannotated(3), AsyncFlpIt[int])
+assert_type(rows(3).where(is_active).select(record_name), AsyncFlpIt[str])
+assert_type(rows(3).first(), Task[Record])
+
+# --- AsyncEnumerator: get_async_enumerator() and async with -----------------------------------------
+assert_type(QUERY.get_async_enumerator(), AsyncEnumerator[Record])
+assert_type(rows(3).get_async_enumerator(CancellationToken.none()), AsyncEnumerator[Record])
+
+
+# --- @await_using: same signature, same result ------------------------------------------------------
+@await_using
+async def first_name(n: int) -> str:
+    async for record in rows(n):
+        return record.name
+    return ""
+
+
+class ExpectedFirstName(Protocol):
+    def __call__(self, n: int) -> Coroutine[Any, Any, str]: ...
+
+
+assert_type(first_name, ExpectedFirstName)
+
+
+async def scoped() -> None:
+    async with rows(3).get_async_enumerator() as items:  # C#: await using (var items = ...)
+        assert_type(items, AsyncEnumerator[Record])
+        async for record in items:
+            assert_type(record, Record)
+    async for row in rows(3):  # C#: await foreach
+        assert_type(row, Record)
+    assert_type(await first_name(3), str)
 
 
 _ = FlpIt

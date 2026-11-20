@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from flpit.task import asyncio_task, Task
+from flpit.task import CancellationToken, TaskCanceledError, TaskContinuationOptions, TaskCreationOptions
 from typing import reveal_type, Protocol, Any, AsyncGenerator
 from typing import assert_type, Callable
 
@@ -85,10 +88,60 @@ async def foo():
     # todo: 0.2.4 finish collect to pass type checks
     # coll: AsyncGenerator[Task[Any], Any] = Task.collect(sync1, async1, async2)
 
+async def waits_and_continuations():
+    t = Task.run(lambda: 42)
+
+    # ========================================================
+    # wait / wait_all / wait_any
+    # ========================================================
+    assert_type(t.wait(), bool)
+    assert_type(t.wait(0.1), bool)
+    assert_type(t.wait(timedelta(seconds=1), CancellationToken.none()), bool)
+    assert_type(Task.wait_all(t, t), bool)
+    assert_type(Task.wait_all([t, t], timeout=0.1), bool)
+    assert_type(Task.wait_any([t], timeout=0.1), int)
+
+    # ========================================================
+    # continue_with - the antecedent is Task[T], the state keeps its type
+    # ========================================================
+    assert_type(t.continue_with(lambda a: str(a.result())), Task[str])
+    assert_type(t.continue_with(lambda a, s: s.upper(), "state"), Task[str])
+
+    async def async_continuation(a: Task[int]) -> float:
+        return float(a.result())
+
+    async def async_continuation_with_state(a: Task[int], s: bytes) -> list[bytes]:
+        return [s]
+
+    assert_type(t.continue_with(async_continuation), Task[float])  # awaited result, not Task[Task[float]]
+    assert_type(t.continue_with(async_continuation_with_state, b"x"), Task[list[bytes]])
+    assert_type(
+        t.continue_with(
+            lambda a: None,
+            token=CancellationToken.none(),
+            options=TaskContinuationOptions.ONLY_ON_RAN_TO_COMPLETION | TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY,
+        ),
+        Task[None],
+    )
+    assert_type(await t.continue_with(lambda a: a.result() * 2), int)
+
+    # ========================================================
+    # creation options, completed_task, TaskCanceledError
+    # ========================================================
+    assert_type(Task.run(lambda: "x", creation_options=TaskCreationOptions.LONG_RUNNING), Task[str])
+    assert_type(t.creation_options, TaskCreationOptions)
+    assert_type(Task.completed_task, Task[None])
+
+    error = TaskCanceledError(t)
+    assert_type(error.task, Task[Any] | None)
+    assert_type(error.inner_exception, BaseException | None)
+
+
 # ========================================================
 # Main startup must not rais an "await missing"
 # ========================================================
 async def main():
     ...
 
+Task.run(waits_and_continuations).result()
 Task.run(foo).result()
