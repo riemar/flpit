@@ -36,11 +36,13 @@ enumeration's ``CancellationToken`` as its last argument::
 from __future__ import annotations
 
 import builtins
+import inspect
 import sys
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Iterator
-from functools import partial
+from functools import partial, wraps
 from operator import itemgetter
+from types import AsyncGeneratorType
 from typing import Any, Type, Union, cast as typing_cast, overload, override
 
 from flpit.core._index import IndexTuple
@@ -77,7 +79,7 @@ from flpit.core.linq import (
 from decimal import Decimal, Inexact, Overflow
 from flpit.core._grouping import Grouping
 from flpit.core._lookup import Lookup
-from flpit.task import CancellationToken, Task, _is_async_callable
+from flpit.task import CancellationToken, CancellationTokenSource, Task, _close_stream, _is_async_callable, _owner_scope
 
 _NONE_TOKEN = CancellationToken.none()
 
@@ -97,7 +99,10 @@ def _token(token: CancellationToken | None) -> CancellationToken:
 
 
 async def _aclose(enumerator: Any) -> None:
-    """``DisposeAsync``: close an enumerator if it can be closed."""
+    """``DisposeAsync``: close an enumerator if it can be closed (an ``@async_flpit`` one inner streams first)."""
+    if type(enumerator) is AsyncGeneratorType:
+        await _close_stream(enumerator)
+        return
     close = getattr(enumerator, "aclose", None)
     if close is not None:
         await close()
@@ -106,6 +111,36 @@ async def _aclose(enumerator: Any) -> None:
 # =============================================================================
 # Sources
 # =============================================================================
+class AsyncEnumerator[T](AsyncIterator[T]):
+    """
+    The enumerator ``AsyncFlpIt.get_async_enumerator()`` returns (.NET ``IAsyncEnumerator<T>``).
+
+    Iterate it with ``async for`` and close it with ``aclose()`` (.NET ``DisposeAsync``), or let
+    ``async with`` close it when the block is left, however it is left (.NET ``await using``).
+    """
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner: AsyncIterator[T]) -> None:
+        self._inner = inner
+
+    def __aiter__(self) -> AsyncEnumerator[T]:
+        return self
+
+    def __anext__(self) -> Awaitable[T]:
+        return self._inner.__anext__()
+
+    async def aclose(self) -> None:
+        """Close the enumeration and everything it opened (.NET ``DisposeAsync``)."""
+        await _aclose(self._inner)
+
+    async def __aenter__(self) -> AsyncEnumerator[T]:
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
+
+
 class _BorrowedAsyncIterator[T](AsyncIterator[T]):
     """An enumerator the pipeline did not create (``__aiter__`` returned the source itself): never closed."""
     __slots__ = ("_inner",)
@@ -123,20 +158,29 @@ class _BorrowedAsyncIterator[T](AsyncIterator[T]):
         pass
 
 
-class _EmptyAsyncIterator(AsyncIterator[Any]):
+class _EmptyAsyncIterator(AsyncEnumerator[Any]):
+    """The shared enumerator of ``AsyncFlpIt.empty()``; .NET hands out one singleton too."""
+
     __slots__ = ()
 
-    def __aiter__(self) -> AsyncIterator[Any]:
+    def __init__(self) -> None:
+        super().__init__(self)
+
+    @override
+    def __aiter__(self) -> AsyncEnumerator[Any]:
         return self
 
+    @override
     async def __anext__(self) -> Any:
         raise StopAsyncIteration
 
+    @override
     async def aclose(self) -> None:
         pass
 
 
 _EMPTY_ENUMERATOR = _EmptyAsyncIterator()
+
 
 
 async def _from_iterable[T](source: Iterable[T], token: CancellationToken) -> AsyncIterator[T]:
@@ -158,6 +202,8 @@ def _from_async_iterable[T](source: AsyncIterable[T], token: CancellationToken) 
 
 
 def _factory_for[T](source: Any) -> Callable[[CancellationToken], AsyncIterator[T]]:
+    if isinstance(source, AsyncFlpIt):
+        return typing_cast(Callable[[CancellationToken], AsyncIterator[T]], source._factory)
     get_async_enumerator = getattr(source, "get_async_enumerator", None)
     if callable(get_async_enumerator):
         return typing_cast(Callable[[CancellationToken], AsyncIterator[T]], get_async_enumerator)
@@ -178,7 +224,7 @@ def _node[T](impl: Callable[..., AsyncIterator[T]], *args: Any) -> AsyncFlpIt[T]
 
 
 async def _collect[T](source: AsyncFlpIt[T], token: CancellationToken) -> list[T]:
-    enumerator = source.get_async_enumerator(token)
+    enumerator = source._get_async_enumerator(token)
     try:
         return [item async for item in enumerator]
     finally:
@@ -197,7 +243,7 @@ async def _join_lookup(
     """Hash lookup key -> inner elements, keys in first-appearance order (``AsyncLookup.CreateForJoinAsync``)."""
     is_async = _is_async_callable(key_selector)
     lookup: dict[Any, list[Any]] = {}
-    enumerator = inner.get_async_enumerator(token)
+    enumerator = inner._get_async_enumerator(token)
     try:
         async for item in enumerator:
             key = await key_selector(item, token) if is_async else key_selector(item)
@@ -212,7 +258,7 @@ async def _join_lookup(
 # Deferred operator implementations (one async generator per enumeration)
 # =============================================================================
 async def _where_impl(source: AsyncFlpIt[Any], predicate: Any, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         if _is_async_callable(predicate):
             async for item in e:
@@ -227,7 +273,7 @@ async def _where_impl(source: AsyncFlpIt[Any], predicate: Any, token: Cancellati
 
 
 async def _select_impl(source: AsyncFlpIt[Any], selector: Any, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         if _is_async_callable(selector):
             async for item in e:
@@ -241,14 +287,14 @@ async def _select_impl(source: AsyncFlpIt[Any], selector: Any, token: Cancellati
 
 async def _select_many_impl(source: AsyncFlpIt[Any], selector: Any, token: CancellationToken) -> AsyncIterator[Any]:
     is_async = _is_async_callable(selector)
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             inner = await selector(item, token) if is_async else selector(item)
             if inner is None:
                 raise ArgumentNullError("source")
             if hasattr(type(inner), "__aiter__") or isinstance(inner, AsyncFlpIt):
-                inner_e = _as_async(inner).get_async_enumerator(token)
+                inner_e = _as_async(inner)._get_async_enumerator(token)
                 try:
                     async for sub in inner_e:
                         yield sub
@@ -262,7 +308,7 @@ async def _select_many_impl(source: AsyncFlpIt[Any], selector: Any, token: Cance
 
 
 async def _index_impl(source: AsyncFlpIt[Any], token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         position = 0
         async for item in e:
@@ -273,7 +319,7 @@ async def _index_impl(source: AsyncFlpIt[Any], token: CancellationToken) -> Asyn
 
 
 async def _skip_impl(source: AsyncFlpIt[Any], count: int, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         remaining = count
         while remaining > 0:
@@ -289,7 +335,7 @@ async def _skip_impl(source: AsyncFlpIt[Any], count: int, token: CancellationTok
 
 
 async def _take_impl(source: AsyncFlpIt[Any], count: int, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         remaining = count
         async for item in e:
@@ -302,7 +348,7 @@ async def _take_impl(source: AsyncFlpIt[Any], count: int, token: CancellationTok
 
 
 async def _skip_last_impl(source: AsyncFlpIt[Any], count: int, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         queue: deque[Any] = deque()
         async for item in e:
@@ -314,7 +360,7 @@ async def _skip_last_impl(source: AsyncFlpIt[Any], count: int, token: Cancellati
 
 
 async def _take_last_impl(source: AsyncFlpIt[Any], count: int, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         queue: deque[Any] = deque(maxlen=min(count, sys.maxsize))
         async for item in e:
@@ -326,7 +372,7 @@ async def _take_last_impl(source: AsyncFlpIt[Any], count: int, token: Cancellati
 
 
 async def _default_if_empty_impl(source: AsyncFlpIt[Any], default: Any, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         empty = True
         async for item in e:
@@ -342,7 +388,7 @@ _VALUE_TYPES = (int, float, bool, complex)
 
 
 async def _cast_impl(source: AsyncFlpIt[Any], target_type: type, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             if item is None:
@@ -358,7 +404,7 @@ async def _cast_impl(source: AsyncFlpIt[Any], target_type: type, token: Cancella
 
 
 async def _of_type_impl(source: AsyncFlpIt[Any], target_type: type, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             if item is not None and isinstance(item, target_type):
@@ -370,7 +416,7 @@ async def _of_type_impl(source: AsyncFlpIt[Any], target_type: type, token: Cance
 async def _distinct_by_impl(source: AsyncFlpIt[Any], key_selector: Any, token: CancellationToken) -> AsyncIterator[Any]:
     is_async = key_selector is not None and _is_async_callable(key_selector)
     seen: set[Any] = set()
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             if key_selector is None:
@@ -389,7 +435,7 @@ async def _except_by_impl(
 ) -> AsyncIterator[Any]:
     # .NET: the first element of `source` is requested before `second` is buffered.
     is_async = key_selector is not None and _is_async_callable(key_selector)
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         try:
             item = await e.__anext__()
@@ -417,7 +463,7 @@ async def _intersect_impl(source: AsyncFlpIt[Any], second: AsyncFlpIt[Any], toke
     remaining: set[Any] = set(await _collect(second, token))
     if not remaining:
         return
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             if item in remaining:
@@ -430,7 +476,7 @@ async def _intersect_impl(source: AsyncFlpIt[Any], second: AsyncFlpIt[Any], toke
 async def _union_impl(source: AsyncFlpIt[Any], second: AsyncFlpIt[Any], token: CancellationToken) -> AsyncIterator[Any]:
     seen: set[Any] = set()
     for part in (source, second):
-        e = part.get_async_enumerator(token)
+        e = part._get_async_enumerator(token)
         try:
             async for item in e:
                 if item not in seen:
@@ -471,7 +517,7 @@ async def _append_prepend_impl(
     if prepended is not None:
         for item in prepended.to_list():
             yield item
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             yield item
@@ -484,7 +530,7 @@ async def _append_prepend_impl(
 
 async def _concat_impl(sources: _Node, token: CancellationToken) -> AsyncIterator[Any]:
     for part in sources.to_list_reversed():
-        e = part.get_async_enumerator(token)
+        e = part._get_async_enumerator(token)
         try:
             async for item in e:
                 yield item
@@ -498,7 +544,7 @@ async def _reverse_impl(source: AsyncFlpIt[Any], token: CancellationToken) -> As
 
 
 async def _chunk_impl(source: AsyncFlpIt[Any], size: int, token: CancellationToken) -> AsyncIterator[Any]:
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         current: list[Any] = []
         async for item in e:
@@ -516,9 +562,9 @@ async def _zip_impl(
         first: AsyncFlpIt[Any], second: AsyncFlpIt[Any], result_selector: Any, token: CancellationToken
 ) -> AsyncIterator[Any]:
     is_async = result_selector is not _SENTINEL and _is_async_callable(result_selector)
-    e1 = first.get_async_enumerator(token)
+    e1 = first._get_async_enumerator(token)
     try:
-        e2 = second.get_async_enumerator(token)
+        e2 = second._get_async_enumerator(token)
         try:
             while True:
                 try:
@@ -550,7 +596,7 @@ async def _join_impl(
     outer_async = _is_async_callable(outer_key)
     has_selector = result_selector is not _SENTINEL
     result_async = has_selector and _is_async_callable(result_selector)
-    e = outer.get_async_enumerator(token)
+    e = outer._get_async_enumerator(token)
     try:
         try:
             item = await e.__anext__()
@@ -583,7 +629,7 @@ async def _left_join_impl(
     outer_async = _is_async_callable(outer_key)
     has_selector = result_selector is not _SENTINEL
     result_async = has_selector and _is_async_callable(result_selector)
-    e = outer.get_async_enumerator(token)
+    e = outer._get_async_enumerator(token)
     try:
         try:
             item = await e.__anext__()
@@ -617,7 +663,7 @@ async def _full_join_impl(
     result_async = has_selector and _is_async_callable(result_selector)
     lookup = await _join_lookup(inner, inner_key, token, keep_none=True)
     matched: set[Any] = set()
-    e = outer.get_async_enumerator(token)
+    e = outer._get_async_enumerator(token)
     try:
         async for item in e:
             key = await outer_key(item, token) if outer_async else outer_key(item)
@@ -648,7 +694,7 @@ async def _cross_join_impl(
     inner_items = await _collect(inner, token)
     if not inner_items:
         return
-    e = outer.get_async_enumerator(token)
+    e = outer._get_async_enumerator(token)
     try:
         async for item in e:
             for match in inner_items:
@@ -669,7 +715,7 @@ async def _group_join_impl(
     has_selector = result_selector is not _SENTINEL
     result_async = has_selector and _is_async_callable(result_selector)
     lookup: dict[Any, list[Any]] | None = None
-    e = outer.get_async_enumerator(token)
+    e = outer._get_async_enumerator(token)
     try:
         async for item in e:
             if lookup is None:
@@ -697,7 +743,7 @@ async def _to_groups(
     has_element = element_selector is not _SENTINEL
     element_async = has_element and _is_async_callable(element_selector)
     groups: dict[Any, list[Any]] = {}
-    e = source.get_async_enumerator(token)
+    e = source._get_async_enumerator(token)
     try:
         async for item in e:
             key = await key_selector(item, token) if key_async else key_selector(item)
@@ -752,7 +798,8 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
             query = AsyncFlpIt.create(numbers)
 
-        ``factory`` is called once per enumeration.
+        ``factory`` is called once per enumeration. ``@async_flpit`` does the same for an async
+        generator function, with its ordinary parameters.
         """
         if factory is None:
             raise ArgumentNullError("factory")
@@ -788,8 +835,24 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     # --- enumeration ---------------------------------------------------------------------------
 
-    def get_async_enumerator(self, token: CancellationToken | None = None) -> AsyncIterator[TItem]:
-        """Returns a new enumerator that observes ``token`` (.NET ``GetAsyncEnumerator(CancellationToken)``)."""
+    def get_async_enumerator(self, token: CancellationToken | None = None) -> AsyncEnumerator[TItem]:
+        """
+        Returns a new enumerator that observes ``token`` (.NET ``GetAsyncEnumerator(CancellationToken)``).
+
+        Use it with ``async with`` to close the query, and its source, when the block is left
+        (.NET ``await using``)::
+
+            async with query.get_async_enumerator(token) as items:
+                async for item in items:
+                    if done(item):
+                        break
+            # closed here, finally blocks included
+        """
+        enumerator = self._factory(_NONE_TOKEN if token is None else token)
+        return enumerator if isinstance(enumerator, AsyncEnumerator) else AsyncEnumerator(enumerator)
+
+    def _get_async_enumerator(self, token: CancellationToken | None = None) -> AsyncIterator[TItem]:
+        """``get_async_enumerator`` for the operators: the bare enumerator, no wrapper."""
         return self._factory(_NONE_TOKEN if token is None else token)
 
     def __aiter__(self) -> AsyncIterator[TItem]:
@@ -1159,7 +1222,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         return Task.run(self._any, predicate, _token(token))
 
     async def _any(self, predicate: Any, token: CancellationToken) -> bool:
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             if predicate is _SENTINEL:
                 try:
@@ -1183,7 +1246,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     async def _all(self, predicate: Any, token: CancellationToken) -> bool:
         is_async = _is_async_callable(predicate)
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 if not ((await predicate(item, token)) if is_async else predicate(item)):
@@ -1197,7 +1260,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         return Task.run(self._contains, value, _token(token))
 
     async def _contains(self, value: Any, token: CancellationToken) -> bool:
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 if item == value:
@@ -1216,7 +1279,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     async def _count(self, predicate: Any, token: CancellationToken) -> int:
         count = 0
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             if predicate is _SENTINEL:
                 async for _ in e:
@@ -1239,7 +1302,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     async def _element_at(self, index: int, token: CancellationToken) -> TItem:
         if index >= 0:
-            e = self.get_async_enumerator(token)
+            e = self._get_async_enumerator(token)
             try:
                 position = 0
                 async for item in e:
@@ -1251,7 +1314,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         raise ArgumentOutOfRangeError("index")
 
     async def _first_match(self, predicate: Any, token: CancellationToken) -> Any:
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             if predicate is _SENTINEL:
                 try:
@@ -1298,7 +1361,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     async def _last_match(self, predicate: Any, token: CancellationToken) -> Any:
         last: Any = _MISSING
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             if predicate is _SENTINEL:
                 async for item in e:
@@ -1349,7 +1412,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         """The single (matching) element, ``_MISSING`` if none; raises on a second (matching) element."""
         found: Any = _MISSING
         is_async = predicate is not _SENTINEL and _is_async_callable(predicate)
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 if predicate is _SENTINEL or ((await predicate(item, token)) if is_async else predicate(item)):
@@ -1446,7 +1509,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
             self, has_seed: bool, seed: Any, func: Any, result_selector: Any, token: CancellationToken
     ) -> Any:
         is_async = _is_async_callable(func)
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             if has_seed:
                 accumulator = seed
@@ -1499,7 +1562,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         best: Any = None
         is_async = selector is not _SENTINEL and _is_async_callable(selector)
         chunk: list[Any] = []
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 if selector is not _SENTINEL:
@@ -1524,7 +1587,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
 
     async def _extreme_by(self, key_selector: Any, is_min: bool, token: CancellationToken) -> Any:
         if key_selector is None:
-            e = self.get_async_enumerator(token)
+            e = self._get_async_enumerator(token)
             try:
                 async for _ in e:
                     raise SelectorNoneError()
@@ -1536,7 +1599,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         key = itemgetter(0)
         best: Any = _MISSING
         chunk: list[tuple[Any, Any]] = []
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
 
         def reduce(pairs: list[tuple[Any, Any]]) -> Any:
             winner = _extreme_by(pairs, key, is_min)
@@ -1590,7 +1653,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         total: Any = None
         count = 0
         is_async = selector is not _SENTINEL and _is_async_callable(selector)
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 if selector is not _SENTINEL:
@@ -1638,7 +1701,7 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         has_element = element_selector is not _SENTINEL
         element_async = has_element and _is_async_callable(element_selector)
         result: dict[Any, Any] = {}
-        e = self.get_async_enumerator(token)
+        e = self._get_async_enumerator(token)
         try:
             async for item in e:
                 key = (await key_selector(item, token)) if key_async else key_selector(item)
@@ -1799,4 +1862,81 @@ class _EmptyAsyncIt(OrderedAsyncIt[Any]):
 _EMPTY: Any = _EmptyAsyncIt()
 
 
-__all__ = ["AsyncFlpIt", "OrderedAsyncIt", "to_async_enumerable"]
+# =============================================================================
+# @async_flpit
+# =============================================================================
+
+def async_flpit[**P, T](function: Callable[P, AsyncIterator[T]]) -> Callable[P, AsyncFlpIt[T]]:
+    """
+    Turns an async generator function into one that returns an ``AsyncFlpIt`` (the C# ``async
+    IAsyncEnumerable<T>`` method)::
+
+        @async_flpit
+        async def rows(n: int, token: CancellationToken = CancellationToken.none()):
+            for i in range(n):
+                await Task.delay(0.1, token=token)
+                yield i
+
+        async for row in rows(10): ...                            # await foreach
+        async for row in rows(10).with_cancellation(cts.token): ...
+        evens = await rows(10).where(lambda r: r % 2 == 0).to_list()
+
+    The result is cold and can be enumerated again: each enumeration calls the generator
+    function anew. Arguments are checked when the decorated function is called.
+
+    A parameter named ``token`` receives the enumeration's cancellation token (the C#
+    ``[EnumeratorCancellation]`` parameter): the one given to ``with_cancellation`` /
+    ``get_async_enumerator`` or to a terminal operator. If the caller also passes ``token``
+    explicitly, the generator sees a token linked to both, as in C#. Give it a default
+    (``CancellationToken.none()``), as C# does with ``= default``.
+    """
+    if not inspect.isasyncgenfunction(function):
+        raise TypeError("@async_flpit expects an async generator function (async def with yield)")
+    signature = inspect.signature(function)
+    takes_token = "token" in signature.parameters
+
+    @wraps(function)
+    def create(*args: P.args, **kwargs: P.kwargs) -> AsyncFlpIt[T]:
+        explicit = signature.bind(*args, **kwargs).arguments.get("token")  # validates the call now
+        if not takes_token:
+            return AsyncFlpIt._wrap(lambda _token: _owned(function(*args, **kwargs)))
+        if explicit is not None and not isinstance(explicit, CancellationToken):
+            raise TypeError("token must be a CancellationToken")
+
+        def enumerate_with(token: CancellationToken) -> AsyncIterator[T]:
+            linked: CancellationTokenSource | None = None
+            if explicit is not None and explicit.can_be_cancelled and explicit is not token:
+                if token.can_be_cancelled:
+                    linked = CancellationTokenSource.create_linked_token_source(explicit, token)
+                    token = linked.token
+                else:
+                    token = explicit
+            call = signature.bind(*args, **kwargs)
+            call.arguments["token"] = token
+            stream = function(*call.args, **call.kwargs)
+            _owner_scope(stream)  # streams its body iterates are closed with it
+            return stream if linked is None else _disposing(stream, linked)
+
+        return AsyncFlpIt._wrap(enumerate_with)
+
+    return create
+
+
+def _owned[T](stream: Any) -> AsyncIterator[T]:
+    _owner_scope(stream)  # streams its body iterates are closed with it
+    return typing_cast(AsyncIterator[T], stream)
+
+
+async def _disposing[T](stream: AsyncIterator[T], linked: CancellationTokenSource) -> AsyncIterator[T]:
+    """Enumerate ``stream``; dispose the linked token source when the enumeration ends."""
+    try:
+        async for item in stream:
+            yield item
+    finally:
+        try:
+            await _aclose(stream)
+        finally:
+            linked.dispose()
+
+
+__all__ = ["AsyncEnumerator", "AsyncFlpIt", "OrderedAsyncIt", "async_flpit", "to_async_enumerable"]

@@ -493,6 +493,7 @@ Key features:
 - **Blocking waits:** `task.wait()`, `Task.wait_all()` and `Task.wait_any()` block with an optional timeout and token, and return `False` / `-1` on timeout. As in .NET, a faulted or canceled task raises one `AggregateError` (canceled tasks contribute a `TaskCanceledError`); `result()` keeps raising the original exception.
 - **Continuations:** `task.continue_with(fn, [state], token=..., options=TaskContinuationOptions...)` runs `fn(antecedent)` when the task completes, with the `NOT_ON_*` / `ONLY_ON_*` filters, `EXECUTE_SYNCHRONOUSLY`, `LAZY_CANCELLATION` and `LONG_RUNNING`.
 - **Long-running work:** `Task.run(fn, creation_options=TaskCreationOptions.LONG_RUNNING)` runs blocking work on a dedicated thread instead of a pool worker.
+- **Async generators:** an async generator left early is closed by the runtime (its awaiting `finally` blocks run), and suspended ones are closed at `Task.shutdown()`. `@await_using` closes every stream a coroutine iterated before it returns (C# `await using var`).
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation, cancellation callbacks, timeouts, and linked cancellation tokens.
 - **Resource management:** Configure worker capacity with `Task.configure(min_workers=..., max_workers=...)`; work beyond that queues up (the queue is unbounded) and workers are added when the pool is starved or blocked in `Task.result()`. Calling `Task.result()` inside a task on a task that has not started yet runs it inline, as .NET does. Shut down the process-wide runtime with an observable shutdown report.
 - **Asyncio interoperability:** FlpIt Tasks can be awaited directly inside asyncio coroutines when Task.asyncio_interop is enabled. 
@@ -513,11 +514,12 @@ See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/exampl
 `AsyncFlpIt` is the `IAsyncEnumerable<T>` counterpart to `FlpIt`, modelled on .NET 10's `System.Linq.AsyncEnumerable`. It wraps any async iterable (an async generator, another `AsyncFlpIt`) or sync iterable, runs on the flpit task runtime and is consumed with `async for`.
 
 ```python
-from flpit import AsyncFlpIt, flp
+from flpit import async_flpit, flp
 from flpit.task import CancellationToken, CancellationTokenSource, Task
 
 
-async def fetch_pages(token: CancellationToken):
+@async_flpit                             # C#: async IAsyncEnumerable<int> FetchPages(...)
+async def fetch_pages(token: CancellationToken = CancellationToken.none()):
     for page in range(1, 4):
         await Task.delay(0.1, token=token)  # the enumeration's token reaches the producer
         yield page
@@ -529,7 +531,7 @@ async def is_valid(page: int, token: CancellationToken) -> bool:  # async callba
 
 async def main():
     query = (
-        AsyncFlpIt.create(fetch_pages)   # or flp.ait(any async / sync iterable)
+        fetch_pages()                    # an AsyncFlpIt; or flp.ait(any async / sync iterable)
         .where(is_valid)                 # deferred, like every intermediate operator
         .select(lambda page: page * 10)  # sync callbacks work too
     )
@@ -548,8 +550,15 @@ flp.ait(range(10)).count().result()      # from sync code: block on the Task
 - **Deferred & lazy:** intermediate operators never touch the source; each enumeration enumerates it again, and one-shot sources stay one-shot.
 - **Terminal operators return a `Task`** (`to_list`, `first`, `single`, `count`, `any`, `sum`, `min_by`, `to_dictionary`, `to_lookup`, `aggregate`, …): `await` them inside the runtime or call `.result()` from synchronous code. Argument errors are raised eagerly, before the `Task` is created.
 - **Sync or async callbacks:** every predicate, selector and key selector can be a plain function or an `async def` taking the `CancellationToken` as its last argument, mirroring .NET's `Func<T, CancellationToken, ValueTask<TResult>>` overloads.
-- **Cancellation:** `with_cancellation(token)` binds a token for `async for`, terminal operators take `token=`, and `AsyncFlpIt.create(factory)` hands the token to the producer (the counterpart of `[EnumeratorCancellation]`). As in .NET, operators pass the token on rather than polling it.
-- **Disposal:** every enumerator an operator opens is closed (`aclose()`, .NET `DisposeAsync`) when it completes, fails or short-circuits. Python's `async for` itself does not close an enumerator on `break`; drive `get_async_enumerator()` with `aclose()` when you need `await foreach` semantics.
+- **Async iterators:** `@async_flpit` turns an async generator function into one that returns an `AsyncFlpIt` (C#'s `async IAsyncEnumerable<T>` method): cold, enumerable again, with every operator. Its `token` parameter receives the enumeration's token (`[EnumeratorCancellation]`).
+- **Cancellation:** `with_cancellation(token)` binds a token for `async for`, terminal operators take `token=`, and the token reaches the producer through `@async_flpit` or `AsyncFlpIt.create(factory)`. As in .NET, operators pass the token on rather than polling it.
+- **Disposal:** C#'s `await foreach` always disposes the stream; flpit gives `async for` the same cleanup:
+  - every enumerator an operator opens is closed (`aclose()`, .NET `DisposeAsync`) when it completes, fails or short-circuits;
+  - a stream left early (`break`, `return`, an exception) is closed by the runtime right after the loop, so its `finally` blocks run even when they await;
+  - when the cleanup must be completed at a known point: `async with query.get_async_enumerator() as items:` (C# `await using (...) { }`) or `@await_using` on the consuming function (C# `await using var`);
+  - streams an `@async_flpit` producer iterates are closed with it, before its own `finally`, as in a C# iterator.
+
+  See [`examples/task/await_using.py`](https://github.com/riemar/flpit/tree/main/examples/task/await_using.py).
 - **Bridges:** `flp.ait(source)`, `FlpIt.to_async_enumerable()`, `AsyncFlpIt.empty() / range() / repeat()`.
 
 `AsyncFlpIt` implements the operators `FlpIt` has; overloads `FlpIt` does not have (index-based selectors, comparers, `Range` / `Index` arguments) are not provided yet.

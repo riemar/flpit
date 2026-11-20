@@ -1,14 +1,14 @@
 """
-Example: async yield + await foreach (async generators on the flpit runtime)
+Example: async iterators with @async_flpit (C#: async IAsyncEnumerable<T> + await foreach)
 
 C# has async iterators: an `async IAsyncEnumerable<T>` method that both awaits and
 `yield return`s, consumed with `await foreach`:
 
-    async IAsyncEnumerable<int> CountdownAsync(int from)
+    async IAsyncEnumerable<int> CountdownAsync(int from, [EnumeratorCancellation] CancellationToken token = default)
     {
         for (var i = from; i > 0; i--)
         {
-            await Task.Delay(100);
+            await Task.Delay(100, token);
             yield return i;
         }
     }
@@ -16,78 +16,67 @@ C# has async iterators: an `async IAsyncEnumerable<T>` method that both awaits a
     await foreach (var n in CountdownAsync(3))
         Console.WriteLine(n);
 
-The Python equivalent is an `async def` that contains `yield` (an async generator),
-consumed with `async for`. This example runs it on the flpit task runtime: no asyncio.
+In flpit: an `async def` with `yield`, decorated with `@async_flpit`, consumed with
+`async for`. Calling it returns an `AsyncFlpIt`, flpit's `IAsyncEnumerable<T>`.
 
 Key takeaways:
-1. **Lazy**: calling the async generator runs nothing; each `async for` step resumes
-   the producer until its next `yield`.
-2. **Await inside the producer**: the producer can await flpit Tasks (`Task.delay`,
-   `Task.run`) between yields.
-3. **Disposal on break**: C#'s `await foreach` always calls `DisposeAsync()`, so the
-   producer's `finally` runs at once. Python's `async for` does not close the
-   generator on `break`; use `contextlib.aclosing` (or call `aclose()`) to get the
-   same guarantee.
-4. **LINQ on top**: `flp.ait(...)` wraps the same async generator in an `AsyncFlpIt`
-   query, which also closes its enumerators when it short-circuits.
+1. **Cold**: calling `countdown(3)` runs nothing; each `async for` starts a fresh
+   enumeration, so the same stream can be enumerated again.
+2. **Await inside the producer**: the producer awaits flpit Tasks between yields.
+3. **LINQ**: the result is an `AsyncFlpIt`, so the async LINQ operators work on it.
+4. **Cancellation**: the `token` parameter receives the enumeration's token, like
+   C#'s `[EnumeratorCancellation]`; `with_cancellation(token)` passes one in.
+
+Leaving the loop early is safe as well; await_using.py shows how to have the
+producer's cleanup completed at a point you choose.
 """
 
-import time
 from collections.abc import AsyncGenerator
-from contextlib import aclosing
 
-from flpit import flp
-from flpit.task import Task
+from flpit import async_flpit
+from flpit.task import CancellationToken, CancellationTokenSource, OperationCanceledError, Task
 
 
-async def countdown(start: int) -> AsyncGenerator[int]:
-    """An async method that yields: the counterpart of `async IAsyncEnumerable<int>`."""
+@async_flpit
+async def countdown(start: int, token: CancellationToken = CancellationToken.none()) -> AsyncGenerator[int]:
+    """C#: async IAsyncEnumerable<int> CountdownAsync(int start, [EnumeratorCancellation] CancellationToken token = default)"""
     print(f"  producer: started (from {start})")
-    try:
-        for i in range(start, 0, -1):
-            await Task.delay(0.1)  # await inside the producer ...
-            print(f"  producer: yield {i}")
-            yield i  # ... and yield the next element back to the consumer
-    finally:
-        # Runs when the sequence completes, or when the consumer closes it early.
-        print("  producer: disposed")
 
-
-def blocking_square(x: int) -> int:
-    time.sleep(0.05)  # stands in for blocking I/O or CPU work
-    return x * x
-
-
-async def slow_square(n: int) -> AsyncGenerator[int]:
-    """The producer can also await blocking work offloaded to the pool."""
-    for i in range(1, n + 1):
-        yield await Task.run(blocking_square, i)
+    for i in range(start, 0, -1):
+        await Task.delay(0.05, token=token)  # await inside the producer ...
+        yield i  # ... and yield the next element back to the consumer
 
 
 async def main() -> None:
-    print("1) await foreach over an async generator")
+    print("1) await foreach")
+
     async for n in countdown(3):  # C#: await foreach (var n in CountdownAsync(3))
         print(f"consumer: got {n}")
 
-    print("\n2) break early with await foreach disposal semantics")
-    async with aclosing(countdown(5)) as numbers:
-        async for n in numbers:
-            print(f"consumer: got {n}")
-            if n == 4:
-                break  # aclosing closes the generator -> its `finally` runs now
+    print("\n2) cold and enumerable again: each loop starts the producer anew")
 
-    print("\n3) the producer awaits pool work between yields")
-    async for square in slow_square(4):
-        print(f"consumer: square {square}")
+    numbers = countdown(2)
 
-    print("\n4) the same async generator as a LINQ query (AsyncFlpIt)")
-    query = flp.ait(countdown(6)).where(lambda n: n % 2 == 0).select(lambda n: n * 10)
-    async for value in query:  # still just `async for`
-        print(f"consumer: query value {value}")
+    print(f"consumer: first pass  {[n async for n in numbers]}")
+    print(f"consumer: second pass {[n async for n in numbers]}")
 
-    print("\n5) terminal operators return a Task you can await")
-    first_even = await flp.ait(countdown(5)).first(lambda n: n % 2 == 0)
-    print(f"consumer: first even -> {first_even}")  # producer is disposed after the match
+    print("\n3) LINQ on the stream")
+
+    evens = await countdown(6).where(lambda n: n % 2 == 0).select(lambda n: n * 10).to_list()
+
+    print(f"consumer: {evens}")
+
+    print("\n4) cancellation reaches the producer's token")
+
+    cts = CancellationTokenSource()
+
+    try:
+        async for n in countdown(5).with_cancellation(cts.token):
+            print(f"consumer: got {n}, cancelling")
+            cts.cancel()
+
+    except OperationCanceledError:
+        print("consumer: stream cancelled")
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ from flpit.core.linq import (
 
 from flpit.core._grouping import Grouping
 from flpit.core._lookup import Lookup
-from flpit.core.async_linq import AsyncFlpIt, OrderedAsyncIt
+from flpit.core.async_linq import AsyncEnumerator, AsyncFlpIt, OrderedAsyncIt, async_flpit
 
 __all__ = [
     "flp",
@@ -57,8 +57,10 @@ __all__ = [
     "Grouping",
     "Lookup",
     "OrderedIt",
+    "AsyncEnumerator",
     "AsyncFlpIt",
     "OrderedAsyncIt",
+    "async_flpit",
 
     "InvalidOperationError",
     "EmptySequenceError",

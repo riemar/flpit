@@ -5,18 +5,19 @@ This example shows how to stream data lazily using asynchronous generators.
 Unlike launching a huge batch of tasks at once, this pattern processes data
 in a memory-efficient pipeline, item by item.
 
-AsyncFlpIt turns such a stream into a LINQ query (.NET System.Linq.AsyncEnumerable):
+`@async_flpit` turns such a producer into a LINQ query (.NET System.Linq.AsyncEnumerable):
 operators stay lazy, terminal operators return a Task, and a CancellationToken
-flows through the whole pipeline into the producer.
+flows through the whole pipeline into the producer's `token` parameter.
 """
 
 import time
 
-from flpit import AsyncFlpIt
+from flpit import AsyncFlpIt, async_flpit
 from flpit.task import CancellationToken, CancellationTokenSource, Task
 
 
-async def async_data_stream(token: CancellationToken):
+@async_flpit
+async def async_data_stream(token: CancellationToken = CancellationToken.none()):
     """A true lazy data producer. It streams data on demand and observes the token."""
     for i in range(1, 6):
         # In a real app, this would be reading a line from a huge file
@@ -36,9 +37,9 @@ async def is_interesting(item: int, token: CancellationToken) -> bool:
 
 
 async def main():
-    # AsyncFlpIt.create passes the enumeration's token to the producer
+    # @async_flpit passes the enumeration's token to the producer's `token` parameter
     # (the counterpart of an [EnumeratorCancellation] parameter).
-    stream = AsyncFlpIt.create(async_data_stream)
+    stream = async_data_stream()
 
     query = (
         stream

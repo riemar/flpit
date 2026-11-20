@@ -34,9 +34,9 @@ Key takeaways:
    each task, so iteration pauses while N tasks are running. Nothing is queued up front.
 2. **Release in `finally`**: every started task gives its slot back, even when it fails.
 3. **Ordered results**: `Task.when_all` returns results in the order the tasks were yielded.
-4. **Cancellation**: with `AsyncFlpIt.create`, the enumeration's token reaches the
-   producer's `wait_async(token)`: cancelling stops new work from starting, already
-   running tasks finish, and no slot is lost.
+4. **Cancellation**: `@async_flpit` hands the enumeration's token to the producer's
+   `token` parameter, so it reaches `wait_async(token)`: cancelling stops new work from
+   starting, already running tasks finish, and no slot is lost.
 """
 
 import random
@@ -45,7 +45,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator
 
-from flpit import AsyncFlpIt
+from flpit import async_flpit
 from flpit.task import CancellationToken, CancellationTokenSource, OperationCanceledError, Task
 from flpit.threading import SemaphoreSlim
 
@@ -105,6 +105,7 @@ async def run_and_release(page_id: int, throttle: SemaphoreSlim, token: Cancella
         throttle.release()  # give the slot back, success or failure
 
 
+@async_flpit
 async def start_all(
         page_ids: range, throttle: SemaphoreSlim, token: CancellationToken = CancellationToken.none()
 ) -> AsyncGenerator[Task[str]]:
@@ -138,7 +139,7 @@ async def main() -> None:
     print("2) the same producer as an AsyncFlpIt query, cancelled after 0.4s\n")
 
     throttle = SemaphoreSlim(MAX_PARALLEL)
-    query = AsyncFlpIt.create(lambda token: start_all(range(1, 101), throttle, token))
+    query = start_all(range(1, 101), throttle)
 
     cts = CancellationTokenSource()
     cts.cancel_after(0.4)

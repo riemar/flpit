@@ -64,12 +64,13 @@ from collections import deque
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from itertools import count
-from types import CoroutineType, FunctionType, MethodType
+from types import AsyncGeneratorType, CoroutineType, FunctionType, MethodType
 from typing import Any, Generic, TypeVar, cast, Iterable, Final, overload
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
-from contextvars import Context, copy_context
+from contextlib import AsyncExitStack
+from contextvars import Context, ContextVar, copy_context
 from enum import IntFlag
 from datetime import timedelta
 from .threading import AsyncLocal, _run_with_context, _to_seconds
@@ -301,8 +302,13 @@ _thread_state = _ThreadState()
 def _start_dedicated_thread(task: "Task[Any]") -> None:
     """Run ``task._start`` on a new background thread (.NET LongRunning)."""
     threading.Thread(
-        target=task._start, name=f"{task.name}-long-running", daemon=True, **_fresh_context()
+        target=_run_dedicated, args=(task,), name=f"{task.name}-long-running", daemon=True, **_fresh_context()
     ).start()
+
+
+def _run_dedicated(task: "Task[Any]") -> None:
+    _install_asyncgen_hooks()
+    task._start()
 
 _completed_task: list["Task[None] | None"] = [None]
 
@@ -796,6 +802,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
     # continuations to the pool instead of running them on the completing thread.
     _async_continuations: bool = False
     _creation_options: "TaskCreationOptions" = TaskCreationOptions.NONE
+    # Internal cleanup (closing async generators) that must also run during shutdown.
+    _shutdown_cleanup: bool = False
 
     @property
     def creation_options(self) -> "TaskCreationOptions":
@@ -1664,7 +1672,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             return
 
         self._coroutine = coroutine
-        if self._runtime._shutdown_requested:
+        if self._runtime._shutdown_requested and not self._shutdown_cleanup:
             # A synchronous function that returned an awaitable after the
             # shutdown sweep: it missed the cancellation request.
             self._cancel_requested = True
@@ -1810,6 +1818,129 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
 
 _current_task: AsyncLocal[Task[Any] | None] = AsyncLocal()
+
+
+# ---------------------------------------------------------------------------
+# Async generators (PEP 525 hooks)
+#
+# Python's ``async for`` does not close an async generator when the loop is left
+# early (``break``, ``return``, an exception); C#'s ``await foreach`` always calls
+# ``DisposeAsync``. Every thread that runs flpit coroutines installs these hooks:
+# an async generator that is dropped before it finished is closed with
+# ``aclose()`` on the pool, so its ``finally`` blocks run even when they await.
+# ``@await_using`` uses the same hooks to close streams deterministically.
+# ---------------------------------------------------------------------------
+
+class _AwaitUsingScope:
+    """Streams first iterated inside one ``@await_using`` call, in first-use order."""
+
+    __slots__ = ("owner", "streams")
+
+    def __init__(self, owner: "Task[Any] | None") -> None:
+        self.owner = owner
+        # Strong references on purpose: a stream abandoned by ``break`` must still be
+        # here to be awaited, not closed in the background by the finalizer hook.
+        self.streams: list[AsyncGeneratorType[Any, Any]] = []
+
+    def add(self, stream: AsyncGeneratorType[Any, Any]) -> None:
+        streams = self.streams
+        if len(streams) >= 64 and not len(streams) & 63:
+            # Long-running callers iterate many short streams: drop finished ones.
+            streams[:] = [item for item in streams if item.ag_frame is not None]
+        streams.append(stream)
+
+    async def close(self) -> None:
+        """Close every unfinished stream, last first (nested ``await using`` semantics)."""
+        streams = self.streams
+        self.streams = []
+        async with AsyncExitStack() as stack:
+            for stream in streams:
+                if stream.ag_frame is not None:
+                    stack.push_async_callback(_close_stream, stream)
+
+
+_await_using_scope: ContextVar[_AwaitUsingScope | None] = ContextVar("flpit.await_using", default=None)
+
+# Owner streams (``@async_flpit`` enumerations) by the id of their generator frame:
+# a stream first iterated inside an owner's body is closed together with the owner,
+# like the ``await foreach`` inside a C# iterator method. Entries are checked against
+# the live generator, so a reused frame id is never mistaken for an owner.
+_owner_scopes: dict[int, tuple[weakref.ref[AsyncGeneratorType[Any, Any]], _AwaitUsingScope]] = {}
+
+
+def _owner_scope(stream: AsyncGeneratorType[Any, Any]) -> _AwaitUsingScope:
+    """Make ``stream`` the owner of the streams first iterated inside its body."""
+    scope = _AwaitUsingScope(None)
+    key = id(stream.ag_frame)
+
+    def forget(ref: weakref.ref[AsyncGeneratorType[Any, Any]], key: int = key) -> None:
+        entry = _owner_scopes.get(key)
+        if entry is not None and entry[0] is ref:
+            del _owner_scopes[key]
+
+    _owner_scopes[key] = (weakref.ref(stream, forget), scope)
+    return scope
+
+
+def _inner_streams(stream: Any) -> _AwaitUsingScope | None:
+    """The streams an owner stream's body iterated, if ``stream`` is a suspended owner."""
+    frame = getattr(stream, "ag_frame", None)
+    if frame is None or not _owner_scopes:
+        return None
+    entry = _owner_scopes.get(id(frame))
+    if entry is None or entry[0]() is not stream:
+        return None
+    return entry[1]
+
+
+async def _close_stream(stream: Any) -> None:
+    """``aclose()`` that closes an owner's inner streams first (C# iterator order)."""
+    inner = _inner_streams(stream)
+    if inner is None:
+        await stream.aclose()
+        return
+    try:
+        await inner.close()
+    finally:
+        await stream.aclose()
+
+
+def _asyncgen_firstiter(generator: AsyncGenerator[Any, Any]) -> None:
+    # Runs for every async generator a flpit thread starts: keep the common path short.
+    stream: AsyncGeneratorType[Any, Any] = generator  # type: ignore[assignment]  # hooks get native ones
+    runtime = _runtime
+    if runtime is not None:
+        # A plain weakref, no callback: dead entries are pruned in bulk (see _track_asyncgen).
+        asyncgens = runtime._asyncgens
+        asyncgens[id(stream)] = weakref.ref(stream)
+        if len(asyncgens) > runtime._asyncgens_limit:
+            runtime._prune_asyncgens()
+    scope = _await_using_scope.get()
+    if scope is not None and scope.owner is _current_task._value.get():
+        scope.add(stream)
+    if _owner_scopes:
+        # The nearest owner on the call stack: its body (or a coroutine it awaits)
+        # is what starts iterating ``stream``.
+        frame = sys._getframe(1)
+        while frame is not None:
+            entry = _owner_scopes.get(id(frame))
+            if entry is not None:
+                owner = entry[0]()
+                if owner is not None and owner.ag_frame is frame:
+                    entry[1].add(stream)
+                    break
+            frame = frame.f_back
+
+
+def _asyncgen_finalizer(generator: AsyncGenerator[Any, Any]) -> None:
+    runtime = _runtime
+    if runtime is not None and not runtime._closed:
+        runtime._close_asyncgen(generator)  # type: ignore[arg-type]  # hooks get native ones
+
+
+def _install_asyncgen_hooks() -> None:
+    """Called on every thread that runs flpit coroutines (pool workers, LONG_RUNNING threads)."""
+    sys.set_asyncgen_hooks(firstiter=_asyncgen_firstiter, finalizer=_asyncgen_finalizer)
 
 
 # ---------------------------------------------------------------------------
@@ -2717,6 +2848,7 @@ class _WorkerPool:
     def _work(self) -> None:
         state = _thread_state
         state.pool = self
+        _install_asyncgen_hooks()
         items = self._items
         lock = self._lock
         report = self._runtime._report_exception
@@ -2925,6 +3057,10 @@ class _Runtime:
         # such task, and the coroutine parked on it, alive for the life of
         # the process.
         self._tasks: weakref.WeakSet[Task[Any]] = weakref.WeakSet()
+        # Async generators started on this runtime, closed at shutdown if still suspended.
+        # id -> weakref without callback: cheaper than a WeakSet on every generator start.
+        self._asyncgens: dict[int, weakref.ref[AsyncGeneratorType[Any, Any]]] = {}
+        self._asyncgens_limit = 1024
         self._state_lock = threading.Lock()
         self._shutdown_lock = threading.Lock()
         self._shutdown_requested = False
@@ -3143,6 +3279,36 @@ class _Runtime:
     # Shutdown
     # ------------------------------------------------------------------
 
+    def _prune_asyncgens(self) -> None:
+        """Drop entries of generators that no longer exist; amortized O(1) per start."""
+        asyncgens = self._asyncgens
+        for key, ref in list(asyncgens.items()):
+            if ref() is None:
+                asyncgens.pop(key, None)
+        self._asyncgens_limit = max(1024, 2 * len(asyncgens))
+
+    def _close_asyncgen(self, stream: AsyncGeneratorType[Any, Any]) -> None:
+        """Run ``stream.aclose()`` on the pool (asyncio's async generator finalizer)."""
+        self._asyncgens.pop(id(stream), None)
+        task: Task[None] = Task(self, capture_context=False)
+        task._execution_context = Context()  # nothing of the dropping thread's context
+        task._shutdown_cleanup = True
+        try:
+            self._track(task, internal=True)
+        except RuntimeShutdownError:
+            return
+        task._work = (_close_stream(stream), (), {})
+        task._add_continuation(functools.partial(self._report_asyncgen_close, stream))
+        # If the pool closes in between, shutdown's final sweep cancels the task.
+        self._pool.queue(task._start)
+
+    def _report_asyncgen_close(self, stream: AsyncGeneratorType[Any, Any], task: Task[Any]) -> None:
+        if task._state is _FAILED and task._exception is not None:
+            self._report_exception(
+                {"message": f"Error while closing async generator {stream!r}", "asyncgen": stream},
+                task._exception,
+            )
+
     def _snapshot_tasks(self) -> list[Task[Any]]:
         while True:
             try:
@@ -3150,6 +3316,14 @@ class _Runtime:
             except RuntimeError:
                 # Resized by another thread while being copied.
                 continue
+
+    def _wait_drained(self, deadline: float) -> None:
+        while self._tasks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._drained.wait(min(remaining, 0.05))
+            self._drained.clear()
 
     def shutdown(self, *, grace_timeout: float, worker_timeout: float) -> ShutdownReport:
         with self._shutdown_lock:
@@ -3168,12 +3342,16 @@ class _Runtime:
 
             # 2. Give coroutines the grace period to unwind (they may still
             #    await delays for cleanup).
-            while self._tasks:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                self._drained.wait(min(remaining, 0.05))
-                self._drained.clear()
+            self._wait_drained(deadline)
+
+            # 2b. Close async generators that are still suspended (asyncio's
+            #     shutdown_asyncgens()): their finally blocks get the rest of the
+            #     grace period.
+            for ref in list(self._asyncgens.values()):
+                stream = ref()
+                if stream is not None and stream.ag_frame is not None and not stream.ag_running:
+                    self._close_asyncgen(stream)
+            self._wait_drained(deadline)
 
             # 3. Stop for good: nothing is accepted any more, whatever is
             #    still pending is completed as cancelled.
@@ -3296,6 +3474,44 @@ def task(function: Callable[..., Any]) -> Callable[..., Task[Any]]:
     @wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Task[Any]:
         return Task.run(function, *args, **kwargs)
+
+    return wrapper
+
+
+def await_using[**P, T](
+        function: Callable[P, Coroutine[Any, Any, T]]
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Close every async stream the coroutine iterated before it returns (C# ``await using var``).
+
+    C#'s ``await foreach`` always disposes its enumerator; Python's ``async for`` leaves
+    an abandoned async generator suspended. flpit closes such generators in the
+    background anyway; ``@await_using`` makes it deterministic: every async generator
+    first iterated by this call (``@async_flpit`` streams, LINQ queries, plain async
+    generators) is closed, awaited and last first, before the call returns or raises::
+
+        @await_using
+        async def main():
+            async for row in rows(10):
+                if row == 3:
+                    break
+        # rows' finally blocks have completed here
+
+    Streams first iterated by other tasks (``Task.run`` inside the function) are not
+    affected. For a scope smaller than the function use the block form:
+    ``async with query.get_async_enumerator() as items:``.
+    """
+    if not inspect.iscoroutinefunction(function):
+        raise TypeError("@await_using expects an async def function")
+
+    @functools.wraps(function)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        scope = _AwaitUsingScope(_current_task.value)
+        reset = _await_using_scope.set(scope)
+        try:
+            return await function(*args, **kwargs)
+        finally:
+            _await_using_scope.reset(reset)
+            await scope.close()
 
     return wrapper
 
