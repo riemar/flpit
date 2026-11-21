@@ -2354,6 +2354,14 @@ class FlpList[TItem](Collection[TItem]):
         """Explicitly returns a shallow copy instance to isolate mutations."""
         return FlpList(self.__list.data.copy())
 
+    def to_async_enumerable(self) -> AsyncFlpIt[TItem]:
+        """
+        Wraps the list as an ``AsyncFlpIt`` (.NET ``ToAsyncEnumerable``). Nothing is copied: every
+        enumeration of the result iterates the list as it is at that moment.
+        """
+        from flpit.core.async_linq import to_async_enumerable
+        return to_async_enumerable(self.__list.data)
+
     # =====================================================================
     # 5. json serialization
     # =====================================================================

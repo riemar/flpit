@@ -33,9 +33,26 @@ async def numbers(token: CancellationToken) -> AsyncIterator[int]:
     yield 1
 
 
+async def numbers_stream() -> AsyncIterator[int]:
+    yield 1
+
+
 # --- construction -------------------------------------------------------------------------------
 assert_type(flp.ait([1, 2]), AsyncFlpIt[int])
 assert_type(flp.it([1, 2]).to_async_enumerable(), AsyncFlpIt[int])
+assert_type(flp.lst([1, 2]).to_async_enumerable(), AsyncFlpIt[int])
+assert_type(flp.it([1, 2]).order_by(lambda i: i).to_async_enumerable(), AsyncFlpIt[int])  # OrderedIt
+assert_type(flp.it([RECORD]).group_by(lambda r: r.active).first().to_async_enumerable(), AsyncFlpIt[Record])  # Grouping
+assert_type(flp.ait(tuple[int, ...]((1, 2))), AsyncFlpIt[int])
+assert_type(flp.ait(range(3)), AsyncFlpIt[int])
+assert_type(flp.ait({1, 2}), AsyncFlpIt[int])
+assert_type(flp.ait({"a": 1}), AsyncFlpIt[str])  # iterates the keys
+assert_type(flp.ait(x for x in [1, 2]), AsyncFlpIt[int])
+assert_type(flp.ait(flp.lst([RECORD])), AsyncFlpIt[Record])
+assert_type(flp.ait(QUERY), AsyncFlpIt[Record])  # an AsyncFlpIt is returned as is
+assert_type(flp.ait(numbers_stream()), AsyncFlpIt[int])  # any async iterable
+assert_type(flp.it([RECORD]).to_async_enumerable().where(is_active).select(record_name), AsyncFlpIt[str])
+assert_type(flp.lst([RECORD]).to_async_enumerable().to_list(), Task[FlpList[Record]])
 assert_type(AsyncFlpIt.range(0, 3), AsyncFlpIt[int])
 assert_type(AsyncFlpIt.repeat("x", 3), AsyncFlpIt[str])
 assert_type(AsyncFlpIt.create(numbers), AsyncFlpIt[int])
