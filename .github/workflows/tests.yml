@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add more interpreters here, e.g. "3.13", "3.14" (project supports >=3.12).
+        python-version: ["3.12", "3.14t"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Type check (pyrefly)
+        run: uv run --frozen pyrefly check src typing
+
+      # Benchmark and stress tests are deselected via addopts in pyproject.toml.
+      - name: Run tests
+        run: uv run --frozen pytest -ra -o log_cli=false
