@@ -1,7 +1,7 @@
 # Chaining
 
 Individual operators are only half of the story. These examples check that the behaviour holds when
-operators are composed.
+operators are composed. They use the `Tracked` helper from [the contract](contract.md).
 
 ## Streaming through a chain
 

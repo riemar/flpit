@@ -1,26 +1,59 @@
 # Task runtime
 
 FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coordinating concurrent work,
-with synchronous callables executed through a bounded worker pool.
+modelled on the .NET thread pool: synchronous callables and coroutines both run on pooled worker threads.
 
-- **Task scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
-- **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order;
-  `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
+- **Scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
+- **Coordination:** `Task.when_all()`, `Task.when_any()` and `Task.collect()`.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation,
-  cancellation callbacks, timeouts, and linked tokens.
-- **Resource management:** configure worker capacity and pending-work limits, and shut down the process-wide
-  runtime with an observable report.
+  callbacks, timeouts, and linked tokens.
+- **Resource management:** configure worker capacity, and shut the runtime down with an observable report.
 - **Asyncio interoperability:** Tasks can be awaited inside asyncio coroutines when `Task.asyncio_interop`
   is enabled (disabled by default).
 
 The runtime starts lazily and manages its own lifecycle. Cancellation of running synchronous functions is
 cooperative.
 
-## Example: running tasks in parallel
+## Run work in parallel
 
-```python title="examples/task/when_all.py"
---8<-- "examples/task/when_all.py"
+Decorate a blocking function with `@task` and every call becomes a `Task` that is already running.
+`Task.when_all` waits for all of them and returns their results in input order:
+
+```python
+--8<-- "examples/task/overview.py:when_all"
 ```
 
-More examples are in
-[`examples/task/`](https://github.com/riemar/flpit/tree/main/examples/task).
+## Take the first result
+
+`Task.when_any` returns the first `Task` to complete:
+
+```python
+--8<-- "examples/task/overview.py:when_any"
+```
+
+## Handle results as they arrive
+
+`Task.collect` is an async stream of tasks in completion order:
+
+```python
+--8<-- "examples/task/overview.py:collect"
+```
+
+## Cancel
+
+```python
+--8<-- "examples/task/overview.py:cancel"
+```
+
+## More examples
+
+The [`examples/`](https://github.com/riemar/flpit/tree/main/examples) folder has runnable programs for:
+
+- [tasks](https://github.com/riemar/flpit/tree/main/examples/task): awaiting sync functions, async streams with
+  `@async_flpit`, cleanup with `@await_using`
+- [channels](https://github.com/riemar/flpit/tree/main/examples/channels): producer/consumer queues with
+  backpressure
+- [concurrent collections](https://github.com/riemar/flpit/tree/main/examples/concurrent): thread-safe queue,
+  stack, bag and dictionary
+- [threading](https://github.com/riemar/flpit/tree/main/examples/threading): `SemaphoreSlim` for limiting
+  parallelism
