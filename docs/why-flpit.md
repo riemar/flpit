@@ -1,3 +1,6 @@
+---
+description: Why FlpIt exists - a Python LINQ library whose operators behave like .NET's System.Linq.Enumerable, alone and when chained, not just in name.
+---
 # Why FlpIt
 
 Method names are the easy part of LINQ. The valuable part is behaviour: when work happens, how much of the
@@ -29,6 +32,13 @@ Failures are the LINQ ones too: `first()` on an empty source raises `EmptySequen
 Every snippet in these docs is a real file under
 [`examples/`](https://github.com/riemar/flpit/tree/main/examples) that runs in CI, so the examples cannot drift
 from the library.
+
+## Scope
+
+FlpIt models in-memory LINQ: `IEnumerable` and `System.Linq.Enumerable`, working directly on Python callables over
+Python iterables. It does not model `IQueryable` or expression trees, so nothing rewrites your query into SQL or
+another backend's language. Each operator's enumeration and buffering behaviour is part of its semantics; see
+[Execution characteristics](semantics/execution.md).
 
 ## How this is checked
 

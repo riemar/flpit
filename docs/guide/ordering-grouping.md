@@ -1,3 +1,6 @@
+---
+description: Stable sorting with order_by and then_by, and grouping with group_by, in FlpIt. Same behaviour as .NET LINQ.
+---
 # Ordering and grouping
 
 ## Ordering

@@ -1,3 +1,6 @@
+---
+description: FlpIt keeps LINQ behaviour when operators are chained - streaming through a chain, take, buffering operators and independent derived queries.
+---
 # Chaining
 
 Individual operators are only half of the story. These examples check that the behaviour holds when
@@ -33,3 +36,14 @@ Queries built from the same source do not affect each other or the source:
 ```python
 --8<-- "examples/linq/chaining.py:independent"
 ```
+
+```text
+original
+   │
+   ├── order_by ──→ ordered
+   │
+   └── concat ────→ extended
+```
+
+`ordered` and `extended` are separate queries over `original`. This matches the independent-query behaviour of
+.NET LINQ.

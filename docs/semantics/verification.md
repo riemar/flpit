@@ -1,3 +1,6 @@
+---
+description: How FlpIt checks its closeness to .NET LINQ - more than 10,000 migrated .NET runtime tests, a .NET oracle in development, and executable docs.
+---
 # Verification
 
 How closeness to .NET LINQ is checked, from the broadest evidence to the most specific.

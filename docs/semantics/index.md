@@ -1,3 +1,6 @@
+---
+description: What matching .NET LINQ semantics means for FlpIt - when work happens, how much is read, what comes out, how it fails and how it composes.
+---
 # What "LINQ semantics" means
 
 Matching LINQ is more than matching method names. For every operator FlpIt implements, the following should
@@ -14,6 +17,8 @@ The next pages show each of these as running code:
 
 - [The contract](contract.md): one behaviour at a time.
 - [Chaining](chaining.md): the same behaviours across composed queries.
+- [Execution characteristics](execution.md): which operators stream and which buffer.
+- [Where FlpIt differs](differences.md): the deliberate deviations and why.
 - [Verification](verification.md): how closeness to .NET is checked.
 
 !!! note

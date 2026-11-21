@@ -5,6 +5,13 @@ repo_url: https://github.com/riemar/flpit
 repo_name: riemar/flpit
 edit_uri: edit/main/docs/
 
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/riemar/flpit
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/flpit/
+
 theme:
   name: material
   features:
@@ -22,6 +29,12 @@ theme:
       scheme: slate
       toggle: { icon: material/weather-sunny, name: Switch to light mode }
 
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
 nav:
   - Home: index.md
   - Why FlpIt: why-flpit.md
@@ -29,14 +42,32 @@ nav:
       - Getting started: guide/getting-started.md
       - Lazy and eager: guide/lazy-vs-eager.md
       - Ordering and grouping: guide/ordering-grouping.md
+      - Joins and lookups: guide/joins.md
       - JSON: guide/json.md
+      - CSV: guide/csv.md
+  - Async queries: async/index.md
   - Semantics:
       - What "LINQ semantics" means: semantics/index.md
       - The contract: semantics/contract.md
       - Chaining: semantics/chaining.md
+      - Execution characteristics: semantics/execution.md
+      - Where FlpIt differs: semantics/differences.md
       - Verification: semantics/verification.md
-  - Task runtime: task/index.md
-  - API reference: reference/index.md
+  - Concurrency:
+      - Task runtime: task/index.md
+      - Cancellation: task/cancellation.md
+      - Channels: concurrency/channels.md
+      - Concurrent collections: concurrency/collections.md
+      - Threading primitives: concurrency/threading.md
+  - API reference:
+      - Reference overview: reference/index.md
+      - LINQ API: reference/linq.md
+      - AsyncFlpIt API: reference/async.md
+      - Task API: reference/task.md
+      - Channels API: reference/channels.md
+      - Concurrent collections API: reference/concurrent.md
+      - Threading API: reference/threading.md
+      - JSON and CSV API: reference/json-csv.md
   - Explore .NET: dotnet.md
 
 markdown_extensions:

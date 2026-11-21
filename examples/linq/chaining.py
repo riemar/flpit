@@ -7,10 +7,10 @@ from flpit import flp
 source = Tracked(range(100))
 first_big_even = (
     flp.it(source)
-    .where(lambda x: x % 2 == 0)
-    .select(lambda x: x * x)
-    .where(lambda x: x > 20)
-    .first()
+        .where(lambda x: x % 2 == 0)
+        .select(lambda x: x * x)
+        .where(lambda x: x > 20)
+        .first()
 )
 
 assert first_big_even == 36     # 6 * 6

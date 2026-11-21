@@ -1,3 +1,6 @@
+---
+description: The FlpIt contract with .NET LINQ as running code - deferred execution, short-circuiting, exceptions, one-shot sources and result order.
+---
 # The contract
 
 Each snippet below is part of a file under `examples/linq/` that runs in CI. Two small helpers keep them
