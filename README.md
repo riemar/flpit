@@ -508,6 +508,48 @@ See the [Task Runtime examples](https://github.com/riemar/flpit/tree/main/exampl
 
 `flpit.threading` adds the matching .NET threading primitives: `SemaphoreSlim` (`wait()` / `await wait_async()`, for example to limit parallelism; see the [throttling example](https://github.com/riemar/flpit/tree/main/examples/threading)), `ThreadLocal[T]` (per-thread values with a value factory and `values` tracking, the counterpart of `AsyncLocal[T]`), and `ManualResetEvent`.
 
+### Channels (`flpit.channels`)
+
+`Channel[T]` is modeled on .NET's `System.Threading.Channels`: a thread-safe producer/consumer queue with backpressure, for flpit tasks and plain threads.
+
+```python
+channel: Channel[str] = Channel.create_bounded(100)   # writers wait while 100 items are buffered
+
+async def produce():
+    for order in orders:
+        await channel.writer.write_async(order)
+    channel.writer.complete()                          # ends the consumer's loop
+
+async def consume():
+    async for order in channel.reader.read_all_async():   # an AsyncFlpIt: LINQ works on it
+        await ship(order)
+```
+
+- **Kinds:** unbounded, bounded (wait, or drop the oldest / newest / incoming item), rendezvous (`create_bounded(0)`) and prioritized.
+- **Non-blocking:** `try_write` / `try_read` never wait; `try_read()` returns `(True, item)` or `(False, None)`.
+
+See the [channel examples](https://github.com/riemar/flpit/tree/main/examples/channels).
+
+### Concurrent collections (`flpit.concurrent`)
+
+Thread-safe collections modeled on .NET's `System.Collections.Concurrent`, for regular and free-threaded CPython.
+
+```python
+counts = ConcurrentDictionary[str, int]()             # or CDict[str, int]()
+counts.add_or_update(word, 1, lambda _, n: n + 1)     # atomic: no lost updates
+cache.get_or_add(url, fetch)                          # fetch(url) runs only if the key is missing
+
+jobs = ConcurrentQueue[Job]()                         # or CQueue[Job]()
+jobs.enqueue(job)
+ok, job = jobs.try_dequeue()                          # (False, None) when empty
+```
+
+- **`ConcurrentDictionary`** is a regular Python mapping, plus atomic `get_or_add`, `add_or_update`, `try_update` and `try_remove`.
+- **`ConcurrentQueue`** (FIFO), **`ConcurrentStack`** (LIFO) and **`ConcurrentBag`** (unordered; each thread gets its own items back first).
+- **Iterating** a collection works on a snapshot, so it never breaks while other threads modify it.
+
+See the [concurrent collection examples](https://github.com/riemar/flpit/tree/main/examples/concurrent).
+
 ## 🌊 Async Queries (`AsyncFlpIt`)
 ⚠️ **Experimental, pre-release only.** Added in `0.3.4.dev1`; not in the current stable release.
 
@@ -583,6 +625,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 > Migrated from the official .NET Runtime LINQ Tests.
 > Note: The test cases exercise both core types, `FlpIt` and `FlpList`, with transitions between lazy and eager execution occurring as part of the individual test cases.
 > `async_linq/` is migrated from the .NET 10 `System.Linq.AsyncEnumerable` tests and exercises `AsyncFlpIt` on the flpit task runtime.
+> `channels/` is migrated from the `System.Threading.Channels` tests; `concurrent/` from the `System.Collections.Concurrent` tests, including the shared `IEnumerable` / `ICollection` / `IDictionary` suites of `Common/tests` (ported to `common/`).
 
 ```
 ================================================================================
@@ -644,6 +687,21 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_union.py                                          |          12 |
 | │   ├── test_where.py                                          |           9 |
 | │   └── test_zip.py                                            |          12 |
+| ├── channels/                                                  |             |
+| │   ├── test_bounded_channel.py                                |         139 |
+| │   ├── test_channel.py                                        |          16 |
+| │   ├── test_channel_closed_exception.py                       |           2 |
+| │   ├── test_debug_attribute.py                                |           0 |
+| │   ├── test_priority_unbounded_channel.py                     |          85 |
+| │   ├── test_rendezvous_channel.py                             |         104 |
+| │   └── test_unbounded_channel.py                              |         338 |
+| ├── concurrent/                                                |             |
+| │   ├── test_concurrent_bag.py                                 |         130 |
+| │   ├── test_concurrent_dictionary.py                          |          56 |
+| │   ├── test_concurrent_dictionary_generic.py                  |        1236 |
+| │   ├── test_concurrent_queue.py                               |         130 |
+| │   ├── test_concurrent_stack.py                               |         124 |
+| │   └── test_etw.py                                            |           0 |
 | ├── linq/                                                      |             |
 | │   ├── test_aggregate.py                                      |          42 |
 | │   ├── test_all.py                                            |          80 |
@@ -709,6 +767,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_semaphore_slim_cancellation.py                    |           4 |
 |     └── test_thread_local.py                                   |          15 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |        8349 |
+| GRAND TOTALS                                                   |       10709 |
 ================================================================================
 ```

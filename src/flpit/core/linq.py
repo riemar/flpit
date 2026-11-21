@@ -62,6 +62,23 @@ _MISSING = object()
 class InvalidOperationError(ValueError):
     pass
 
+
+class NotSupportedError(Exception):
+    """An operation the object does not support (.NET ``NotSupportedException``)."""
+
+
+class KeyNotFoundError(KeyError):
+    """A key that is not in the dictionary (.NET ``KeyNotFoundException``)."""
+
+    def __init__(self, key: object) -> None:
+        super().__init__(f"The given key '{key}' was not present in the dictionary.")
+        self.key = key
+
+    @override
+    def __str__(self) -> str:
+        return str(self.args[0])
+
+
 class EmptySequenceError(InvalidOperationError):
     def __init__(self):
         super().__init__("Sequence contains no elements")

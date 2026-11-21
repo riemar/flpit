@@ -24,6 +24,8 @@ from flpit.core.linq import (
     NoMatchError,
     MultipleElementsError,
     MultipleMatchesError,
+    NotSupportedError,
+    KeyNotFoundError,
 
     #====================
     # ArgumentExceptions
@@ -67,6 +69,8 @@ __all__ = [
     "NoMatchError",
     "MultipleElementsError",
     "MultipleMatchesError",
+    "NotSupportedError",
+    "KeyNotFoundError",
 
     "ArgumentError",
     "ArgumentNullError",

@@ -21,14 +21,17 @@ from typing import Any
 
 import pytest
 
+import flpit.task as task_module
 from flpit.task import Task, TaskCompletionSource
 
 
 @pytest.fixture(autouse=True)
 def isolated_runtime():
+    previous = dict(task_module._runtime_config)
     Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
     yield
     Task.shutdown(grace_timeout=0.5, worker_timeout=1.0)
+    Task.configure(**previous)  # the limits outlive shutdown: restore them for later modules
 
 
 def _collect() -> None:
