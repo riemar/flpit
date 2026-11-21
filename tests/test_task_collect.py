@@ -1,6 +1,7 @@
 import pytest
 import pytest
 
+from flpit import AsyncFlpIt
 from flpit.task import (
     Task,
     asyncio_task
@@ -85,3 +86,38 @@ class TestTaskCollect():
 
         assert len(list_results) == 2
         assert len(positional_results) == 2
+
+    def test_task_collect_returns_async_flpit(self, isolate_worker_pool):
+        """Task.collect returns an AsyncFlpIt (not a bare async generator) in both call forms."""
+        t1 = async_mock_worker(1, duration=0.01)
+        t2 = async_mock_worker(2, duration=0.01)
+
+        assert isinstance(Task.collect([t1, t2]), AsyncFlpIt)
+        assert isinstance(Task.collect(t1, t2), AsyncFlpIt)
+
+    def test_task_collect_supports_fluent_queries_in_completion_order(self, isolate_worker_pool):
+        """AsyncFlpIt operators work on collect: a bare async generator has no .select/.where."""
+        t1 = async_mock_worker(1, duration=0.3)
+        t2 = async_mock_worker(2, duration=0.05)  # finishes first
+        t3 = async_mock_worker(3, duration=0.2)
+
+        async def run_query():
+            return await (
+                Task.collect(t1, t2, t3)
+                .select(lambda finished: finished.result()["id"])
+                .where(lambda task_id: task_id != 3)
+                .to_list()
+            )
+
+        assert list(Task.run(run_query).result()) == [2, 1]
+
+    def test_task_collect_result_can_be_enumerated_again(self, isolate_worker_pool):
+        """The AsyncFlpIt is cold: a second enumeration re-yields the (now completed) tasks."""
+        t1 = async_mock_worker(1, duration=0.01)
+        t2 = async_mock_worker(2, duration=0.01)
+        stream = Task.collect(t1, t2)
+
+        async def run_twice():
+            return await stream.count(), await stream.count()
+
+        assert Task.run(run_twice).result() == (2, 2)

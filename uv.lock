@@ -103,7 +103,7 @@ wheels = [
 
 [[package]]
 name = "flpit"
-version = "0.4.0.dev11"
+version = "0.4.0.dev12"
 source = { editable = "." }
 dependencies = [
     { name = "msgspec", marker = "platform_python_implementation == 'CPython' and sys_platform != 'emscripten'" },

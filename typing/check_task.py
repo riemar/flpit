@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from flpit.task import asyncio_task, Task
 from flpit.task import CancellationToken, TaskCanceledError, TaskContinuationOptions, TaskCreationOptions
+from flpit import AsyncFlpIt
 from typing import reveal_type, Protocol, Any, AsyncGenerator
 from typing import assert_type, Callable
 
@@ -52,10 +53,10 @@ async def foo():
     assert_type(await t3, list[str])
 
     # ========================================================
-    # @asyncio_task - on sync
+    # @asyncio_task - on async
     # ========================================================
     @asyncio_task
-    def async2(z: dict[str, int]):
+    async def async2(z: dict[str, int]):
         return {next(iter(z.values())): "I am async via io"}
 
     class ExpectedAsyncIo(Protocol):
@@ -68,25 +69,23 @@ async def foo():
     assert_type(await t4, dict[int, str])
 
     # ========================================================
-    # when_all 
+    # when_all / when_any / collect
+    # one T when the collection is homogeneous, Any otherwise (like .NET)
     # ========================================================
+    same: list[Task[int]] = [Task.run(lambda: 1), Task.run(lambda: 2)]
+    mixed: list[Task[Any]] = [sync1(1), async1("x")]
 
-    # todo: 0.2.4 finish when_all to pass type checks
-    # wall: Task[list[Any]] = Task.when_all(sync1, async1, async2)
+    assert_type(Task.when_all(same), Task[list[int]])
+    assert_type(Task.when_all(mixed), Task[list[Any]])
+    assert_type(Task.when_all(sync1(1), async1("x")), Task[list[Any]])
 
-    # ========================================================
-    # when_any
-    # ========================================================
+    assert_type(Task.when_any(same), Task[Task[int]])
+    assert_type(Task.when_any(mixed), Task[Task[Any]])
+    assert_type(Task.when_any(sync1(1), async1("x")), Task[Task[Any]])
 
-    # todo: 0.2.4 finish when_any to properly pass type checks
-    wany: Task[Task[Any]] = Task.when_any(sync1, async1, async2)
-
-    # ========================================================
-    # collect
-    # ========================================================
-
-    # todo: 0.2.4 finish collect to pass type checks
-    # coll: AsyncGenerator[Task[Any], Any] = Task.collect(sync1, async1, async2)
+    assert_type(Task.collect(same), AsyncFlpIt[Task[int]])
+    assert_type(Task.collect(mixed), AsyncFlpIt[Task[Any]])
+    assert_type(Task.collect(sync1(1), async1("x")), AsyncFlpIt[Task[Any]])
 
 async def waits_and_continuations():
     t = Task.run(lambda: 42)

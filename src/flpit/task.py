@@ -65,7 +65,7 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from itertools import count
 from types import AsyncGeneratorType, CoroutineType, FunctionType, MethodType
-from typing import Any, Generic, TypeVar, cast, Iterable, Final, overload
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, Iterable, Final, overload
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
@@ -77,6 +77,9 @@ from .threading import AsyncLocal, _run_with_context, _to_seconds
 from flpit.core.linq import ArgumentError, ArgumentNullError, ArgumentOutOfRangeError
 
 import flpit
+
+if TYPE_CHECKING:
+    from flpit.core.async_linq import AsyncFlpIt
 
 T = TypeVar("T")
 _LOG = logging.getLogger("task")
@@ -1015,11 +1018,16 @@ class Task(Generic[T], metaclass=_TaskMeta):
             runtime._submit(task, work, args, kwargs)
         return task
 
+    @overload
     @classmethod
-    def when_all(
-            cls,
-            *tasks: Awaitable[T]
-    ) -> "Task[list[Any]]":
+    def when_all[R](cls, tasks: Iterable[Awaitable[R]], /) -> "Task[list[R]]": ...
+
+    @overload
+    @classmethod
+    def when_all(cls, *tasks: Awaitable[Any]) -> "Task[list[Any]]": ...
+
+    @classmethod
+    def when_all(cls, *tasks: Any) -> "Task[list[Any]]":
         """Complete when every supplied task completes, preserving input order.
 
         Accepts Task instances and raw awaitables (including coroutine objects)
@@ -1034,11 +1042,16 @@ class Task(Generic[T], metaclass=_TaskMeta):
         _WhenAll(promise, normalized).start()
         return promise
 
+    @overload
     @classmethod
-    def when_any(
-            cls,
-            *tasks: Any,
-    ) -> "Task[Task[Any]]":
+    def when_any[R](cls, tasks: Iterable[Awaitable[R]], /) -> "Task[Task[R]]": ...
+
+    @overload
+    @classmethod
+    def when_any(cls, *tasks: Awaitable[Any]) -> "Task[Task[Any]]": ...
+
+    @classmethod
+    def when_any(cls, *tasks: Any) -> "Task[Task[Any]]":
         """Complete when one supplied task completes and return that task.
 
         Accepts Task instances and raw awaitables (including coroutine objects)
@@ -1054,44 +1067,23 @@ class Task(Generic[T], metaclass=_TaskMeta):
         _WhenAny(promise, normalized).start()
         return promise
 
+    @overload
     @staticmethod
-    async def collect(*tasks: Task[Any] | list[Task[Any]]) -> AsyncGenerator[Task[Any], None]:
+    def collect[R](tasks: Iterable[Task[R]], /) -> "AsyncFlpIt[Task[R]]": ...
+
+    @overload
+    @staticmethod
+    def collect(*tasks: Task[Any]) -> "AsyncFlpIt[Task[Any]]": ...
+
+    @staticmethod
+    def collect(*tasks: Any) -> "AsyncFlpIt[Task[Any]]":
         """
-        Yields tasks as they complete. Accepts either a list or loose positional tasks.
+        Yields tasks as they complete (.NET ``Task.WhenEach``). Accepts either an
+        iterable or loose positional tasks. Returns an ``AsyncFlpIt``, so it can be
+        queried fluently and iterated with ``async for``.
         """
-        pending = _normalize_tasks(tasks, allow_empty=True)
-        if not pending:
-            return
-
-        # Every task reports its own completion exactly once, so the whole
-        # stream costs O(n) instead of one when_any over the rest per item.
-        runtime = _get_runtime()
-        lock = threading.Lock()
-        completed: deque[Task[Any]] = deque()
-        signal: list[Task[None] | None] = [None]
-
-        def on_completed(finished: Task[Any]) -> None:
-            with lock:
-                completed.append(finished)
-                waiter = signal[0]
-                signal[0] = None
-            if waiter is not None:
-                waiter._finish(_SUCCEEDED)
-
-        for item in pending:
-            if not item._add_continuation(on_completed):
-                on_completed(item)
-
-        for _ in range(len(pending)):
-            while True:
-                with lock:
-                    if completed:
-                        finished = completed.popleft()
-                        break
-                    waiter = signal[0] = Task(runtime, capture_context=False)
-                    waiter._is_promise_task = True
-                await waiter
-            yield finished
+        from flpit.core.async_linq import async_flpit  # async_linq imports this module
+        return async_flpit(_collect_each)(tasks)
 
     @classmethod
     def delay(
@@ -2342,6 +2334,42 @@ class TaskCompletionSource(Generic[T]):
         return self._task._finish(state, result=result, exception=exception)
 
 
+async def _collect_each(tasks: tuple[Any, ...]) -> AsyncGenerator[Task[Any], None]:
+    pending = _normalize_tasks(tasks, allow_empty=True)
+    if not pending:
+        return
+
+    # Every task reports its own completion exactly once, so the whole
+    # stream costs O(n) instead of one when_any over the rest per item.
+    runtime = _get_runtime()
+    lock = threading.Lock()
+    completed: deque[Task[Any]] = deque()
+    signal: list[Task[None] | None] = [None]
+
+    def on_completed(finished: Task[Any]) -> None:
+        with lock:
+            completed.append(finished)
+            waiter = signal[0]
+            signal[0] = None
+        if waiter is not None:
+            waiter._finish(_SUCCEEDED)
+
+    for item in pending:
+        if not item._add_continuation(on_completed):
+            on_completed(item)
+
+    for _ in range(len(pending)):
+        while True:
+            with lock:
+                if completed:
+                    finished = completed.popleft()
+                    break
+                waiter = signal[0] = Task(runtime, capture_context=False)
+                waiter._is_promise_task = True
+            await waiter
+        yield finished
+
+
 def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task[Any], ...]:
     """Normalize task-combinator inputs, scheduling raw awaitables as Tasks.
 
@@ -3557,29 +3585,24 @@ def await_using[**P, T](
     return wrapper
 
 
-@overload
 def asyncio_task[**P, T](
         async_function: Callable[P, Awaitable[T]]
-) -> Callable[P, Task[T]]: ...
-
-@overload
-def asyncio_task[**P, T](
-        async_function: Callable[P, T], /
-) -> Callable[P, Task[T]]: ...
-
-def asyncio_task(async_function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+) -> Callable[P, Task[T]]:
     """
     | Wraps async functions with a dependency on asyncio to be compatible with Task.run(coro)
 
     Use with caution as this transfers execution control to an isolated asyncio loop runner.
     """
     import asyncio
+
+    async def _await(awaitable: Awaitable[T]) -> T:
+        return await awaitable
+
     @functools.wraps(async_function)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         with asyncio.Runner() as runner:
-            # Call the function with its arguments to generate the Coroutine object instance
-            coro = async_function(*args, **kwargs)
-            return runner.run(coro)
+            # Call the function with its arguments to generate the awaitable instance
+            return runner.run(_await(async_function(*args, **kwargs)))
 
     return task(wrapper)
 

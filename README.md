@@ -489,7 +489,7 @@ FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coo
 Key features:
 
 - **Task scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
-- **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` yields tasks as they complete.
+- **Task coordination:** `Task.when_all()` waits for all tasks while preserving input order; `Task.when_any()` returns the first completed task; `Task.collect()` returns an `AsyncFlpIt` of tasks as they complete.
 - **Blocking waits:** `task.wait()`, `Task.wait_all()` and `Task.wait_any()` block with an optional timeout and token, and return `False` / `-1` on timeout. As in .NET, a faulted or canceled task raises one `AggregateError` (canceled tasks contribute a `TaskCanceledError`); `result()` keeps raising the original exception.
 - **Continuations:** `task.continue_with(fn, [state], token=..., options=TaskContinuationOptions...)` runs `fn(antecedent)` when the task completes, with the `NOT_ON_*` / `ONLY_ON_*` filters, `EXECUTE_SYNCHRONOUSLY`, `LAZY_CANCELLATION` and `LONG_RUNNING`.
 - **Long-running work:** `Task.run(fn, creation_options=TaskCreationOptions.LONG_RUNNING)` runs blocking work on a dedicated thread instead of a pool worker.
