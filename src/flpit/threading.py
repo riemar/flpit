@@ -464,9 +464,9 @@ class WaitHandle:
         if seconds == 0 or self._event.is_set():
             return self._event.is_set()
         if seconds is not None and seconds > _MAX_WAIT:
-            deadline = _time.monotonic() + seconds
-            while not _blocking_wait(self._event.wait, min(_MAX_WAIT, deadline - _time.monotonic())):
-                if _time.monotonic() >= deadline:
+            deadline = _time.perf_counter() + seconds
+            while not _blocking_wait(self._event.wait, min(_MAX_WAIT, deadline - _time.perf_counter())):
+                if _time.perf_counter() >= deadline:
                     return False
             return True
         return _blocking_wait(self._event.wait, seconds)
@@ -619,7 +619,7 @@ class SemaphoreSlim:
         if seconds == 0 and self._current_count == 0:
             return False  # pessimistic fail fast, outside the lock
 
-        start = _time.monotonic()
+        start = _time.perf_counter()
         async_wait: Task[bool] | None = None
         waiter: _AsyncWaiter | None = None
         wait_successful = False
@@ -672,7 +672,7 @@ class SemaphoreSlim:
             if seconds is None:
                 wait_for: float | None = None
             else:
-                remaining = seconds - (_time.monotonic() - start)
+                remaining = seconds - (_time.perf_counter() - start)
                 if remaining <= 0:
                     return False
                 wait_for = remaining

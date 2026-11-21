@@ -366,7 +366,7 @@ class _TimerQueue:
 
     def schedule(self, delay: float, callback: Callable[[], Any]) -> _TimerHandle:
         handle = _TimerHandle(self, callback)
-        deadline = time.monotonic() + delay
+        deadline = time.perf_counter() + delay
         with self._condition:
             heap = self._heap
             if self._cancelled > 64 and self._cancelled * 2 > len(heap):
@@ -403,7 +403,7 @@ class _TimerQueue:
             with condition:
                 while True:
                     heap = self._heap
-                    now = time.monotonic()
+                    now = time.perf_counter()
                     while heap:
                         deadline, _, handle = heap[0]
                         callback = handle._callback
@@ -2063,12 +2063,12 @@ def _block_until(
             if pool is not None:
                 pool._worker_blocked()
             try:
-                deadline = None if seconds is None else time.monotonic() + seconds
+                deadline = None if seconds is None else time.perf_counter() + seconds
                 while winner[0] is None and not token.is_cancellation_requested:
                     if deadline is None:
                         wait_for = _TimerQueue._MAX_WAIT
                     else:
-                        wait_for = deadline - time.monotonic()
+                        wait_for = deadline - time.perf_counter()
                         if wait_for <= 0:
                             break
                         wait_for = min(wait_for, _TimerQueue._MAX_WAIT)
@@ -3101,10 +3101,10 @@ class _WorkerPool:
 
     def wait(self, timeout: float) -> int:
         """Wait for workers to exit; returns how many are still running."""
-        deadline = time.monotonic() + timeout
+        deadline = time.perf_counter() + timeout
         with self._exited:
             while self._count > 0:
-                remaining = deadline - time.monotonic()
+                remaining = deadline - time.perf_counter()
                 if remaining <= 0:
                     break
                 self._exited.wait(remaining)
@@ -3388,7 +3388,7 @@ class _Runtime:
 
     def _wait_drained(self, deadline: float) -> None:
         while self._tasks:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 break
             self._drained.wait(min(remaining, 0.05))
@@ -3401,7 +3401,7 @@ class _Runtime:
 
             # 1. Reject new external work and ask every pending task to cancel.
             self._shutdown_requested = True
-            deadline = time.monotonic() + grace_timeout
+            deadline = time.perf_counter() + grace_timeout
             # Synchronous functions cannot be cancelled and get worker_timeout
             # rather than the coroutine grace period.
             synchronous = [

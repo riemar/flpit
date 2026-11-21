@@ -204,12 +204,12 @@ def test_SingleThreadedSynchronousWaitHonorsAvailableCount(count: int, milliseco
             assert semaphore.wait(timedelta(milliseconds=millisecondsTimeout))
             assert not handle.wait_one(0)
         elif millisecondsTimeout != Timeout.INFINITE:
-            stopwatch = time.monotonic()
+            stopwatch = time.perf_counter()
             assert not semaphore.wait(_ms(millisecondsTimeout))
-            assert (time.monotonic() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
-            stopwatch = time.monotonic()
+            assert (time.perf_counter() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
+            stopwatch = time.perf_counter()
             assert not semaphore.wait(timedelta(milliseconds=millisecondsTimeout))
-            assert (time.monotonic() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
+            assert (time.perf_counter() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
         else:
             raise AssertionError("unreachable: skipped (PlatformNotSupportedException case)")
         assert semaphore.current_count == 0
@@ -245,12 +245,12 @@ def test_WaitOnJSInteropThreadHonorsFiniteTimeouts(
             async_waiter = semaphore.wait_async(Timeout.INFINITE) if queueAsyncWaiter else None
 
             # RunWithJSInteropBlockingPolicy(..., warnOnly) body:
-            stopwatch = time.monotonic()
+            stopwatch = time.perf_counter()
             assert not semaphore.wait(_ms(millisecondsTimeout))
-            assert (time.monotonic() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
-            stopwatch = time.monotonic()
+            assert (time.perf_counter() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
+            stopwatch = time.perf_counter()
             assert not semaphore.wait(timedelta(milliseconds=millisecondsTimeout))
-            assert (time.monotonic() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
+            assert (time.perf_counter() - stopwatch) * 1000 >= max(0, millisecondsTimeout - 1)
             # if (!warnOnly) Assert.Throws<PlatformNotSupportedException>(() => semaphore.Wait());
             # -> only in the skipped cases.
 
