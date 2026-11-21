@@ -60,6 +60,7 @@ nav:
       - Concurrent collections: concurrency/collections.md
       - Threading primitives: concurrency/threading.md
   - Explore .NET: dotnet.md
+  - Changelog: changelog.md
 
 markdown_extensions:
   - admonition
