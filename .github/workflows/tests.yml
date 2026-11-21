@@ -14,14 +14,20 @@ permissions:
 
 jobs:
   test:
-    name: py${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: py${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Interpreters that may be missing wheels (3.13t has no msgspec wheel in uv.lock)
+    # or may still be pre-releases (3.15) must not block the rest.
+    continue-on-error: ${{ contains(fromJSON('["3.13t", "3.15", "3.15t"]'), matrix.python-version) }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        # Add more interpreters here, e.g. "3.13", "3.14" (project supports >=3.12).
-        python-version: ["3.12", "3.14t"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12", "3.13", "3.14", "3.15", "3.14t", "3.15t"]
     steps:
       - uses: actions/checkout@v7
 
@@ -33,7 +39,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Runs after importing flpit (and msgspec if present): on a free-threaded
+      # build this fails if an import re-enabled the GIL.
+      - name: Interpreter info
+        run: >-
+          uv run --frozen python -c "import sys, sysconfig, flpit.json as j;
+          ft = bool(sysconfig.get_config_var('Py_GIL_DISABLED'));
+          gil = getattr(sys, '_is_gil_enabled', lambda: True)();
+          print(sys.version);
+          print('free-threaded build:', ft, '| GIL enabled after imports:', gil);
+          print('json backends:', j.available_backends());
+          assert not (ft and gil), 'GIL was re-enabled by an import'"
+
       - name: Type check (pyrefly)
+        if: runner.os == 'Linux'
         run: uv run --frozen pyrefly check src typing
 
       # Benchmark and stress tests are deselected via addopts in pyproject.toml.
