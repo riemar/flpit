@@ -5,7 +5,8 @@ How closeness to .NET LINQ is checked, from the broadest evidence to the most sp
 ## 1. Migrated .NET runtime tests
 
 The .NET runtime's own LINQ tests are migrated to Python and run against both core types, `FlpIt` and
-`FlpList`. At the time of writing that is **2390 test cases**; the per-operator breakdown is in the
+`FlpList`. Together with the migrated tests for async queries, channels, concurrent collections and threading,
+that is more than 10,000 test cases; the per-module breakdown is in the
 [README](https://github.com/riemar/flpit#migrated-net-unit-tests). The tests live in
 [`tests/nettests/`](https://github.com/riemar/flpit/tree/main/tests/nettests).
 

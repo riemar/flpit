@@ -1,11 +1,13 @@
 # The contract
 
-Each snippet below is part of a file under `examples/linq/` that runs in CI. Several of them use a small
-helper that counts how many elements a source has handed out:
+Each snippet below is part of a file under `examples/linq/` that runs in CI. Two small helpers keep them
+short. `Tracked` counts how many elements a source has handed out:
 
 ```python
 --8<-- "examples/linq/_support.py:tracked"
 ```
+
+and `raises(SomeError)` is a `with` block that asserts the error is raised.
 
 ## Building a query reads nothing
 
@@ -20,6 +22,8 @@ helper that counts how many elements a source has handed out:
 ```
 
 ## Short-circuiting
+
+`any` stops at the first match, `single` as soon as it sees a second one:
 
 ```python
 --8<-- "examples/linq/contract.py:short_circuit"
@@ -40,10 +44,10 @@ LINQ tests exercise this with `RunOnce()`; the migrated tests do the same with o
 --8<-- "examples/linq/contract.py:sources"
 ```
 
-## Ordering of results
+## Results and their order
 
 ```python
---8<-- "examples/linq/contract.py:set_ops"
+--8<-- "examples/linq/contract.py:results"
 ```
 
 See also [ordering and grouping](../guide/ordering-grouping.md).

@@ -37,10 +37,12 @@ nav:
       - Verification: semantics/verification.md
   - Task runtime: task/index.md
   - API reference: reference/index.md
+  - Explore .NET: dotnet.md
 
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html  # needed for the card grid on the home page
   - toc:
       permalink: true
   - pymdownx.highlight:

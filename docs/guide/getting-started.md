@@ -24,8 +24,17 @@ Native built-ins read inside-out. A FlpIt pipeline reads in the order things hap
 --8<-- "examples/linq/quickstart.py:flip"
 ```
 
-## Typed domain objects
+## Querying your own objects
+
+`select_many` flattens one level, here from departments to their employees:
 
 ```python
 --8<-- "examples/linq/quickstart.py:domain"
 ```
+
+## Where next
+
+- [Lazy and eager](lazy-vs-eager.md): when does work happen, and what is a `FlpList`?
+- [Ordering and grouping](ordering-grouping.md)
+- [JSON](json.md)
+- [Semantics](../semantics/index.md): how closely FlpIt follows .NET LINQ, with running proof.

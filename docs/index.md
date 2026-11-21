@@ -15,9 +15,10 @@ uv add flpit
 
 <div class="grid cards" markdown>
 
-- **[Why FlpIt](why-flpit.md)** — the goal behind the library.
-- **[Guide](guide/getting-started.md)** — from the first query to JSON.
-- **[Semantics](semantics/index.md)** — what behaves like LINQ, with running proof.
-- **[Task runtime](task/index.md)** — structured concurrency for sync and async code.
+- **[Why FlpIt](why-flpit.md)**: the goal behind the library.
+- **[Guide](guide/getting-started.md)**: from the first query to JSON.
+- **[Semantics](semantics/index.md)**: what behaves like LINQ, with running proof.
+- **[Task runtime](task/index.md)**: concurrent work with .NET-style tasks and cancellation.
+- **[Explore .NET](dotnet.md)**: where all of this comes from, and how to try it.
 
 </div>

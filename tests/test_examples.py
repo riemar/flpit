@@ -30,7 +30,9 @@ def _run(script: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "script", _scripts("linq") + _scripts("json"), ids=lambda p: f"{p.parent.name}/{p.name}"
+    "script",
+    _scripts("linq") + _scripts("json") + _scripts("channels") + _scripts("concurrent") + _scripts("threading"),
+    ids=lambda p: f"{p.parent.name}/{p.name}",
 )
 def test_example_runs(script: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _run(script, monkeypatch)
