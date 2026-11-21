@@ -23,7 +23,6 @@ uv add flpit
 - **[Async queries](async/index.md)**: the same operators over `async for`.
 - **[Semantics](semantics/index.md)**: what behaves like LINQ, with running proof.
 - **[Task runtime](task/index.md)**: tasks, cancellation, channels and concurrent collections.
-- **[API reference](reference/index.md)**: generated from the source.
 - **[Explore .NET](dotnet.md)**: where all of this comes from, and how to try it.
 
 </div>
