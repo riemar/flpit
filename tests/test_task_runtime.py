@@ -649,8 +649,9 @@ def test_delays_complete_without_a_free_worker(pool) -> None:
 def test_delay_is_not_early_and_respects_ordering(pool) -> None:
     pool(max_workers=4)
     finished: list[float] = []
-    # Worker start-up latency can exceed the gap between the delays on a loaded machine,
-    # so release all three sleepers together: only the delays decide the order.
+    # On a loaded machine (free-threaded CI runners) a thread can be descheduled for
+    # tens of milliseconds. Release the sleepers together and keep the delays 100 ms
+    # apart so that only the delays decide the order.
     start_together = threading.Barrier(3)
 
     async def sleeper(seconds: float) -> None:
@@ -660,8 +661,8 @@ def test_delay_is_not_early_and_respects_ordering(pool) -> None:
         assert time.perf_counter() - started >= seconds - 0.002
         finished.append(seconds)
 
-    Task.when_all([Task.run(sleeper, s) for s in (0.09, 0.01, 0.05)]).result()
-    assert finished == [0.01, 0.05, 0.09]
+    Task.when_all([Task.run(sleeper, s) for s in (0.25, 0.05, 0.15)]).result()
+    assert finished == [0.05, 0.15, 0.25]
 
 
 def test_cancel_after_uses_one_shared_timer_thread(pool) -> None:
