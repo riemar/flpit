@@ -72,7 +72,12 @@ def test_ordered_it_key_selector_benchmark(benchmark):
 
     query = FlpIt(data).order_by(key)
 
-    result = benchmark(lambda: list(query))
+    def run():
+        nonlocal calls
+        calls = 0  # pytest-benchmark runs many rounds; count per round
+        return list(query)
+
+    result = benchmark(run)
 
     assert len(result) == 100_000
     assert calls == 100_000

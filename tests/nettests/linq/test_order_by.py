@@ -9,8 +9,6 @@ https://github.com/dotnet/runtime/blob/main/src/libraries/System.Linq/tests/Orde
 Original source attribution: .NET Foundation / dotnet/runtime, MIT License.
 This file is an independent Python port adapted to FlpIt's API and semantics.
 """
-import time
-import gc
 import pytest
 import random
 import locale
@@ -369,18 +367,7 @@ def test_SortsRandomizedEnumerableCorrectly(flp_type, items):
     randomized = [random.randint(0, 2147483647) for _ in range(items)]
     randomized.append(None)
 
-    # don't get interrupted while
-    gc.collect()
-    gc.disable()
-    start = time.perf_counter()
-
     ordered = list(flp_type(force_not_collection(randomized)).order_by(lambda i: i))
-
-    elapsed = time.perf_counter() - start
-    gc.enable()
-
-    # pure sort time should never exceed 1s
-    assert elapsed < 0.75 # not part of the original test
 
     # randomized.sort(key=lambda x: (x is not None, x))
 

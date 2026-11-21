@@ -3,7 +3,7 @@
 Run explicitly, because timings are diagnostic and intentionally have no
 pass/fail thresholds:
 
-    pytest -s -v tests/test_task_performance.py
+    pytest -s -v benchmarks/test_task_benchmark.py -m benchmark
 
 These are steady-state micro benchmarks, not claims about production throughput.
 Adjust the constants below for longer runs on target hardware.
@@ -212,7 +212,9 @@ class TestTimerHandling:
 
         def task_operation():
             tasks = [Task.run(task_timer_job) for _ in range(TIMER_TASK_COUNT)]
-            return Task.when_all(tasks).result(WAIT_TIMEOUT_SECONDS)
+            all_done = Task.when_all(tasks)
+            all_done.wait(WAIT_TIMEOUT_SECONDS)
+            return all_done.result()
 
         async def asyncio_operation():
             tasks = [asyncio.create_task(asyncio_timer_job()) for _ in range(TIMER_TASK_COUNT)]
@@ -280,7 +282,8 @@ class TestTaskAggregation:
 
     def test_when_any_against_wait_first_completed(self):
         task_children = [Task.run(_task_noop, i) for i in range(AGGREGATION_TASK_COUNT)]
-        Task.when_all(task_children).result(WAIT_TIMEOUT_SECONDS)
+        all_done = Task.when_all(task_children)
+        all_done.wait(WAIT_TIMEOUT_SECONDS)
 
         def task_aggregate():
             return Task.when_any(task_children).result()
