@@ -1,3 +1,6 @@
+---
+description: FlpIt is a deferred, streaming query; FlpList is a materialized list with the full LINQ API. When work happens, and how count() differs from list.count().
+---
 # Lazy and eager
 
 `FlpIt` is a deferred, streaming query over any iterable. `FlpList` is a materialized list that also has the

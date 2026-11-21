@@ -1,3 +1,6 @@
+---
+description: FlpIt's programming model comes from .NET. Try C# in the browser, learn LINQ, or call Python from C# with CSnakes.
+---
 # Like FlpIt? Give .NET a try.
 
 Enjoying FlpIt’s .NET-inspired programming model? Here’s where it comes from.
@@ -16,11 +19,8 @@ You don't need to install anything to get started.
 
 You don't have to choose one ecosystem over the other.
 
-[CSnakes](https://tonybaloney.github.io/CSnakes/latest/) lets you embed Python code and libraries directly into
-.NET applications. It uses Python's C API and generates C# bindings from Python type annotations.
-
-You can keep your existing .NET application, introduce Python where it makes sense, and call Python code
-directly from C#, without introducing a REST API or microservice just to connect the two.
+[CSnakes](https://tonybaloney.github.io/CSnakes/latest/) is a library for calling Python from C#. A .NET
+application can keep what it has and use Python where Python fits.
 
 ## Ready to explore .NET further?
 

@@ -48,3 +48,22 @@ except OperationCanceledError:
 
 assert delay.status == "cancelled"       # cut short after 50 ms
 # --8<-- [end:cancel]
+
+# --8<-- [start:continue_with]
+squared = fetch(3).continue_with(lambda antecedent: len(antecedent.result()))
+assert squared.result() == 6                 # len("page 3"), computed when fetch(3) completed
+# --8<-- [end:continue_with]
+
+# --8<-- [start:wait]
+slow = fetch(1, delay=0.3)
+assert slow.wait(0.01) is False              # timed out; the task keeps running
+assert Task.wait_all([slow], timeout=2)      # True once everything has completed
+# --8<-- [end:wait]
+
+# --8<-- [start:long_running]
+from flpit.task import TaskCreationOptions
+
+# Blocking work that runs for a long time gets its own thread instead of occupying a pool worker.
+dedicated = Task.run(time.sleep, 0.05, creation_options=TaskCreationOptions.LONG_RUNNING)
+dedicated.result()
+# --8<-- [end:long_running]

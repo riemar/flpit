@@ -4,7 +4,12 @@
 from flpit import flp, FlpIt, FlpList
 
 # A lazy, streaming pipeline: nothing has run yet.
-query: FlpIt[int] = flp.it(range(1, 11)).where(lambda x: x % 2 == 0).select(lambda x: x * 10)
+query: FlpIt[int] = (
+    flp
+        .it(range(1, 11))
+        .where(lambda x: x % 2 == 0)
+        .select(lambda x: x * 10)
+)
 
 # Explicit materialization.
 result: FlpList[int] = query.to_list()
@@ -58,3 +63,13 @@ well_paid = (
 
 assert list(well_paid) == ["Alice", "Charlie"]
 # --8<-- [end:domain]
+
+# --8<-- [start:builtins]
+query = flp.range(1, 11).where(lambda x: x % 2 == 0)
+
+assert query.first() == 2                  # LINQ-style terminal operators ...
+assert query.any()
+
+assert list(query) == [2, 4, 6, 8, 10]     # ... and plain Python built-ins both work
+assert any(query)
+# --8<-- [end:builtins]

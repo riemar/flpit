@@ -1,3 +1,6 @@
+---
+description: FlpIt brings .NET LINQ to Python iterables - lazy, typed, fluent queries with behaviour kept as close to System.Linq.Enumerable as Python allows.
+---
 # FlpIt
 
 **Fluent LINQ for Python — flip your iterables.**
@@ -16,9 +19,11 @@ uv add flpit
 <div class="grid cards" markdown>
 
 - **[Why FlpIt](why-flpit.md)**: the goal behind the library.
-- **[Guide](guide/getting-started.md)**: from the first query to JSON.
+- **[Guide](guide/getting-started.md)**: from the first query to joins, JSON and CSV.
+- **[Async queries](async/index.md)**: the same operators over `async for`.
 - **[Semantics](semantics/index.md)**: what behaves like LINQ, with running proof.
-- **[Task runtime](task/index.md)**: concurrent work with .NET-style tasks and cancellation.
+- **[Task runtime](task/index.md)**: tasks, cancellation, channels and concurrent collections.
+- **[API reference](reference/index.md)**: generated from the source.
 - **[Explore .NET](dotnet.md)**: where all of this comes from, and how to try it.
 
 </div>
