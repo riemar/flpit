@@ -46,3 +46,50 @@ counter.value += 1
 assert Task.run(lambda: counter.value).result() == 0   # a pool thread does not see this thread's value
 assert counter.value == 1
 # --8<-- [end:thread_local]
+
+# --8<-- [start:event]
+from flpit.threading import ManualResetEvent
+
+start = ManualResetEvent()             # not signaled yet
+started: list[int] = []
+
+
+def runner(n: int) -> None:
+    start.wait_one()                   # blocks until the event is set
+    started.append(n)
+
+
+runners = [Task.run(runner, n) for n in range(3)]
+time.sleep(0.05)
+assert started == []                   # everyone is still waiting
+
+start.set()                            # one signal releases all of them
+Task.wait_all(runners)
+assert sorted(started) == [0, 1, 2]
+
+start.reset()
+assert start.wait_one(0.01) is False   # unsignaled again: a wait with a timeout gives up
+# --8<-- [end:event]
+
+# --8<-- [start:async_local]
+from flpit.threading import AsyncLocal
+
+request_id = AsyncLocal[str]()
+
+
+async def handle(rid: str) -> str:
+    request_id.value = rid             # set once ...
+    await Task.delay(0.02)             # ... the task may resume on another pool worker
+    return request_id.value            # ... and still sees its own value
+
+
+async def serve() -> None:
+    request_id.value = "main"
+    a, b = Task.run(handle, "a"), Task.run(handle, "b")
+
+    assert await Task.when_all(a, b) == ["a", "b"]   # each task kept its own value
+    assert request_id.value == "main"                # and nothing leaked back
+
+
+Task.run(serve).result()
+# --8<-- [end:async_local]

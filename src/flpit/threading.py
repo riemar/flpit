@@ -29,6 +29,24 @@ class AsyncLocalValueChangedArgs[T]:
 
 
 class AsyncLocal[T]:
+    """A value that follows the logical flow of a task (.NET ``AsyncLocal<T>``).
+
+    Unlike ``ThreadLocal``, the value does not belong to an OS thread: a task that resumes
+    on another pool worker after an ``await`` still sees its own value. A task inherits the
+    value of the flow that started it, and changes made inside the task do not reach its parent.
+    Built on ``contextvars.ContextVar``.
+
+    ``value_changed_handler`` is called with an ``AsyncLocalValueChangedArgs`` when the value
+    changes; ``thread_context_changed`` is true when the change comes from switching to another
+    flow and not from an assignment.
+
+    Example:
+        ```python
+        request_id = AsyncLocal[str]()
+        request_id.value = "req-1"   # visible to this task and to the tasks it starts
+        ```
+    """
+
     def __init__(
             self,
             value_changed_handler: (

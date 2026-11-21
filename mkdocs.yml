@@ -59,15 +59,6 @@ nav:
       - Channels: concurrency/channels.md
       - Concurrent collections: concurrency/collections.md
       - Threading primitives: concurrency/threading.md
-  - API reference:
-      - Reference overview: reference/index.md
-      - LINQ API: reference/linq.md
-      - AsyncFlpIt API: reference/async.md
-      - Task API: reference/task.md
-      - Channels API: reference/channels.md
-      - Concurrent collections API: reference/concurrent.md
-      - Threading API: reference/threading.md
-      - JSON and CSV API: reference/json-csv.md
   - Explore .NET: dotnet.md
 
 markdown_extensions:

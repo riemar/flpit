@@ -38,13 +38,33 @@ on timeout, and raise `OperationCanceledError` when the token is cancelled.
 ```
 
 A coroutine that resumes on another pool worker after an `await` sees that worker's value. For values that follow
-the logical flow of a task instead, use `AsyncLocal[T]`. `ThreadLocal(factory, track_all_values=True)` makes
-`values` list every thread's value.
+the task instead, use [`AsyncLocal`](#asynclocal). `ThreadLocal(factory, track_all_values=True)` makes `values` list
+every thread's value.
+
+## AsyncLocal
+
+`AsyncLocal[T]` keeps a value with the logical flow of a task, however many pool workers it hops between. Typical
+uses are a request ID or user context that is set once and read further down the call chain:
+
+```python
+--8<-- "examples/threading/overview.py:async_local"
+```
+
+A task inherits the value of the flow that started it. Changes made inside the task do not reach its parent.
+`AsyncLocal` is built on `contextvars.ContextVar`, and an optional `value_changed_handler` is called when the value
+changes.
 
 ## ManualResetEvent
 
-`ManualResetEvent` is a signal that stays set until it is reset: threads wait on it with `wait_one()`, and one `set()`
-releases all of them until `reset()` is called.
+`ManualResetEvent` is a signal that stays set until it is reset. Threads wait on it with `wait_one()`, and one
+`set()` releases all of them until `reset()` is called:
+
+```python
+--8<-- "examples/threading/overview.py:event"
+```
+
+`wait_one(timeout)` returns `False` when the timeout elapses first. It blocks the calling thread, so inside a task it
+occupies a pool worker while it waits.
 
 More programs:
 [`examples/threading/`](https://github.com/riemar/flpit/tree/main/examples/threading).
