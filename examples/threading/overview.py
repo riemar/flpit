@@ -6,23 +6,21 @@ from flpit.task import Task
 from flpit.threading import SemaphoreSlim
 
 throttle = SemaphoreSlim(2)            # at most two at a time
-running = peak = 0
 
 
 def limited_work() -> None:
-    global running, peak
     throttle.wait()                    # blocks until a slot is free
     try:
-        running += 1
-        peak = max(peak, running)
-        time.sleep(0.02)
-        running -= 1
+        time.sleep(0.05)
     finally:
         throttle.release()             # always give the slot back
 
 
+start = time.perf_counter()
 Task.wait_all([Task.run(limited_work) for _ in range(6)])
-assert peak <= 2
+
+# Six 50 ms jobs, two at a time, need at least three rounds (0.14 leaves slack for the timer).
+assert time.perf_counter() - start >= 0.14
 # --8<-- [end:semaphore]
 
 # --8<-- [start:async_semaphore]
