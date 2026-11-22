@@ -22,17 +22,34 @@ assert winner.result() == "page 2"       # the first Task to complete
 # --8<-- [end:when_any]
 
 
-# --8<-- [start:collect]
+# --8<-- [start:when_each]
 async def main() -> None:
     tasks = [fetch(1, delay=0.3), fetch(2, delay=0.05)]
 
     # Tasks arrive as they complete, not in input order.
-    finished = [t.result() async for t in Task.collect(tasks)]
+    finished = [t.result() async for t in Task.when_each(tasks)]
     assert finished == ["page 2", "page 1"]
 
 
 Task.run(main).result()
-# --8<-- [end:collect]
+# --8<-- [end:when_each]
+
+# --8<-- [start:operators]
+from flpit import flp
+
+
+@task
+def nap(seconds: float) -> float:
+    time.sleep(seconds)
+    return seconds
+
+
+# A query of tasks ends in the wait, the same way it would in .NET.
+results = flp.it([0.2, 0.1, 0.05]).select(nap).when_all().result()      # in query order
+first = flp.it([0.5, 0.05]).select(nap).when_any().result()             # the first Task to complete
+# --8<-- [end:operators]
+assert results == [0.2, 0.1, 0.05]
+assert first.result() == 0.05
 
 # --8<-- [start:cancel]
 from flpit.task import CancellationTokenSource, OperationCanceledError

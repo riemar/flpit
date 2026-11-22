@@ -3,6 +3,21 @@
 All notable changes to FlpIt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - Unreleased
+
+### Added
+
+- `Task.when_each` (.NET `Task.WhenEach`) yields tasks as they complete. `Task.collect` stays as an alias.
+- The query operators `when_each()`, `when_all()` and `when_any()` on `FlpIt` and `FlpList`, so a query of
+  tasks can end in the wait. `when_any()` is the `first()` of a query of tasks. .NET has these only as static
+  `Task` methods, not as extension methods.
+
+### Documentation
+
+- New page on mixing sync and async functions: start in an `async def`, put `@task` on a blocking function to
+  await it, and call async code from sync code with `twait >>`. It includes a blocking-library example.
+- The task overview covers the new query operators.
+
 ## [0.4.0] - 2026-11-22
 
 ### Added

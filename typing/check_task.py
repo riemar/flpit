@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from flpit.task import asyncio_task, Task
 from flpit.task import CancellationToken, TaskCanceledError, TaskContinuationOptions, TaskCreationOptions
-from flpit import AsyncFlpIt
+from flpit import AsyncFlpIt, flp
 from typing import reveal_type, Protocol, Any, AsyncGenerator
 from typing import assert_type, Callable
 
@@ -86,6 +86,23 @@ async def foo():
     assert_type(Task.collect(same), AsyncFlpIt[Task[int]])
     assert_type(Task.collect(mixed), AsyncFlpIt[Task[Any]])
     assert_type(Task.collect(sync1(1), async1("x")), AsyncFlpIt[Task[Any]])
+
+    assert_type(Task.when_each(same), AsyncFlpIt[Task[int]])
+    assert_type(Task.when_each(mixed), AsyncFlpIt[Task[Any]])
+    assert_type(Task.when_each(sync1(1), async1("x")), AsyncFlpIt[Task[Any]])
+
+    # the query operator: a FlpIt / FlpList of tasks
+    assert_type(flp.it(same).when_each(), AsyncFlpIt[Task[int]])
+    assert_type(flp.it([1, 2]).select(lambda n: Task.run(lambda: n)).when_each(), AsyncFlpIt[Task[int]])
+    assert_type(flp.lst(same).when_each(), AsyncFlpIt[Task[int]])
+
+    # when_all / when_any as query operators
+    assert_type(flp.it(same).when_all(), Task[list[int]])
+    assert_type(flp.it(same).when_any(), Task[Task[int]])
+    assert_type(flp.lst(same).when_all(), Task[list[int]])
+    assert_type(flp.lst(same).when_any(), Task[Task[int]])
+    assert_type(flp.it([1, 2]).select(lambda n: Task.run(lambda: n)).when_all(), Task[list[int]])
+    assert_type(flp.it([1, 2]).select(lambda n: Task.run(lambda: n)).when_any(), Task[Task[int]])
 
 async def waits_and_continuations():
     t = Task.run(lambda: 42)

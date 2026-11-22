@@ -25,6 +25,42 @@ reports = Task.run(main).result()          # ["report a", "report b", "report c"
 assert reports == ["report a", "report b", "report c"]
 
 
+import httpx
+
+# Not shown in the docs: keeps this example offline by answering httpx.get() locally.
+httpx.get = lambda url, **kwargs: httpx.Response(200, content=b"<html>" + url.split("//")[1].encode() + b"</html>")
+
+# --8<-- [start:blocking_library]
+from flpit import flp
+from flpit.task import Task, task
+
+links = [
+    "https://python.org",
+    "https://docs.python.org",
+    "https://peps.python.org",
+]
+
+
+@task
+def fetch(url: str) -> bytes:
+    return httpx.get(url).content          # plain, blocking httpx
+
+
+pages = flp.it(links).select(fetch).when_all().result()   # all three at once, in order
+# --8<-- [end:blocking_library]
+assert pages == [b"<html>python.org</html>", b"<html>docs.python.org</html>", b"<html>peps.python.org</html>"]
+
+
+# --8<-- [start:blocking_stream]
+async def crawl() -> None:
+    async for done in flp.it(links).select(fetch).when_each():
+        page = await done                  # finished already, just unwrapping
+# --8<-- [end:blocking_stream]
+
+
+Task.run(crawl).result()
+
+
 # --8<-- [start:call_async]
 from flpit.task import twait
 

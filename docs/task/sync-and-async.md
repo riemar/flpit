@@ -20,6 +20,23 @@ awaited, or run side by side with others in `Task.when_all`:
 --8<-- "examples/interop/sync_and_async.py:await_sync"
 ```
 
+## Start many calls at once
+
+Put `@task` on a function, sync or `async def`, and every call starts immediately and returns a `Task`. A query
+that selects such a function therefore has all its calls running before you wait for any of them. End the query in
+`when_all()` to get the results in input order:
+
+```python
+--8<-- "examples/interop/sync_and_async.py:blocking_library"
+```
+
+To handle each result as soon as it is ready, end the query in `when_each()` instead. It is an async stream of the
+tasks in the order they finish, and each task is already done when you receive it.
+
+```python
+--8<-- "examples/interop/sync_and_async.py:blocking_stream"
+```
+
 ## Call an async function from sync code
 
 `Task.run` starts a coroutine function (or a plain one) and returns the same `Task`. From synchronous code,

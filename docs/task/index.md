@@ -1,5 +1,5 @@
 ---
-description: A lightweight, asyncio-free task runtime for Python modelled on the .NET thread pool. Task.run, when_all, when_any, collect, continuations, cancellation and shutdown.
+description: A lightweight, asyncio-free task runtime for Python modelled on the .NET thread pool. Task.run, when_all, when_any, when_each, continuations, cancellation and shutdown.
 ---
 # Task runtime
 
@@ -7,7 +7,7 @@ FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coo
 modelled on the .NET thread pool: synchronous callables and coroutines both run on pooled worker threads.
 
 - **Scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
-- **Coordination:** `Task.when_all()`, `Task.when_any()` and `Task.collect()`.
+- **Coordination:** `Task.when_all()`, `Task.when_any()` and `Task.when_each()`, also as query operators.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation,
   callbacks, timeouts, and linked tokens. See [Cancellation](cancellation.md).
 - **Resource management:** configure worker capacity, and shut the runtime down with an observable report.
@@ -37,11 +37,28 @@ Decorate a blocking function with `@task` and every call becomes a `Task` that i
 
 ## Handle results as they arrive
 
-`Task.collect` is an async stream of tasks in completion order:
+`Task.when_each` (.NET `Task.WhenEach`) is an async stream of tasks in completion order:
 
 ```python
---8<-- "examples/task/overview.py:collect"
+--8<-- "examples/task/overview.py:when_each"
 ```
+
+`Task.collect` is the former name and still works.
+
+## End a query in the wait
+
+`when_all()`, `when_any()` and `when_each()` are also query operators. A query that produces tasks can end in
+any of them, so there is no need to wrap it in a `Task.when_*` call:
+
+```python
+--8<-- "examples/task/overview.py:operators"
+```
+
+`when_any()` is the `first()` of a query of tasks, and `when_each()` streams them in completion order. .NET has
+these only as static `Task` methods, so the operators are FlpIt's own.
+
+Enumerating the query starts every task before the wait begins. `when_any()` on an empty query raises
+`ValueError`, and `when_all()` on an empty query gives an empty list.
 
 ## Cancel
 
