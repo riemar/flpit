@@ -27,34 +27,34 @@ assert reports == ["report a", "report b", "report c"]
 
 import httpx
 
-# Not shown in the docs: keeps this example offline by answering httpx.get() locally.
-httpx.get = lambda url, **kwargs: httpx.Response(200, content=b"<html>" + url.split("//")[1].encode() + b"</html>")
+# Not shown in the docs: keeps this example offline. The delay in the URL is answered locally, in tenths of a second.
+httpx.get = lambda url, **kwargs: (time.sleep(int(url.rsplit("/", 1)[1]) / 10), httpx.Response(200, content=url.encode()))[1]
 
 # --8<-- [start:blocking_library]
 from flpit import flp
 from flpit.task import Task, task
 
 links = [
-    "https://python.org",
-    "https://docs.python.org",
-    "https://peps.python.org",
+    "https://httpbin.org/delay/3",         # slowest first
+    "https://httpbin.org/delay/2",
+    "https://httpbin.org/delay/1",
 ]
 
 
 @task
-def fetch(url: str) -> bytes:
-    return httpx.get(url).content          # plain, blocking httpx
+def fetch(url: str) -> tuple[str, bytes]:
+    return url, httpx.get(url, timeout=30).content        # plain, blocking httpx
 
 
 pages = flp.it(links).select(fetch).when_all().result()   # all three at once, in order
 # --8<-- [end:blocking_library]
-assert pages == [b"<html>python.org</html>", b"<html>docs.python.org</html>", b"<html>peps.python.org</html>"]
+assert [url for url, _ in pages] == links
 
 
 # --8<-- [start:blocking_stream]
 async def crawl() -> None:
     async for done in flp.it(links).select(fetch).when_each():
-        page = await done                  # finished already, just unwrapping
+        url, page = await done             # finished already, just unwrapping
 # --8<-- [end:blocking_stream]
 
 
@@ -62,11 +62,9 @@ Task.run(crawl).result()
 
 
 # --8<-- [start:blocking_processed]
-def parse(page: bytes) -> int:
-    return len(page)                       # any post-processing, a plain function or an async def
-
-
-sizes: list[int] = []
+def parse(result: tuple[str, bytes]) -> tuple[str, int]:
+    url, page = result
+    return url, len(page)                  # any post-processing, a plain function or an async def
 
 
 async def crawl_sizes() -> None:
@@ -78,13 +76,12 @@ async def crawl_sizes() -> None:
         .select(parse)      # post-process the value as it arrives
     )
 
-    async for size in query:
-        sizes.append(size)  # fastest download first
+    async for url, size in query:
+        print(url, size)    # first finished, first served
 # --8<-- [end:blocking_processed]
 
 
 Task.run(crawl_sizes).result()
-assert sorted(sizes) == sorted(len(page) for page in pages)
 
 
 # --8<-- [start:call_async]
