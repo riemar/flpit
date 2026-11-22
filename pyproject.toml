@@ -5,9 +5,9 @@ description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-keywords = ["linq", "fluent", "iterable", "pipeline", "lazy-evaluation", "pyrefly", "type-safe", "generators"]
+keywords = ["linq", "dotnet", "fluent", "iterable", "pipeline", "lazy-evaluation", "generators", "async", "async-enumerable", "task", "concurrency", "channels", "free-threaded", "json", "csv", "type-safe", "pyrefly"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -15,6 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Free Threading :: 2 - Beta",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed"
 ]
@@ -32,6 +33,8 @@ whenever = ["whenever>=0.11"]
 
 [project.urls]
 Homepage = "https://github.com/riemar/flpit"
+Documentation = "https://riemar.github.io/flpit/"
+Changelog = "https://riemar.github.io/flpit/changelog/"
 Repository = "https://github.com/riemar/flpit"
 Issues = "https://github.com/riemar/flpit/issues"
 

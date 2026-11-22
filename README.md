@@ -8,6 +8,10 @@
 
 If you know C# LINQ, you already know most of FlpIt. Existing LINQ examples, query patterns and documentation can generally be translated directly, which makes the .NET LINQ ecosystem a valuable reference for developers and AI coding assistants alike.
 
+Queries are the doorway. Around them FlpIt carries over the rest of the .NET programming model: async streams
+(`AsyncFlpIt`), typed JSON and CSV, an `asyncio`-free task runtime, channels and concurrent collections. It is
+tested on free-threaded Python (3.14t) in CI.
+
 > **Semantic goal:** `flp` strives to faithfully reproduce .NET LINQ semantics.
 > Where Python's language or type system requires a different API contract, the contract is adapted accordingly,
 > and [each deviation is documented](https://riemar.github.io/flpit/semantics/differences/).
@@ -57,7 +61,7 @@ result = (
 * **Async queries (`AsyncFlpIt`)**: the `IAsyncEnumerable<T>` counterpart, with async callbacks, cancellation and cleanup. [Docs](https://riemar.github.io/flpit/async/)
 * **Faithful semantics**: when work happens, how much is read, what comes out and how it fails match .NET, also when operators are chained. Derived queries never affect each other. [Semantics](https://riemar.github.io/flpit/semantics/)
 * **Typed JSON and CSV**: dataclasses to and from JSON and CSV, with `msgspec` or a pure-Python backend. [JSON](https://riemar.github.io/flpit/guide/json/), [CSV](https://riemar.github.io/flpit/guide/csv/)
-* **Task runtime**: an `asyncio`-free runtime modelled on the .NET thread pool, with `Task.when_all`, continuations and cooperative cancellation. [Docs](https://riemar.github.io/flpit/task/)
+* **Task runtime**: an `asyncio`-free runtime modelled on the .NET thread pool, built for free-threaded Python, with `Task.when_all`, `when_each`, continuations and cooperative cancellation. Blocking and `async def` functions mix freely. [Docs](https://riemar.github.io/flpit/task/), [sync and async](https://riemar.github.io/flpit/task/sync-and-async/)
 * **Channels, concurrent collections and threading primitives**: `Channel[T]`, `ConcurrentDictionary`, `SemaphoreSlim` and friends. [Docs](https://riemar.github.io/flpit/concurrency/channels/)
 * **Static-first typing**: designed for precise `pyrefly` inference without plugins (mypy and pyright may give varying results).
 
@@ -72,6 +76,10 @@ uv add flpit
 msgspec is installed automatically on CPython. On other interpreters (PyPy, Pyodide) flpit
 installs without it and uses the native JSON backend. Free-threaded CPython 3.13t is not
 supported by msgspec: install there with `--no-deps`, or use 3.14t.
+
+## 💬 Feedback
+
+FlpIt is in beta. Bug reports, questions are welcome as [GitHub issues](https://github.com/riemar/flpit/issues).
 
 ## 🧭 Like FlpIt? Give .NET a try.
 
