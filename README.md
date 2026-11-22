@@ -133,6 +133,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_repeat.py                                         |           3 |
 | │   ├── test_reverse.py                                        |           8 |
 | │   ├── test_select.py                                         |           9 |
+| │   ├── test_select_await.py                                   |          10 |
 | │   ├── test_select_many.py                                    |           5 |
 | │   ├── test_single.py                                         |           9 |
 | │   ├── test_single_or_default.py                              |           9 |
@@ -147,6 +148,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_to_lookup.py                                      |           4 |
 | │   ├── test_union.py                                          |          12 |
 | │   ├── test_where.py                                          |           9 |
+| │   ├── test_where_await.py                                    |           6 |
 | │   └── test_zip.py                                            |          12 |
 | ├── channels/                                                  |             |
 | │   ├── test_bounded_channel.py                                |         139 |
@@ -228,6 +230,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 |     ├── test_semaphore_slim_cancellation.py                    |           4 |
 |     └── test_thread_local.py                                   |          15 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |       10709 |
+| GRAND TOTALS                                                   |       10725 |
 ================================================================================
 ```
