@@ -1,5 +1,5 @@
 ---
-description: FlpIt brings .NET LINQ to Python iterables - lazy, typed, fluent queries with behaviour kept as close to System.Linq.Enumerable as Python allows.
+description: "Flip your iterables: fluent, typed, lazy LINQ for Python with .NET semantics, async streams, JSON/CSV and an asyncio-free task runtime."
 ---
 # FlpIt
 
@@ -7,6 +7,10 @@ description: FlpIt brings .NET LINQ to Python iterables - lazy, typed, fluent qu
 
 FlpIt brings the .NET LINQ query model to ordinary Python iterables, with its behaviour kept as close to
 `System.Linq.Enumerable` as Python allows. If you know C# LINQ, you already know most of FlpIt.
+
+Queries are the doorway. Around them FlpIt carries over other parts of the .NET programming model: async streams
+(`AsyncFlpIt`), typed JSON and CSV serialization, an `asyncio`-free task runtime, channels and concurrent collections. It is
+tested on free-threaded Python (>=3.14t) in CI.
 
 ```bash
 uv add flpit
