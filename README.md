@@ -8,9 +8,9 @@
 
 If you know C# LINQ, you already know most of FlpIt. Existing LINQ examples, query patterns and documentation can generally be translated directly, which makes the .NET LINQ ecosystem a valuable reference for developers and AI coding assistants alike.
 
-Queries are the doorway. Around them FlpIt carries over the rest of the .NET programming model: async streams
-(`AsyncFlpIt`), typed JSON and CSV, an `asyncio`-free task runtime, channels and concurrent collections. It is
-tested on free-threaded Python (3.14t) in CI.
+Queries are the doorway. Around them FlpIt carries over other parts of the .NET programming model: async streams
+(`AsyncFlpIt`), typed JSON and CSV serialization, an `asyncio`-free task runtime, channels and concurrent collections. It is
+tested on free-threaded Python (>=3.14t) in CI.
 
 > **Semantic goal:** `flp` strives to faithfully reproduce .NET LINQ semantics.
 > Where Python's language or type system requires a different API contract, the contract is adapted accordingly,
@@ -79,7 +79,7 @@ supported by msgspec: install there with `--no-deps`, or use 3.14t.
 
 ## 💬 Feedback
 
-FlpIt is in beta. Bug reports, questions are welcome as [GitHub issues](https://github.com/riemar/flpit/issues).
+FlpIt is in beta. Bug reports and questions are welcome as [GitHub issues](https://github.com/riemar/flpit/issues).
 
 ## 🧭 Like FlpIt? Give .NET a try.
 
