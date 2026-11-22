@@ -19,7 +19,8 @@ cooperative.
 
 ## Run work in parallel
 
-Decorate a blocking function with `@task` and every call becomes a `Task` that is already running.
+Decorate a blocking function with `@task` and every call becomes a `Task` that is already running
+(see also [mixing sync and async functions](sync-and-async.md)).
 `Task.when_all` waits for all of them and returns their results in input order:
 
 ```python
