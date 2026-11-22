@@ -646,23 +646,33 @@ def test_delays_complete_without_a_free_worker(pool) -> None:
     blocker.result()
 
 
-def test_delay_is_not_early_and_respects_ordering(pool) -> None:
-    pool(max_workers=4)
-    finished: list[float] = []
-    # On a loaded machine (free-threaded CI runners) a thread can be descheduled for
-    # tens of milliseconds. Release the sleepers together and keep the delays 100 ms
-    # apart so that only the delays decide the order.
-    start_together = threading.Barrier(3)
+def test_delay_is_not_early(pool) -> None:
+    pool(max_workers=1)
 
-    async def sleeper(seconds: float) -> None:
-        start_together.wait(10)
+    async def sleeper() -> float:
         started = time.perf_counter()
-        await Task.delay(seconds)
-        assert time.perf_counter() - started >= seconds - 0.002
-        finished.append(seconds)
+        await Task.delay(0.05)
+        return time.perf_counter() - started
 
-    Task.when_all([Task.run(sleeper, s) for s in (0.25, 0.05, 0.15)]).result()
-    assert finished == [0.05, 0.15, 0.25]
+    assert Task.run(sleeper).result() >= 0.05 - 0.002
+
+
+def test_earlier_timer_wakes_the_sleeping_timer_thread() -> None:
+    # The timer thread sleeps until the nearest deadline. A timer that is due sooner than
+    # that deadline must wake it up. No timing is compared: with the wake-up missing the
+    # short delay completes after the long one (two minutes), with it after ~20 ms, and a
+    # loaded runner (about 0.2 s late in stress runs) cannot blur a gap that large.
+    long_timer = CancellationTokenSource()
+    try:
+        Task.delay(120, token=long_timer.token)  # the timer thread now waits for this one
+        time.sleep(0.05)  # let it go to sleep
+        started = time.perf_counter()
+        short = Task.delay(0.02)
+        short.wait(30)
+        assert short.done(), f"a 20 ms delay was still pending after {time.perf_counter() - started:.1f} s"
+    finally:
+        long_timer.cancel()
+        long_timer.dispose()
 
 
 def test_cancel_after_uses_one_shared_timer_thread(pool) -> None:
