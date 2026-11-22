@@ -285,6 +285,29 @@ async def _select_impl(source: AsyncFlpIt[Any], selector: Any, token: Cancellati
         await _aclose(e)
 
 
+async def _where_await_impl(source: AsyncFlpIt[Any], predicate: Any, token: CancellationToken) -> AsyncIterator[Any]:
+    e = source._get_async_enumerator(token)
+    try:
+        async for item in e:
+            if await predicate(item):
+                yield item
+    finally:
+        await _aclose(e)
+
+
+async def _select_await_impl(source: AsyncFlpIt[Any], selector: Any, token: CancellationToken) -> AsyncIterator[Any]:
+    e = source._get_async_enumerator(token)
+    try:
+        if selector is None:  # identity: the elements are the awaitables
+            async for item in e:
+                yield await item
+        else:
+            async for item in e:
+                yield await selector(item)
+    finally:
+        await _aclose(e)
+
+
 async def _select_many_impl(source: AsyncFlpIt[Any], selector: Any, token: CancellationToken) -> AsyncIterator[Any]:
     is_async = _is_async_callable(selector)
     e = source._get_async_enumerator(token)
@@ -891,6 +914,38 @@ class AsyncFlpIt[TItem](AsyncIterable[TItem]):
         if self is _EMPTY:
             return _EMPTY
         return _node(_select_impl, self, selector)
+
+    def where_await(self, predicate: Callable[[TItem], Awaitable[bool]]) -> AsyncFlpIt[TItem]:
+        """
+        Filters with a predicate that returns an awaitable bool (.NET ``WhereAwait``). The predicate is
+        called for the next element only after the previous answer has arrived. Unlike ``where``, it
+        may be any callable (a lambda, a ``@task`` function), and what it returns is always awaited.
+        """
+        if predicate is None:
+            raise PredicateNoneError()
+        if self is _EMPTY:
+            return self
+        return _node(_where_await_impl, self, predicate)
+
+    @overload
+    def select_await[R](self: AsyncFlpIt[Task[R]]) -> AsyncFlpIt[R]: ...
+
+    @overload
+    def select_await[TResult](self, selector: Callable[[TItem], Awaitable[TResult]]) -> AsyncFlpIt[TResult]: ...
+
+    def select_await(self, selector: Any = None) -> AsyncFlpIt[Any]:
+        """
+        Projects each element with a selector that returns an awaitable and yields the awaited
+        value (.NET ``SelectAwait``). The selector is called for the next element only after the
+        previous result has arrived, so the calls run one at a time. Unlike ``select``, it may be any
+        callable (a lambda, a ``@task`` function), and what it returns is always awaited.
+
+        Without a selector the identity is used: the elements themselves are the tasks, and each
+        one is awaited, so ``query.when_each().select_await()`` yields the values.
+        """
+        if self is _EMPTY:
+            return _EMPTY
+        return _node(_select_await_impl, self, selector)
 
     def select_many[TResult](
             self,

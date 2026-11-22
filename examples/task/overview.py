@@ -51,6 +51,21 @@ first = flp.it([0.5, 0.05]).select(nap).when_any().result()             # the fi
 assert results == [0.2, 0.1, 0.05]
 assert first.result() == 0.05
 
+# --8<-- [start:select_await]
+async def await_each() -> None:
+    # One at a time, like .NET SelectAwait: nap(0.1) is not called until nap(0.05) has returned.
+    in_order = await flp.it([0.05, 0.1]).select_await(nap).to_list()
+
+    # All at once: select starts the tasks, when_each() hands them over as they finish,
+    # and select_await awaits each one.
+    as_finished = await flp.it([0.2, 0.05]).select(nap).when_each().select_await().to_list()
+# --8<-- [end:select_await]
+    assert in_order == [0.05, 0.1]
+    assert as_finished == [0.05, 0.2]
+
+
+Task.run(await_each).result()
+
 # --8<-- [start:cancel]
 from flpit.task import CancellationTokenSource, OperationCanceledError
 
