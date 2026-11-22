@@ -45,9 +45,10 @@ class ColdTask:
         if self.task.done():
             # .NET: "Start may not be called on a task that has completed."
             raise InvalidOperationError("Start may not be called on a task that has completed.")
-        Task.run(self._action).continue_with(
-            self._source.try_set_from_task, options=TaskContinuationOptions.EXECUTE_SYNCHRONOUSLY
-        )
+        # Not EXECUTE_SYNCHRONOUSLY: if the action already finished, that would complete
+        # ``task`` (and run its synchronous continuations) on the thread calling start(),
+        # which .NET's Task.Start never does. The pool completes it instead.
+        Task.run(self._action).continue_with(self._source.try_set_from_task)
 
 
 def EnsureTaskCanceledExceptionThrown(action: Callable[[], Any], message: str) -> None:
