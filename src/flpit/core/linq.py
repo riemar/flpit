@@ -1524,6 +1524,35 @@ class FlpIt[TItem](Iterable[TItem]):
         from flpit.core.async_linq import to_async_enumerable
         return to_async_enumerable(self._iterable if type(self) is FlpIt else self)
 
+    def when_each[R](self: FlpIt[Task[R]]) -> AsyncFlpIt[Task[R]]:
+        """
+        Yields the tasks of this query in the order they complete, as an ``AsyncFlpIt``. The query
+        form of ``Task.when_each`` (.NET ``Task.WhenEach``). Enumerating the query starts it in
+        full, so every task is running before the first one is awaited.
+        """
+        from flpit.task import Task
+        return Task.when_each(self)
+
+    def when_all[R](self: FlpIt[Task[R]]) -> Task[list[R]]:
+        """
+        A task that completes with the results of all tasks of this query, in query order. The query
+        form of ``Task.when_all`` (.NET ``Task.WhenAll``). Enumerating the query starts it in full. If a task fails the
+        exception is re-raised; if several fail, ``TaskAggregateError`` carries all of them.
+        An empty query gives an empty list.
+        """
+        from flpit.task import Task
+        return Task.when_all(self)
+
+    def when_any[R](self: FlpIt[Task[R]]) -> Task[Task[R]]:
+        """
+        A task that completes with the task of this query that finishes first: ``first()`` for a
+        query of tasks. The query form of ``Task.when_any`` (.NET ``Task.WhenAny``). Enumerating
+        the query starts it in full. The winner is returned even if it failed, and the other tasks
+        keep running. An empty query raises ``ValueError``.
+        """
+        from flpit.task import Task
+        return Task.when_any(self)
+
     # =====================================================================
     # 5. json serialization
     # =====================================================================
@@ -2362,6 +2391,21 @@ class FlpList[TItem](Collection[TItem]):
         from flpit.core.async_linq import to_async_enumerable
         return to_async_enumerable(self.__list.data)
 
+    def when_each[R](self: FlpList[Task[R]]) -> AsyncFlpIt[Task[R]]:
+        """Yields the tasks of this list in the order they complete. The list form of ``Task.when_each``."""
+        from flpit.task import Task
+        return Task.when_each(self)
+
+    def when_all[R](self: FlpList[Task[R]]) -> Task[list[R]]:
+        """A task that completes with the results of all tasks of this list, in list order. The list form of ``Task.when_all``."""
+        from flpit.task import Task
+        return Task.when_all(self)
+
+    def when_any[R](self: FlpList[Task[R]]) -> Task[Task[R]]:
+        """A task that completes with the task of this list that finishes first. The list form of ``Task.when_any``."""
+        from flpit.task import Task
+        return Task.when_any(self)
+
     # =====================================================================
     # 5. json serialization
     # =====================================================================
@@ -2395,3 +2439,4 @@ from ._lookup import Lookup
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from flpit.core.async_linq import AsyncFlpIt
+    from flpit.task import Task

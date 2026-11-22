@@ -1069,14 +1069,14 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
     @overload
     @staticmethod
-    def collect[R](tasks: Iterable[Task[R]], /) -> "AsyncFlpIt[Task[R]]": ...
+    def when_each[R](tasks: Iterable[Task[R]], /) -> "AsyncFlpIt[Task[R]]": ...
 
     @overload
     @staticmethod
-    def collect(*tasks: Task[Any]) -> "AsyncFlpIt[Task[Any]]": ...
+    def when_each(*tasks: Task[Any]) -> "AsyncFlpIt[Task[Any]]": ...
 
     @staticmethod
-    def collect(*tasks: Any) -> "AsyncFlpIt[Task[Any]]":
+    def when_each(*tasks: Any) -> "AsyncFlpIt[Task[Any]]":
         """
         Yields tasks as they complete (.NET ``Task.WhenEach``). Accepts either an
         iterable or loose positional tasks. Returns an ``AsyncFlpIt``, so it can be
@@ -1084,6 +1084,9 @@ class Task(Generic[T], metaclass=_TaskMeta):
         """
         from flpit.core.async_linq import async_flpit  # async_linq imports this module
         return async_flpit(_collect_each)(tasks)
+
+    collect = when_each
+    """Alias of :meth:`when_each`."""
 
     @classmethod
     def delay(
