@@ -104,6 +104,16 @@ async def foo():
     assert_type(flp.it([1, 2]).select(lambda n: Task.run(lambda: n)).when_all(), Task[list[int]])
     assert_type(flp.it([1, 2]).select(lambda n: Task.run(lambda: n)).when_any(), Task[Task[int]])
 
+    # select_await / where_await
+    assert_type(flp.it(same).select_await(lambda t: t), AsyncFlpIt[int])
+    assert_type(flp.lst(same).select_await(lambda t: t), AsyncFlpIt[int])
+    assert_type(flp.it(same).when_each().select_await(lambda t: t), AsyncFlpIt[int])
+    assert_type(flp.it(same).when_each().select_await(), AsyncFlpIt[int])
+    assert_type(flp.it(same).select_await(), AsyncFlpIt[int])
+    assert_type(flp.lst(same).select_await(), AsyncFlpIt[int])
+    assert_type(flp.it([1, 2]).where_await(lambda n: Task.run(lambda: n > 1)), AsyncFlpIt[int])
+    assert_type(flp.lst([1, 2]).where_await(lambda n: Task.run(lambda: n > 1)), AsyncFlpIt[int])
+
 async def waits_and_continuations():
     t = Task.run(lambda: 42)
 

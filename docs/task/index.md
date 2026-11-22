@@ -57,7 +57,26 @@ any of them, so there is no need to wrap it in a `Task.when_*` call:
 `when_any()` is the `first()` of a query of tasks, and `when_each()` streams them in completion order. .NET has
 these only as static `Task` methods, so the operators are FlpIt's own.
 
-Enumerating the query starts every task before the wait begins. `when_any()` on an empty query raises
+Enumerating the query starts every task before the wait begins.
+
+## Await each result in a query
+
+`select_await()` and `where_await()` (.NET `SelectAwait` and `WhereAwait`) take a callback that returns something
+awaitable, usually a `Task`, and await it for you. They are the ones to use when the callback is a `@task`
+function or a lambda: `select()` only awaits an `async def` callback, and a plain callable that returns a `Task`
+would hand you the `Task` itself.
+
+```python
+--8<-- "examples/task/overview.py:select_await"
+```
+
+As in .NET, the calls run one at a time. The callback is not called for the next element until the previous result
+has arrived, so `select_await(nap)` on its own is sequential. To run the calls side by side, start the tasks first
+with `select()`, put `when_each()` in front to take them as they finish, and let `select_await()` await each one
+(the second query above), or end the query in `when_all()` to get the results in input order.
+
+Without an argument, `select_await()` awaits the elements themselves, which is what you want after `when_each()`
+or any other query of tasks. The same as passing `lambda t: t`. `when_any()` on an empty query raises
 `ValueError`, and `when_all()` on an empty query gives an empty list.
 
 ## Cancel

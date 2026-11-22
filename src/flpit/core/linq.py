@@ -33,7 +33,8 @@ from typing import (
     cast as typing_cast,
     BinaryIO,
     Concatenate,
-    Sized
+    Sized,
+    Awaitable
 )
 
 if TYPE_CHECKING:
@@ -1533,6 +1534,25 @@ class FlpIt[TItem](Iterable[TItem]):
         from flpit.task import Task
         return Task.when_each(self)
 
+    @overload
+    def select_await[R](self: FlpIt[Task[R]]) -> AsyncFlpIt[R]: ...
+
+    @overload
+    def select_await[R](self, selector: Callable[[TItem], Awaitable[R]]) -> AsyncFlpIt[R]: ...
+
+    def select_await(self, selector: Any = None) -> AsyncFlpIt[Any]:
+        """
+        Projects each element with a selector that returns an awaitable and yields the awaited value
+        (.NET ``SelectAwait``). Without a selector the elements themselves are the tasks and are awaited.
+        The calls run one at a time; to run them side by side, start the tasks first with ``select``
+        and end in ``when_all()``, or put ``when_each()`` in front.
+        """
+        return self.to_async_enumerable().select_await(selector)
+
+    def where_await(self, predicate: Callable[[TItem], Awaitable[bool]]) -> AsyncFlpIt[TItem]:
+        """Filters with a predicate that returns an awaitable bool (.NET ``WhereAwait``), one element at a time."""
+        return self.to_async_enumerable().where_await(predicate)
+
     def when_all[R](self: FlpIt[Task[R]]) -> Task[list[R]]:
         """
         A task that completes with the results of all tasks of this query, in query order. The query
@@ -2395,6 +2415,23 @@ class FlpList[TItem](Collection[TItem]):
         """Yields the tasks of this list in the order they complete. The list form of ``Task.when_each``."""
         from flpit.task import Task
         return Task.when_each(self)
+
+    @overload
+    def select_await[R](self: FlpList[Task[R]]) -> AsyncFlpIt[R]: ...
+
+    @overload
+    def select_await[R](self, selector: Callable[[TItem], Awaitable[R]]) -> AsyncFlpIt[R]: ...
+
+    def select_await(self, selector: Any = None) -> AsyncFlpIt[Any]:
+        """
+        Projects each element with a selector that returns an awaitable (.NET ``SelectAwait``), one
+        element at a time. Without a selector the elements themselves are the tasks and are awaited.
+        """
+        return self.to_async_enumerable().select_await(selector)
+
+    def where_await(self, predicate: Callable[[TItem], Awaitable[bool]]) -> AsyncFlpIt[TItem]:
+        """Filters with a predicate that returns an awaitable bool (.NET ``WhereAwait``), one element at a time."""
+        return self.to_async_enumerable().where_await(predicate)
 
     def when_all[R](self: FlpList[Task[R]]) -> Task[list[R]]:
         """A task that completes with the results of all tasks of this list, in list order. The list form of ``Task.when_all``."""

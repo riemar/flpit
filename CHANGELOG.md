@@ -11,6 +11,10 @@ All notable changes to FlpIt are documented here. The format follows
 - The query operators `when_each()`, `when_all()` and `when_any()` on `FlpIt` and `FlpList`, so a query of
   tasks can end in the wait. `when_any()` is the `first()` of a query of tasks. .NET has these only as static
   `Task` methods, not as extension methods.
+- The query operators `select_await()` and `where_await()` on `AsyncFlpIt`, `FlpIt` and `FlpList` (.NET
+  `SelectAwait` / `WhereAwait`). The callback may return any awaitable, such as a `Task`, and is awaited one
+  element at a time. `select_await()` without an argument awaits the elements themselves, for example after
+  `when_each()`.
 
 ### Documentation
 
