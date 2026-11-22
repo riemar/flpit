@@ -57,7 +57,8 @@ any of them, so there is no need to wrap it in a `Task.when_*` call:
 `when_any()` is the `first()` of a query of tasks, and `when_each()` streams them in completion order. .NET has
 these only as static `Task` methods, so the operators are FlpIt's own.
 
-Enumerating the query starts every task before the wait begins.
+Enumerating the query starts every task before the wait begins. `when_any()` on an empty query raises
+`ValueError`, and `when_all()` on an empty query gives an empty list.
 
 ## Await each result in a query
 
@@ -76,8 +77,7 @@ with `select()`, put `when_each()` in front to take them as they finish, and let
 (the second query above), or end the query in `when_all()` to get the results in input order.
 
 Without an argument, `select_await()` awaits the elements themselves, which is what you want after `when_each()`
-or any other query of tasks. The same as passing `lambda t: t`. `when_any()` on an empty query raises
-`ValueError`, and `when_all()` on an empty query gives an empty list.
+or any other query of tasks. It is the same as passing `lambda t: t`.
 
 ## Cancel
 
