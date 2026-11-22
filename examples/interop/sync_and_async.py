@@ -61,6 +61,32 @@ async def crawl() -> None:
 Task.run(crawl).result()
 
 
+# --8<-- [start:blocking_processed]
+def parse(page: bytes) -> int:
+    return len(page)                       # any post-processing, a plain function or an async def
+
+
+sizes: list[int] = []
+
+
+async def crawl_sizes() -> None:
+    query = (
+        flp.it(links)
+        .select(fetch)      # one fetch task per link
+        .when_each()        # yield the tasks in the order they finish
+        .select_await()     # await each finished task to get its value
+        .select(parse)      # post-process the value as it arrives
+    )
+
+    async for size in query:
+        sizes.append(size)  # fastest download first
+# --8<-- [end:blocking_processed]
+
+
+Task.run(crawl_sizes).result()
+assert sorted(sizes) == sorted(len(page) for page in pages)
+
+
 # --8<-- [start:call_async]
 from flpit.task import twait
 

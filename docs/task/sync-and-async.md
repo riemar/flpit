@@ -37,6 +37,13 @@ tasks in the order they finish, and each task is already done when you receive i
 --8<-- "examples/interop/sync_and_async.py:blocking_stream"
 ```
 
+To work with the values and not the tasks, add `select_await()`, which awaits each finished task, and then
+post-process with an ordinary `select`. The callback can be a plain function or an `async def`:
+
+```python
+--8<-- "examples/interop/sync_and_async.py:blocking_processed"
+```
+
 ## Call an async function from sync code
 
 `Task.run` starts a coroutine function (or a plain one) and returns the same `Task`. From synchronous code,
