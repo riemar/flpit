@@ -686,24 +686,18 @@ class SemaphoreSlim:
         """Wait on the lock's condition while the count is zero. Lock held."""
         while self._current_count == 0:
             token.throw_if_cancellation_requested()
-            capped = False
-            if seconds is None:
-                wait_for: float | None = None
-            else:
+            wait_for: float | None = None
+            if seconds is not None:
                 remaining = seconds - (_time.perf_counter() - start)
                 if remaining <= 0:
                     return False
-                wait_for = remaining
-            if wait_for is None or wait_for > _MAX_WAIT:
-                # A capped wait that returns False is not a timeout; loop and wait again.
-                capped = wait_for is not None
-                wait_for = _MAX_WAIT if capped else None
-            signaled = _blocking_wait(self._lock.wait, wait_for)
+                wait_for = min(remaining, _MAX_WAIT)
+            _blocking_wait(self._lock.wait, wait_for)
             # No per-thread pulse state: count any wake-up against the pulsed waiters.
             if self._pulsed_to_wake:
                 self._pulsed_to_wake -= 1
-            if wait_for is not None and not capped and not signaled:
-                return False
+            # Whatever the wait returned, the loop re-checks count and deadline. The OS wait
+            # can return early (Windows rounds to its timer tick), which is not a timeout.
         return True
 
     def _pulse_all(self) -> None:
