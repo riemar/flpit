@@ -1,6 +1,16 @@
 """
 Fluent LINQ for Python — flip your iterables.
 """
+
+# flpit is an extensible package: sub-packages under ``flpit.*`` may be installed by other
+# distributions (e.g. flpit-stoop -> ``flpit.stoop``), also from editable/dev installs.
+# The ``flpit.*`` namespace is reserved for official flpit packages; third-party extensions
+# should use their own top-level package (e.g. ``flpit_<name>`` or ``<name>_flpit``).
+from pkgutil import extend_path as _extend_path
+
+__path__ = _extend_path(__path__, __name__)
+del _extend_path
+
 from importlib.metadata import version
 __version__ = version("flpit")
 
