@@ -7,6 +7,7 @@ from flpit.threading import (
     ManualResetEvent,
     SemaphoreSlim,
     ThreadLocal,
+    ThreadPool,
     Timeout,
     WaitHandle,
 )
@@ -62,3 +63,9 @@ COUNTER.value += 1
 
 with ThreadLocal(lambda: 1.5) as scoped_local:
     assert_type(scoped_local, ThreadLocal[float])
+
+
+# --- ThreadPool ---------------------------------------------------------------------------------
+assert_type(ThreadPool.queue(lambda: None), bool)
+assert_type(ThreadPool.queue(lambda state: None, "state"), bool)
+assert_type(ThreadPool.queue_user_work_item(print, 1, prefer_local=True), bool)

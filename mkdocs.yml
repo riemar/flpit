@@ -55,6 +55,7 @@ nav:
       - Verification: semantics/verification.md
   - Concurrency:
       - Task runtime: task/index.md
+      - Ways to start work: task/starting-work.md
       - Mixing sync and async: task/sync-and-async.md
       - Cancellation: task/cancellation.md
       - Channels: concurrency/channels.md

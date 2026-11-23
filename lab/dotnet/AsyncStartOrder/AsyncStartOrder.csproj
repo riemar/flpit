@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Override on the command line to run a subset, e.g. -p:TargetFrameworks=net8.0 -->
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Each build runs on its own major version only (latest installed patch), never on a newer one. -->
+    <RollForward>LatestPatch</RollForward>
+    <NuGetAudit>false</NuGetAudit>
+    <!-- Run as "dotnet AsyncStartOrder.dll": no native launcher, so no extra pack to download. -->
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+</Project>

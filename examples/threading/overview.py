@@ -91,3 +91,21 @@ async def serve() -> None:
 
 Task.run(serve).result()
 # --8<-- [end:async_local]
+
+# --8<-- [start:thread_pool]
+import threading
+
+from flpit.threading import ThreadPool
+
+served = threading.Event()
+
+
+def serve_one(request: str) -> None:       # runs on a pool worker, in a fresh context
+    assert request == "GET /"
+    served.set()
+
+
+# From any thread, for example a server's IO thread: no Task, no result, just the call.
+ThreadPool.queue(serve_one, "GET /")
+assert served.wait(5)
+# --8<-- [end:thread_pool]

@@ -3,6 +3,38 @@
 All notable changes to FlpIt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `Task.run_inline` starts work on the calling thread, the way calling an `async` method does in .NET: a
+  coroutine runs until its first `await` of something not yet complete, then resumes on the pool. A coroutine
+  that never suspends has completed when the call returns, with no queue hop and no wake-up. It takes the same
+  arguments as `Task.run`, including a coroutine object. Exceptions are captured in the returned Task, the
+  work runs in a copy of the caller's context, an already cancelled token cancels it without running it, and
+  deep nesting falls back to queuing. `Task.run` is unchanged.
+- `@task(inline=True)` on an `async def` starts every call with `Task.run_inline`, so calling the function behaves
+  like calling an `async` method in .NET. Plain `@task` is unchanged and still queues every call; `inline=True` on a
+  plain function raises `TypeError`. `@task()` now works as well and means `@task`.
+- `flpit.threading.ThreadPool` with `queue` and `queue_user_work_item` (.NET
+  `ThreadPool.UnsafeQueueUserWorkItem` / `QueueUserWorkItem`): queue a plain call on the worker pool without
+  creating a Task. `queue` runs it in a fresh, empty context, `queue_user_work_item` in a copy of the
+  caller's. Exceptions go to the `Task.set_exception_handler` handler, or are logged.
+- `benchmarks/scripts/task_start_bench.py` measures what it costs to start, resume and complete tasks.
+
+### Documentation
+
+- New page "Ways to start work": `await`, `Task.run`, `@task`, `Task.run_inline`, `@task(inline=True)` and
+  `ThreadPool` work items compared, with their .NET counterparts, costs and when to use which.
+- `lab/dotnet/AsyncStartOrder`: a C# program that checks the start order of async methods on .NET 8, 9 and 10, as
+  the reference for the inline-start tests.
+
+### Changed
+
+- Starting and stepping tasks is cheaper: `Task` keeps rarely changed fields as class defaults, the start
+  path skips `inspect.isawaitable` for plain functions and plain results, and a coroutine step no longer
+  passes through an extra frame when no `AsyncLocal` change handler exists.
+
 ## [0.4.1] - 2026-11-22
 
 ### Added

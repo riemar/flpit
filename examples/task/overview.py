@@ -99,3 +99,26 @@ from flpit.task import TaskCreationOptions
 dedicated = Task.run(time.sleep, 0.05, creation_options=TaskCreationOptions.LONG_RUNNING)
 dedicated.result()
 # --8<-- [end:long_running]
+
+# --8<-- [start:run_inline]
+async def handle(request: str, cache: dict[str, str]) -> str:
+    if request in cache:
+        return cache[request]               # never suspends: done before run_inline returns
+    await Task.delay(0.01)                  # a real suspension: the rest runs on the pool
+    cache[request] = f"fresh {request}"
+    return cache[request]
+
+
+def on_worker() -> None:                    # e.g. a web framework handling a request
+    cache = {"home": "cached home"}
+
+    hit = Task.run_inline(handle, "home", cache)
+    assert hit.status == Task.SUCCEEDED      # ran right here, no queue hop, no wake-up
+
+    miss = Task.run_inline(handle("about", cache))   # a coroutine object works too
+    assert not miss.done()                   # suspended in Task.delay; the caller goes on
+    assert miss.result() == "fresh about"
+
+
+Task.run(on_worker).result()
+# --8<-- [end:run_inline]

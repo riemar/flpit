@@ -9,7 +9,7 @@ from collections.abc import Callable
 from contextvars import Context, ContextVar
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast, overload
 
 from flpit.core.linq import ArgumentNullError, ArgumentOutOfRangeError, InvalidOperationError
 
@@ -382,6 +382,81 @@ class ThreadLocal[T]:
 # =============================================================================
 # Wait handles, timeouts and SemaphoreSlim (System.Threading)
 # =============================================================================
+
+# Marks an omitted ``state`` argument: ``None`` is a valid state.
+_NO_STATE: Final = object()
+
+
+class ThreadPool:
+    """Queue plain work items on the Task runtime's worker pool (.NET ``ThreadPool``).
+
+    A work item is a function call and nothing more: no Task is created, there is no
+    result to wait for and nothing to cancel. That makes it the cheapest way to get a
+    call onto a pool worker, for example from a thread that is not one (an IO thread
+    of a server) and must hand off at once. Use ``Task.run`` when you need a result,
+    an exception, cancellation or ``await``.
+
+    The pool is the one ``Task.run`` uses, so ``Task.configure`` sizes it and
+    ``Task.shutdown`` stops it.
+
+    Example:
+        ```python
+        ThreadPool.queue(handle_request, request)
+        ```
+    """
+
+    __slots__ = ()
+
+    @overload
+    @staticmethod
+    def queue(callback: Callable[[], object], /) -> bool: ...
+
+    @overload
+    @staticmethod
+    def queue[S](callback: Callable[[S], object], state: S, prefer_local: bool = False) -> bool: ...
+
+    @staticmethod
+    def queue(
+            callback: Callable[..., object], state: Any = _NO_STATE, prefer_local: bool = False
+    ) -> bool:
+        """Queue ``callback(state)``, or ``callback()`` without ``state``, on a pool worker.
+
+        As .NET ``ThreadPool.UnsafeQueueUserWorkItem``, nothing of the caller's execution
+        context flows: the call runs in a fresh, empty ``contextvars.Context``. It sees no
+        ``AsyncLocal`` value of the caller, and what it sets stays inside the work item
+        (a pool thread's context is never changed, as .NET resets it after each item).
+
+        An exception that escapes ``callback`` goes to the handler installed with
+        ``Task.set_exception_handler``, or is logged when there is none. (.NET
+        terminates the process instead.)
+
+        ``prefer_local`` is accepted for porting and has no effect: the pool has one
+        shared queue. Returns ``True``. Raises ``RuntimeShutdownError`` while the runtime
+        is shutting down.
+        """
+        return _task._queue_work_item(callback, state, flow_context=False)
+
+    @overload
+    @staticmethod
+    def queue_user_work_item(callback: Callable[[], object], /) -> bool: ...
+
+    @overload
+    @staticmethod
+    def queue_user_work_item[S](callback: Callable[[S], object], state: S, prefer_local: bool = False) -> bool: ...
+
+    @staticmethod
+    def queue_user_work_item(
+            callback: Callable[..., object], state: Any = _NO_STATE, prefer_local: bool = False
+    ) -> bool:
+        """Queue ``callback(state)``, or ``callback()``, with the caller's execution context.
+
+        As .NET ``ThreadPool.QueueUserWorkItem``: the call runs in a copy of the caller's
+        ``contextvars`` context, so it sees the caller's ``AsyncLocal`` values, and changes
+        made inside never reach the caller. Costs one context copy more than
+        ``queue``. Exceptions and ``prefer_local`` behave as there.
+        """
+        return _task._queue_work_item(callback, state, flow_context=True)
+
 
 class SemaphoreFullError(Exception):
     """Raised when ``release`` would exceed the maximum count (.NET ``SemaphoreFullException``)."""
