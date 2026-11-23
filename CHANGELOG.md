@@ -25,7 +25,9 @@ All notable changes to FlpIt are documented here. The format follows
 ### Documentation
 
 - New page "Ways to start work": `await`, `Task.run`, `@task`, `Task.run_inline`, `@task(inline=True)` and
-  `ThreadPool` work items compared, with their .NET counterparts, costs and when to use which.
+  `ThreadPool` work items compared, with their .NET counterparts, costs and when to use which, and why
+  `@task(inline=True)` belongs where a Task starts, not on every `async def`
+  (`benchmarks/scripts/inline_chain_bench.py`).
 - `lab/dotnet/AsyncStartOrder`: a C# program that checks the start order of async methods on .NET 8, 9 and 10, as
   the reference for the inline-start tests.
 
