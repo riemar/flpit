@@ -9,9 +9,10 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Fixed
 
-- A finished Task, its result, its exception and the `AsyncLocal` values set inside it were only
-  freed by the cyclic garbage collector, because a Task and its context referenced each other.
-  They are now freed as soon as the last reference goes.
+- A finished Task, its result and the `AsyncLocal` values set inside it were only freed by the cyclic
+  garbage collector, because a Task and its context referenced each other. They are now freed as soon
+  as the last reference goes. A failed task is still freed by the cyclic garbage collector, as is any
+  exception that Python code keeps: its traceback leads back to the task.
 - Free-threaded builds: objects created on an idle pool worker, the timer thread or the IO thread
   and released elsewhere stayed allocated until that thread ran again, up to 20 s. Idle runtime
   threads now wake every 0.5 s, which frees them within that time.
