@@ -97,13 +97,42 @@ See [ThreadPool](../concurrency/threading.md#threadpool) for its context and exc
   function does before its first `await`.
 - **To start coroutines that usually finish quickly or suspend early** (cache hits, a framework calling a request
   handler, many small coroutines started from a worker): `Task.run_inline`, or `@task(inline=True)`. It saves the
-  queue hop and the wake-up, which cost far more than a short coroutine itself.
+  queue hop and the wake-up, which cost far more than a short coroutine itself. Only where you start them without
+  awaiting at once; see [below](#dont-put-taskinlinetrue-on-every-async-def).
 - **Not inline** when the coroutine does blocking or heavy work before its first `await` (each call would then hold
   up the caller, and several calls would run one after another), when the caller holds a lock the coroutine might
   need, or when the calling thread must not run your code at all, such as a server's IO thread.
 - **To hand a call to a worker and forget it:** `ThreadPool.queue`.
 - **For work that blocks for a long time:** `Task.run(..., creation_options=TaskCreationOptions.LONG_RUNNING)`, so
   it does not occupy a pool worker.
+
+## Don't put `@task(inline=True)` on every `async def`
+
+In C# every async method returns a `Task`, so it is tempting to decorate every `async def` the same way. In Python
+that makes code slower that simply awaits its calls:
+
+- **`await foo()` on a plain `async def` costs almost nothing.** The coroutine runs inside the caller's own task,
+  without a `Task` of its own. A decorated function creates a full `Task` on every call, a few microseconds each.
+- **Suspended chains pay once per level.** When a chain of plain coroutines resumes, it resumes as one unit. When
+  every level is its own `Task`, each finished level hands control to the one above as a separate work item on the
+  pool.
+- **Deep chains stop being inline.** Nested inline starts count toward a depth limit (32). Past it, the call is
+  queued like `Task.run`.
+
+Measured with `benchmarks/scripts/inline_chain_bench.py` (each figure includes about 3.5 µs for starting and
+waiting for the outer task):
+
+| | 3.13 | 3.14t |
+|---|---:|---:|
+| `await` chain, 10 levels, one real suspension at the bottom, plain `async def` | 50 µs | 46 µs |
+| the same chain with every level `@task(inline=True)` | 204 µs | 181 µs |
+| `await` of one call that never suspends, plain `async def` | 3.3 µs | 3.5 µs |
+| the same call with `@task(inline=True)` | 7.2 µs | 6.0 µs |
+
+The rule: **inline where a `Task` starts, plain `await` everywhere else.** If every caller writes `await foo()`
+right away, leave `foo` a plain `async def`; it already behaves like C#'s `await FooAsync()`. Decorate a function
+with `@task(inline=True)`, or call it with `Task.run_inline`, where it is started *without* being awaited at once:
+fan-out, fire-and-forget, a framework starting a handler.
 
 What it costs, as a rough guide: CPU time per call measured with `benchmarks/scripts/task_start_bench.py` on
 a small 2-core machine, Python 3.13 and free-threaded 3.14. Your numbers will differ, the proportions less so.
