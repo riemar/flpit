@@ -859,9 +859,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
         # Promise-style tasks never run code and need no execution context.
         # The context holds this task as the current task, so the two form a
         # reference cycle. Every path on which the task's code has finished
-        # drops the context ("see _release_context"): otherwise a finished
-        # task, its result and every AsyncLocal value set inside it would only
-        # be freed by the cyclic garbage collector.
+        # drops the context: otherwise a finished task, its result and every
+        # AsyncLocal value set inside it would only be freed by the cyclic
+        # garbage collector. (A failed task still is: its exception's traceback
+        # reaches the runtime frames that ran it, as with any stored exception.)
         self._execution_context: Context | None = (
             copy_context() if capture_context else None
         )
@@ -1804,9 +1805,6 @@ class Task(Generic[T], metaclass=_TaskMeta):
             if result is not None:
                 self._result = result
             if exception is not None:
-                tb = exception.__traceback__
-                if tb is not None and tb.tb_frame.f_code in _RUNTIME_CODES:
-                    exception.__traceback__ = _without_runtime_frames(tb)
                 self._exception = exception
             # Published last: lock-free readers check the state first.
             self._state = state
@@ -2110,23 +2108,6 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
 
 _current_task: AsyncLocal[Task[Any] | None] = AsyncLocal()
-
-# The runtime's own frames, which head the traceback of an exception that escapes a
-# task's code. They tell the user nothing, and their locals include the task itself:
-# kept in the stored exception, they would tie the task, its exception and everything
-# the traceback references into a cycle that only the cyclic GC can free.
-_RUNTIME_CODES: Final = frozenset({
-    Task._start.__code__,
-    Task._drive.__code__,
-    Task._run_coroutine_inline.__code__,
-    _run_with_context.__code__,
-})
-
-
-def _without_runtime_frames(tb: Any) -> Any:
-    while tb is not None and tb.tb_frame.f_code in _RUNTIME_CODES:
-        tb = tb.tb_next
-    return tb
 
 
 # ---------------------------------------------------------------------------

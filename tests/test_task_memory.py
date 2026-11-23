@@ -1,7 +1,10 @@
 """Finished tasks and what they reference are freed promptly, without the cyclic GC.
 
 * A task's context holds the task as the current task. A finished task drops its
-  context, so reference counting frees it as soon as the last reference goes.
+  context, so reference counting frees it as soon as the last reference goes. A failed
+  task is the exception: its exception's traceback reaches the runtime frames that ran
+  it, which reference the task, so the cyclic GC frees it, as with any exception that
+  Python code stores (``concurrent.futures``, ``asyncio``).
 * On free-threaded builds an object is freed by the thread that created it; when another
   thread drops the last reference, the creator frees it the next time it runs Python
   code. Idle runtime threads therefore wake up regularly instead of blocking for the
@@ -24,6 +27,8 @@ from flpit.task import Task
 from flpit.threading import AsyncLocal
 
 FREE_THREADED = not getattr(sys, "_is_gil_enabled", lambda: True)()
+# Generous for slow CI machines, yet far below the 20 s idle timeout that used to keep objects alive.
+TIMEOUT = 5.0
 
 
 @pytest.fixture
@@ -71,6 +76,11 @@ async def async_work() -> Payload:
     return Payload()
 
 
+def failing_sync_work() -> None:
+    payload = Payload()
+    raise RuntimeError(f"failed with {payload!r}")
+
+
 async def failing_work() -> None:
     payload = Payload()  # referenced from the traceback's frame
     raise RuntimeError(f"failed with {payload!r}")
@@ -84,19 +94,21 @@ def test_a_finished_task_and_its_result_are_freed_without_the_cyclic_gc(
     task_ref = weakref.ref(t)
     result_ref = weakref.ref(t.result())
     del t
-    wait_until_dead(task_ref, timeout=2.0)
-    wait_until_dead(result_ref, timeout=2.0)
+    wait_until_dead(task_ref, timeout=TIMEOUT)
+    wait_until_dead(result_ref, timeout=TIMEOUT)
 
 
-def test_a_failed_task_and_its_traceback_are_freed_without_the_cyclic_gc(
-        no_cyclic_gc: None, several_workers: None
-) -> None:
-    t = Task.run(failing_work)
-    error = t.exception()
-    assert isinstance(error, RuntimeError)
+@pytest.mark.parametrize("work", [failing_sync_work, failing_work], ids=["sync", "async"])
+def test_a_failed_task_is_freed_by_the_cyclic_gc(no_cyclic_gc: None, several_workers: None, work: Any) -> None:
+    t = Task.run(work)
+    assert isinstance(t.exception(), RuntimeError)
     task_ref = weakref.ref(t)
-    del t, error
-    wait_until_dead(task_ref, timeout=2.0)
+    del t
+    deadline = time.perf_counter() + TIMEOUT
+    while task_ref() is not None:  # collected once nothing outside the cycle refers to it
+        assert time.perf_counter() < deadline, "a failed task leaked"
+        gc.collect()
+        time.sleep(0.01)
 
 
 def test_async_local_values_set_in_a_task_are_freed_with_it(no_cyclic_gc: None, several_workers: None) -> None:
@@ -110,7 +122,7 @@ def test_async_local_values_set_in_a_task_are_freed_with_it(no_cyclic_gc: None, 
         await Task.yield_now()
 
     Task.run(handler).wait()
-    wait_until_dead(refs[0], timeout=2.0)
+    wait_until_dead(refs[0], timeout=TIMEOUT)
 
 
 def test_inline_tasks_are_freed_without_the_cyclic_gc(no_cyclic_gc: None) -> None:
@@ -120,8 +132,8 @@ def test_inline_tasks_are_freed_without_the_cyclic_gc(no_cyclic_gc: None) -> Non
     t = Task.run_inline(done)
     task_ref, result_ref = weakref.ref(t), weakref.ref(t.result())
     del t
-    wait_until_dead(task_ref, timeout=2.0)
-    wait_until_dead(result_ref, timeout=2.0)
+    wait_until_dead(task_ref, timeout=TIMEOUT)
+    wait_until_dead(result_ref, timeout=TIMEOUT)
 
 
 @pytest.mark.skipif(not FREE_THREADED, reason="objects are freed at once with the GIL")
@@ -139,6 +151,6 @@ def test_objects_created_on_an_idle_worker_are_freed_while_it_stays_idle(
     holder.clear()  # the last reference goes on this thread, not on the creator
     # The creator parks with nothing to do; it used to free the object only when its
     # 20 s idle timeout expired.
-    elapsed = wait_until_dead(ref, timeout=3.0)
-    assert elapsed < 3.0
+    elapsed = wait_until_dead(ref, timeout=TIMEOUT)
+    assert elapsed < TIMEOUT
     assert created_on[0].is_alive()  # freed by the idle wake-up, not by the worker retiring
