@@ -5,6 +5,17 @@ All notable changes to FlpIt are documented here. The format follows
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Fixed
+
+- A finished Task, its result, its exception and the `AsyncLocal` values set inside it were only
+  freed by the cyclic garbage collector, because a Task and its context referenced each other.
+  They are now freed as soon as the last reference goes.
+- Free-threaded builds: objects created on an idle pool worker, the timer thread or the IO thread
+  and released elsewhere stayed allocated until that thread ran again, up to 20 s. Idle runtime
+  threads now wake every 0.5 s, which frees them within that time.
+
 ### Added
 
 - `Task.run_inline` starts work on the calling thread, the way calling an `async` method does in .NET: a
@@ -22,6 +33,13 @@ All notable changes to FlpIt are documented here. The format follows
   caller's. Exceptions go to the `Task.set_exception_handler` handler, or are logged.
 - `benchmarks/scripts/task_start_bench.py` measures what it costs to start, resume and complete tasks.
 
+### Changed
+
+- Starting and stepping tasks is cheaper: `Task.run` costs about 25–40% less per task. `Task` keeps rarely
+  changed fields as class defaults, the start path skips `inspect.isawaitable` for plain functions and plain
+  results, and a coroutine step no longer passes through an extra frame when no `AsyncLocal` change handler
+  exists.
+
 ### Documentation
 
 - New page "Ways to start work": `await`, `Task.run`, `@task`, `Task.run_inline`, `@task(inline=True)` and
@@ -29,13 +47,8 @@ All notable changes to FlpIt are documented here. The format follows
   `@task(inline=True)` belongs where a Task starts, not on every `async def`
   (`benchmarks/scripts/inline_chain_bench.py`).
 - `lab/dotnet/AsyncStartOrder`: a C# program that checks the start order of async methods on .NET 8, 9 and 10, as
-  the reference for the inline-start tests.
-
-### Changed
-
-- Starting and stepping tasks is cheaper: `Task` keeps rarely changed fields as class defaults, the start
-  path skips `inspect.isawaitable` for plain functions and plain results, and a coroutine step no longer
-  passes through an extra frame when no `AsyncLocal` change handler exists.
+  the reference for the inline-start tests, and `lab/task/async_start_order.py`, which runs the same cases with
+  flpit.
 
 ## [0.4.1] - 2026-11-22
 

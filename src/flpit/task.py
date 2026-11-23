@@ -401,6 +401,7 @@ class _TimerQueue:
         _thread_state.internal = True
         condition = self._condition
         due: list[Callable[[], Any]] = []
+        park = cast(float, _park_interval(self._MAX_WAIT))
         while True:
             with condition:
                 while True:
@@ -421,9 +422,9 @@ class _TimerQueue:
                     if due:
                         break
                     if heap:
-                        condition.wait(min(heap[0][0] - now, self._MAX_WAIT))
+                        condition.wait(min(heap[0][0] - now, park))
                     else:
-                        condition.wait()
+                        condition.wait(_park_interval(None))
             for callback in due:
                 try:
                     callback()
@@ -856,6 +857,11 @@ class Task(Generic[T], metaclass=_TaskMeta):
         self._lock = threading.Lock()
         self._state: str = _PENDING
         # Promise-style tasks never run code and need no execution context.
+        # The context holds this task as the current task, so the two form a
+        # reference cycle. Every path on which the task's code has finished
+        # drops the context ("see _release_context"): otherwise a finished
+        # task, its result and every AsyncLocal value set inside it would only
+        # be freed by the cyclic garbage collector.
         self._execution_context: Context | None = (
             copy_context() if capture_context else None
         )
@@ -1658,12 +1664,15 @@ class Task(Generic[T], metaclass=_TaskMeta):
                             _notify_context_exit(context)
             except StopIteration as stop:
                 self._finish(_SUCCEEDED, result=stop.value)
+                self._execution_context = None  # break the cycle with the context
                 return
             except OperationCanceledError as cancellation:
                 self._finish(_CANCELLED, exception=cancellation)
+                self._execution_context = None  # break the cycle with the context
                 return
             except BaseException as failure:
                 self._finish(_FAILED, exception=failure)
+                self._execution_context = None  # break the cycle with the context
                 return
 
             # The first real suspension (or an await that _suspend resolves at once).
@@ -1795,6 +1804,9 @@ class Task(Generic[T], metaclass=_TaskMeta):
             if result is not None:
                 self._result = result
             if exception is not None:
+                tb = exception.__traceback__
+                if tb is not None and tb.tb_frame.f_code in _RUNTIME_CODES:
+                    exception.__traceback__ = _without_runtime_frames(tb)
                 self._exception = exception
             # Published last: lock-free readers check the state first.
             self._state = state
@@ -1919,14 +1931,17 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 coroutine = _await_any(value)
             else:
                 self._finish(_SUCCEEDED, result=value)
+                self._execution_context = None  # break the cycle with the context
                 return
         except OperationCanceledError as error:
             state.tail = True
             self._finish(_CANCELLED, exception=error)
+            self._execution_context = None  # break the cycle with the context
             return
         except BaseException as error:
             state.tail = True
             self._finish(_FAILED, exception=error)
+            self._execution_context = None  # break the cycle with the context
             return
 
         self._coroutine = coroutine
@@ -1994,16 +2009,19 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 state.tail = True
                 self._coroutine = None
                 self._finish(_SUCCEEDED, result=stop.value)
+                self._execution_context = None  # break the cycle with the context
                 return
             except OperationCanceledError as cancellation:
                 state.tail = True
                 self._coroutine = None
                 self._finish(_CANCELLED, exception=cancellation)
+                self._execution_context = None  # break the cycle with the context
                 return
             except BaseException as failure:
                 state.tail = True
                 self._coroutine = None
                 self._finish(_FAILED, exception=failure)
+                self._execution_context = None  # break the cycle with the context
                 return
 
             state.tail = True
@@ -2092,6 +2110,23 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
 
 _current_task: AsyncLocal[Task[Any] | None] = AsyncLocal()
+
+# The runtime's own frames, which head the traceback of an exception that escapes a
+# task's code. They tell the user nothing, and their locals include the task itself:
+# kept in the stored exception, they would tie the task, its exception and everything
+# the traceback references into a cycle that only the cyclic GC can free.
+_RUNTIME_CODES: Final = frozenset({
+    Task._start.__code__,
+    Task._drive.__code__,
+    Task._run_coroutine_inline.__code__,
+    _run_with_context.__code__,
+})
+
+
+def _without_runtime_frames(tb: Any) -> Any:
+    while tb is not None and tb.tb_frame.f_code in _RUNTIME_CODES:
+        tb = tb.tb_next
+    return tb
 
 
 # ---------------------------------------------------------------------------
@@ -2960,8 +2995,9 @@ class _IOReactor:
         commands = self._commands
         failure: BaseException | None = None
         try:
+            park = _park_interval(None)
             while not self._closing:
-                for key, mask in selector.select(None):
+                for key, mask in selector.select(park):
                     if key.data is _WAKE:
                         try:
                             while reader.recv(4096):
@@ -3015,6 +3051,27 @@ class _IOReactor:
         self._notify()
         thread.join(1.0)
         return not thread.is_alive()
+
+
+def _park_interval(longest: float | None) -> float | None:
+    """How long a runtime thread may block in one go while it has nothing to do.
+
+    On free-threaded builds an object is freed by the thread that created it: when
+    another thread drops the last reference, the object is queued to its creator,
+    which frees it the next time it runs Python code. A thread blocked for a long
+    time would keep such objects (and everything they reference) alive. So there,
+    idle threads wake up regularly. With the GIL, objects are freed at once and
+    ``longest`` is kept.
+    """
+    gil_enabled = getattr(sys, "_is_gil_enabled", None)
+    if gil_enabled is None or gil_enabled():
+        return longest
+    return _FREE_THREADED_PARK if longest is None else min(longest, _FREE_THREADED_PARK)
+
+
+# Free-threaded builds: the longest an idle runtime thread blocks without running
+# Python code (see _park_interval). Each wake-up costs a few microseconds.
+_FREE_THREADED_PARK: Final = 0.5
 
 
 def _spin_count() -> int:
@@ -3167,6 +3224,7 @@ class _WorkerPool:
         parker.acquire()
         searching = True  # whoever started this thread counted it as such
         counted = True
+        park = cast(float, _park_interval(self._IDLE_TIMEOUT))
         try:
             while True:
                 item = state.slot
@@ -3222,7 +3280,13 @@ class _WorkerPool:
                             searching = True
                             continue
 
-                        while not parker.acquire(timeout=self._IDLE_TIMEOUT):
+                        idle_since = time.monotonic()
+                        while not parker.acquire(timeout=park):
+                            # Waking up ran Python code: objects this thread
+                            # created and others released are freed now.
+                            if time.monotonic() - idle_since < self._IDLE_TIMEOUT:
+                                continue
+                            idle_since = time.monotonic()
                             with lock:
                                 if parker not in self._parked:
                                     # A waker picked this worker just now.
