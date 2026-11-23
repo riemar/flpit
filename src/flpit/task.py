@@ -65,7 +65,7 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from itertools import count
 from types import AsyncGeneratorType, CoroutineType, FunctionType, MethodType
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, Iterable, Final, overload
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast, Iterable, Final, overload
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
@@ -73,7 +73,8 @@ from contextlib import AsyncExitStack
 from contextvars import Context, ContextVar, copy_context
 from enum import IntFlag
 from datetime import timedelta
-from .threading import AsyncLocal, _run_with_context, _to_seconds
+from .threading import _NO_STATE, AsyncLocal, _notify_context_exit, _run_with_context, _to_seconds
+from . import threading as _context_flow
 from flpit.core.linq import ArgumentError, ArgumentNullError, ArgumentOutOfRangeError
 
 import flpit
@@ -231,6 +232,7 @@ _CREATION_OPTIONS_MASK: Final = int(
     | TaskCreationOptions.ATTACHED_TO_PARENT | TaskCreationOptions.DENY_CHILD_ATTACH
     | TaskCreationOptions.HIDE_SCHEDULER | TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY
 )
+_LONG_RUNNING: Final = TaskCreationOptions.LONG_RUNNING.value
 _NOT_ON_ANYTHING: Final = int(
     TaskContinuationOptions.NOT_ON_RAN_TO_COMPLETION | TaskContinuationOptions.NOT_ON_FAULTED
     | TaskContinuationOptions.NOT_ON_CANCELED
@@ -781,6 +783,13 @@ def _close_if_coroutine(value: Any) -> None:
         value.close()
 
 
+# Result types of synchronous work that are never awaitable; checking for them
+# first spares the comparatively slow inspect.isawaitable() for most results.
+_NEVER_AWAITABLE: Final = frozenset(
+    {type(None), bool, int, float, complex, str, bytes, bytearray, tuple, list, dict, set, frozenset}
+)
+
+
 async def _await_any(awaitable: Any) -> Any:
     return await awaitable
 
@@ -813,6 +822,28 @@ class Task(Generic[T], metaclass=_TaskMeta):
         """The options the task was created with (.NET ``Task.CreationOptions``)."""
         return self._creation_options
 
+    # Per-task state that most tasks never change. The defaults live on the class
+    # and a task only gets its own attribute when it assigns one: a Task is created
+    # for every unit of work, and each attribute stored in __init__ costs time.
+    _result: Any = None
+    _exception: BaseException | None = None
+    _continuations: list[Callable[[Task[Any]], Any]] | None = None
+    _done_event: threading.Event | None = None
+    _work: tuple[Any, tuple[Any, ...], dict[str, Any]] | None = None
+    _coroutine: Coroutine[Any, Any, Any] | None = None
+    _waiting_on: _Operation | None = None
+    _running: bool = False
+    _sync_running: bool = False
+    _next_value: Any = None
+    _next_exception: BaseException | None = None
+    _cancel_requested: bool = False
+    _token_registration: CancellationTokenRegistration | None = None
+    _timer: _TimerHandle | None = None
+    _pass_token: bool = False
+    _is_promise_task: bool = False
+    _name: str | None = None
+    async_state: Any = None
+
     def __init__(
             self,
             runtime: "_Runtime",
@@ -824,29 +855,11 @@ class Task(Generic[T], metaclass=_TaskMeta):
         # Guards the state transition, the continuation list and parking.
         self._lock = threading.Lock()
         self._state: str = _PENDING
-        self._result: Any = None
-        self._exception: BaseException | None = None
-        self._continuations: list[Callable[[Task[Any]], Any]] | None = None
-        self._done_event: threading.Event | None = None
         # Promise-style tasks never run code and need no execution context.
         self._execution_context: Context | None = (
             copy_context() if capture_context else None
         )
-        self._work: tuple[Any, tuple[Any, ...], dict[str, Any]] | None = None
-        self._coroutine: Coroutine[Any, Any, Any] | None = None
-        self._waiting_on: _Operation | None = None
-        self._running = False
-        self._sync_running = False
-        self._next_value: Any = None
-        self._next_exception: BaseException | None = None
-        self._cancel_requested = False
         self._token = token if token is not None else _NONE_TOKEN
-        self._token_registration: CancellationTokenRegistration | None = None
-        self._timer: _TimerHandle | None = None
-        self._pass_token = False
-        self._is_promise_task = False
-        self._name: str | None = None
-        self.async_state: Any = None
 
     @property
     def name(self) -> str:
@@ -980,7 +993,126 @@ class Task(Generic[T], metaclass=_TaskMeta):
         ``creation_options`` (.NET ``TaskFactory.StartNew``): ``LONG_RUNNING`` runs
         the work on a dedicated thread instead of a pool worker, for work that
         blocks for a long time; see ``TaskCreationOptions`` for the others.
+
+        The work always starts on the pool, never on the calling thread; use
+        ``Task.run_inline`` to start it on the calling thread instead.
         """
+        task = cls._create(work, args, kwargs, token, pass_token, creation_options)
+        if creation_options and creation_options & _LONG_RUNNING:
+            task._runtime._submit_long_running(task, work, args, kwargs)
+        else:
+            task._runtime._submit(task, work, args, kwargs)
+        return task
+
+    @overload
+    @classmethod
+    def run_inline[R](
+            cls,
+            work: Callable[..., Coroutine[Any, Any, R]],
+            /,
+            *args: Any,
+            token: CancellationToken | None = None,
+            pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
+            **kwargs: Any,
+    ) -> Task[R]: ...
+
+    @overload
+    @classmethod
+    def run_inline[R](
+            cls,
+            work: Coroutine[Any, Any, R],
+            /,
+            *,
+            token: CancellationToken | None = None,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
+    ) -> Task[R]: ...
+
+    @overload
+    @classmethod
+    def run_inline[R](
+            cls,
+            work: Callable[..., R],
+            /,
+            *args: Any,
+            token: CancellationToken | None = None,
+            pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
+            **kwargs: Any,
+    ) -> Task[R]: ...
+
+    @classmethod
+    def run_inline(
+            cls,
+            work: Any,
+            /,
+            *args: Any,
+            token: CancellationToken | None = None,
+            pass_token: bool = False,
+            creation_options: TaskCreationOptions = TaskCreationOptions.NONE,
+            **kwargs: Any,
+    ) -> Task[Any]:
+        """Start ``work`` on the calling thread and return a Task for the rest of it.
+
+        This is how calling an ``async`` method behaves in .NET: the coroutine runs
+        synchronously on the calling thread until its first ``await`` of something that
+        has not completed yet. Only then does the caller get control back, holding a
+        pending Task; after that point the coroutine resumes on the pool, as with
+        ``Task.run``. A coroutine that never really suspends has completed when this
+        returns, without a queue hop or a wake-up. A synchronous callable runs to its
+        end on the calling thread.
+
+        Accepts the same arguments as ``Task.run``: a coroutine object or other
+        awaitable, or a callable with its arguments. In detail:
+
+        * **Exceptions** raised before the first suspension complete the returned Task
+          (faulted, or canceled for ``OperationCanceledError``); they are not raised into
+          the caller.
+        * **Awaiting something already complete** continues at once, on the same thread.
+          ``await Task.yield_now()`` is a real suspension: the rest runs on the pool.
+        * **Context:** the work runs in a copy of the caller's ``contextvars`` context, so
+          ``AsyncLocal`` changes made inside never reach the caller.
+        * **Cancellation:** an already cancelled ``token`` gives a canceled Task without
+          running anything, as with ``Task.run``.
+        * **Nesting:** each nested inline start adds to the calling thread's stack. Past a
+          fixed depth (shared with ``Task.result()``, which also runs tasks inline) the
+          work is queued to the pool instead, as ``Task.run`` does. The runtime's own
+          timer and IO threads never run user code: called there, it queues as well.
+
+        ``creation_options`` behave as in ``Task.run``, except ``LONG_RUNNING``, which asks
+        for a dedicated thread and is rejected.
+        """
+        if creation_options and isinstance(creation_options, int) and creation_options & _LONG_RUNNING:
+            _close_if_coroutine(work)
+            raise ArgumentOutOfRangeError(
+                "creationOptions", "LONG_RUNNING cannot be combined with Task.run_inline()."
+            )
+        task = cls._create(work, args, kwargs, token, pass_token, creation_options)
+        runtime = task._runtime
+        state = _thread_state
+        if state.internal or state.inline >= _MAX_INLINE_DEPTH:
+            runtime._submit(task, work, args, kwargs)
+            return task
+        kind = type(work)
+        if kind is CoroutineType or (
+                (kind is FunctionType or kind is MethodType) and _is_coroutine_function(work)
+        ):
+            task._run_coroutine_inline(state, work, args, kwargs)
+        else:
+            runtime._submit_inline(task, work, args, kwargs, state)
+        return task
+
+    @classmethod
+    def _create(
+            cls,
+            work: Any,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+            token: CancellationToken | None,
+            pass_token: bool,
+            creation_options: TaskCreationOptions,
+    ) -> Task[Any]:
+        """Validate ``Task.run`` arguments and create the (not yet submitted) task."""
         kind = type(work)
         is_coroutine = kind is CoroutineType
         if kind is FunctionType or kind is MethodType:
@@ -1006,16 +1138,13 @@ class Task(Generic[T], metaclass=_TaskMeta):
             if is_coroutine:
                 cast(Any, work).close()
             raise ArgumentOutOfRangeError("creationOptions", "The value needs to be a valid TaskCreationOptions.")
-        runtime = _get_runtime()
-        task = cls(runtime, token=token)
-        task._pass_token = pass_token
-        task._creation_options = TaskCreationOptions(creation_options)
-        if creation_options & TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY:
-            task._async_continuations = True
-        if creation_options & TaskCreationOptions.LONG_RUNNING:
-            runtime._submit_long_running(task, work, args, kwargs)
-        else:
-            runtime._submit(task, work, args, kwargs)
+        task = cls(_get_runtime(), token=token)
+        if pass_token:
+            task._pass_token = True
+        if creation_options:
+            task._creation_options = TaskCreationOptions(creation_options)
+            if creation_options & TaskCreationOptions.RUN_CONTINUATIONS_ASYNCHRONOUSLY:
+                task._async_continuations = True
         return task
 
     @overload
@@ -1433,7 +1562,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 and pool is self._runtime._pool
                 and state.inline < _MAX_INLINE_DEPTH
         ):
-            self._run_inline(state, pool)
+            self._run_inline(state)
         with self._lock:
             if self._state is not _PENDING:
                 return
@@ -1449,30 +1578,114 @@ class Task(Generic[T], metaclass=_TaskMeta):
         finally:
             pool._worker_unblocked()
 
-    def _run_inline(self, state: _ThreadState, pool: "_WorkerPool") -> None:
-        """Start this task on the calling worker instead of waiting for it.
+    def _run_inline(self, state: _ThreadState) -> None:
+        """Start this task on the calling thread instead of on a pool worker.
 
-        ``_start()`` takes the work under the task's lock, so either this
-        thread or the worker that pops the queued item runs it, never both;
-        the loser finds nothing to do.
+        Used by ``Task.result()`` for a task that has not started, and by
+        ``Task.run_inline``. ``_start()`` takes the work under the task's
+        lock, so either this thread or a worker that pops a queued item runs
+        it, never both; the loser finds nothing to do.
         """
-        tail = state.tail
-        state.inline += 1
+        tail, hooks = _enter_inline(state)
         try:
             self._start()
         finally:
-            state.inline -= 1
-            # The caller is still inside its own work item. Anything the
-            # inlined task left for "this worker's next item" must not wait
-            # until the caller returns -- the caller may be about to block on
-            # exactly that.
-            state.tail = tail
-            item = state.slot
-            if item is not None:
-                state.slot = None
-                # False only if the pool closed, and then shutdown has
-                # already cancelled the task behind the item.
-                pool.queue(item)
+            _exit_inline(state, tail, hooks)
+
+    def _run_coroutine_inline(
+            self, state: _ThreadState, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
+        """``Task.run_inline`` of a coroutine: run its first step on the calling thread.
+
+        The same as ``_start()`` followed by ``_drive()``, minus what the first step
+        of a task that nobody else has seen yet does not need. The task counts as
+        running from the moment it is registered, so a concurrent shutdown treats it
+        like any running coroutine: cancellation is delivered at its next step
+        boundary. On the first suspension it is handed to the usual machinery.
+        """
+        runtime = self._runtime
+        self._running = True
+        try:
+            runtime._track(self)
+        except BaseException:
+            _close_if_coroutine(target)
+            raise
+        token = self._token
+        if token.is_cancellation_requested:
+            _close_if_coroutine(target)
+            self._finish(
+                _CANCELLED,
+                exception=OperationCanceledError(f"{self.name} cancelled before start", token=token),
+            )
+            return
+
+        context = cast(Context, self._execution_context)
+        # The bookkeeping of _enter_inline()/_exit_inline(), spelled out: thread-local
+        # attributes are slow, and a coroutine that finishes in its first step needs
+        # few of them. ``tail`` stays False while the step runs (as in _drive), so
+        # anything the step makes runnable goes to the shared queue directly.
+        tail = state.tail
+        if tail:
+            state.tail = False
+        pool = state.pool
+        hooks = None
+        if pool is None:
+            hooks = sys.get_asyncgen_hooks()
+            if hooks.firstiter is _asyncgen_firstiter:
+                hooks = None
+            else:
+                _install_asyncgen_hooks()
+        depth = state.inline
+        state.inline = depth + 1
+        drove = False
+        try:
+            context.run(_current_task._value.set, self)
+            try:
+                if type(target) is CoroutineType:
+                    coroutine = target
+                else:
+                    if self._pass_token:
+                        kwargs = {**kwargs, "token": token}
+                    # Only creates the coroutine object; no user code runs yet.
+                    coroutine = context.run(target, *args, **kwargs)
+                if _context_flow._notifications_enabled:
+                    yielded = _run_with_context(context, coroutine.send, None)
+                else:
+                    try:
+                        yielded = context.run(coroutine.send, None)
+                    finally:
+                        if _context_flow._notifications_enabled:
+                            _notify_context_exit(context)
+            except StopIteration as stop:
+                self._finish(_SUCCEEDED, result=stop.value)
+                return
+            except OperationCanceledError as cancellation:
+                self._finish(_CANCELLED, exception=cancellation)
+                return
+            except BaseException as failure:
+                self._finish(_FAILED, exception=failure)
+                return
+
+            # The first real suspension (or an await that _suspend resolves at once).
+            drove = True
+            state.tail = True
+            self._coroutine = coroutine
+            try:
+                resume = runtime._suspend(self, yielded)
+            except BaseException as failure:
+                with self._lock:
+                    resume = self._running or self._waiting_on is yielded
+                    if resume:
+                        self._waiting_on = None
+                        self._next_exception = failure
+            if resume:
+                self._drive()
+        finally:
+            state.inline = depth
+            if tail or drove:
+                _exit_inline_slot(state, tail)
+            if hooks is not None:
+                sys.set_asyncgen_hooks(*hooks)
 
     def _add_continuation(self, continuation: Callable[[Task[Any]], Any]) -> bool:
         """Call ``continuation(self)`` on completion; False if already complete.
@@ -1577,17 +1790,24 @@ class Task(Generic[T], metaclass=_TaskMeta):
         with self._lock:
             if self._state is not _PENDING:
                 return False
-            self._result = result
-            self._exception = exception
+            # Fields still at their class default (None) are only read: storing
+            # None would give every task an instance attribute of its own.
+            if result is not None:
+                self._result = result
+            if exception is not None:
+                self._exception = exception
             # Published last: lock-free readers check the state first.
             self._state = state
             continuations = self._continuations
-            self._continuations = None
+            if continuations is not None:
+                self._continuations = None
             event = self._done_event
             registration = self._token_registration
-            self._token_registration = None
+            if registration is not None:
+                self._token_registration = None
             timer = self._timer
-            self._timer = None
+            if timer is not None:
+                self._timer = None
         if registration is not None:
             registration.dispose()
         if timer is not None:
@@ -1673,9 +1893,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
             # The context belongs to this task alone, so the current task is
             # set once instead of being set and restored around every step.
             context.run(_current_task._value.set, self)
-            if type(target) is CoroutineType:
+            kind = type(target)
+            if kind is CoroutineType:
                 value = target
-            elif inspect.isawaitable(target):
+            elif kind is not FunctionType and kind is not MethodType and inspect.isawaitable(target):
                 value = _await_any(target)
             else:
                 if self._pass_token:
@@ -1690,9 +1911,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
                     finally:
                         self._sync_running = False
                         state.tail = True
-            if type(value) is CoroutineType:
+            kind = type(value)
+            if kind is CoroutineType:
                 coroutine = value
-            elif inspect.isawaitable(value):
+            elif kind not in _NEVER_AWAITABLE and inspect.isawaitable(value):
                 # Support sync wrappers that return an awaitable.
                 coroutine = _await_any(value)
             else:
@@ -1730,8 +1952,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
                     self._running = True
                     value = self._next_value
                     error = self._next_exception
-                    self._next_value = None
-                    self._next_exception = None
+                    if value is not None:
+                        self._next_value = None
+                    if error is not None:
+                        self._next_exception = None
                     if self._cancel_requested:
                         self._cancel_requested = False
                         if not isinstance(error, OperationCanceledError):
@@ -1748,10 +1972,24 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
             state.tail = False
             try:
-                if error is None:
-                    yielded = _run_with_context(context, coroutine.send, value)
+                if _context_flow._notifications_enabled:
+                    if error is None:
+                        yielded = _run_with_context(context, coroutine.send, value)
+                    else:
+                        yielded = _run_with_context(context, coroutine.throw, error)
                 else:
-                    yielded = _run_with_context(context, coroutine.throw, error)
+                    # _run_with_context without AsyncLocal change handlers, inlined:
+                    # every step of every coroutine runs through here, and the
+                    # StopIteration that ends one is costly to pass through a frame.
+                    try:
+                        if error is None:
+                            yielded = context.run(coroutine.send, value)
+                        else:
+                            yielded = context.run(coroutine.throw, error)
+                    finally:
+                        if _context_flow._notifications_enabled:
+                            # A handler was installed while the step ran.
+                            _notify_context_exit(context)
             except StopIteration as stop:
                 state.tail = True
                 self._coroutine = None
@@ -3196,6 +3434,19 @@ class _Runtime:
         # If the pool closes in between, shutdown's final sweep cancels the task.
         self._pool.queue(task._start)
 
+    def _submit_inline(
+            self, task: Task[Any], work: Any, args: tuple[Any, ...], kwargs: dict[str, Any], state: _ThreadState
+    ) -> None:
+        """Task.run_inline: start the task on the calling thread right away."""
+        task._work = (work, args, kwargs)
+        try:
+            self._track(task)
+        except BaseException:
+            task._work = None
+            _close_if_coroutine(work)
+            raise
+        task._run_inline(state)
+
     def _submit_long_running(
             self, task: Task[Any], work: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> None:
@@ -3459,6 +3710,81 @@ class _Runtime:
             return report
 
 
+def _queue_work_item(callback: Any, state: Any, *, flow_context: bool) -> bool:
+    """``ThreadPool.queue`` / ``queue_user_work_item``: queue ``callback`` without a Task."""
+    if callback is None:
+        raise ArgumentNullError("callBack")
+    if not callable(callback):
+        raise TypeError("callback must be callable")
+    runtime = _get_runtime()
+    if flow_context:
+        context = copy_context()
+        if context.get(_current_task._value) is not None:
+            # A work item is not part of the task that queued it.
+            context.run(_current_task._value.set, None)
+    else:
+        context = Context()
+    runtime._post(functools.partial(_run_work_item, runtime, context, callback, state))
+    return True
+
+
+def _run_work_item(runtime: _Runtime, context: Context, callback: Callable[..., Any], state: Any) -> None:
+    try:
+        if state is _NO_STATE:
+            _run_with_context(context, callback)
+        else:
+            _run_with_context(context, callback, state)
+    except BaseException as error:
+        runtime._report_exception(
+            {"message": "Unhandled exception in a thread-pool work item", "callback": callback}, error
+        )
+
+
+def _enter_inline(state: _ThreadState) -> tuple[bool, Any]:
+    """Bookkeeping before a task runs inline on the calling thread.
+
+    Returns what ``_exit_inline`` restores. Pool workers and LONG_RUNNING threads
+    have flpit's async generator hooks; any other thread gets them for the time
+    being, so that async generators the task starts are tracked as on the pool.
+    """
+    hooks = None
+    if state.pool is None:
+        hooks = sys.get_asyncgen_hooks()
+        if hooks.firstiter is _asyncgen_firstiter:
+            hooks = None
+        else:
+            _install_asyncgen_hooks()
+    state.inline += 1
+    return state.tail, hooks
+
+
+def _exit_inline(state: _ThreadState, tail: bool, hooks: Any) -> None:
+    state.inline -= 1
+    _exit_inline_slot(state, tail)
+    if hooks is not None:
+        sys.set_asyncgen_hooks(*hooks)
+
+
+def _exit_inline_slot(state: _ThreadState, tail: bool) -> None:
+    # The caller is still inside its own work item. Anything the inlined task
+    # left for "this worker's next item" must not wait until the caller
+    # returns -- the caller may be about to block on exactly that. (Only pool
+    # workers ever fill the slot.)
+    state.tail = tail
+    item = state.slot
+    if item is not None:
+        state.slot = None
+        # False only if the pool closed, and then shutdown has already
+        # cancelled the task behind the item.
+        cast("_WorkerPool", state.pool).queue(item)
+
+
+def _is_coroutine_function(function: Any) -> bool:
+    """True for an ``async def`` function or bound method, by its code flags alone."""
+    code = getattr(function.__func__ if type(function) is MethodType else function, "__code__", None)
+    return code is not None and bool(code.co_flags & inspect.CO_COROUTINE)
+
+
 def _is_async_callable(value: Any) -> bool:
     function = value.__func__ if type(value) is MethodType else value
     if type(function) is FunctionType:
@@ -3529,20 +3855,63 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_reset_after_fork)
 
 
+class _TaskDecorator(Protocol):
+    """What ``task(inline=...)`` returns: the decorator itself."""
+
+    @overload
+    def __call__[**P, T](self, function: Callable[P, Awaitable[T]], /) -> Callable[P, Task[T]]: ...
+
+    @overload
+    def __call__[**P, T](self, function: Callable[P, T], /) -> Callable[P, Task[T]]: ...
+
+
 @overload
 def task[**P, T](
-        function: Callable[P, Awaitable[T]]
+        function: Callable[P, Awaitable[T]], /
 ) -> Callable[P, Task[T]]: ...
 
 @overload
 def task[**P, T](
-        function: Callable[P, T]
+        function: Callable[P, T], /
 ) -> Callable[P, Task[T]]: ...
 
-def task(function: Callable[..., Any]) -> Callable[..., Task[Any]]:
+@overload
+def task(*, inline: bool = False) -> _TaskDecorator: ...
+
+def task(function: Callable[..., Any] | None = None, /, *, inline: bool = False) -> Any:
+    """Make every call of ``function`` start a Task and return it.
+
+    ``@task`` starts each call with ``Task.run``: queued to the pool, for plain and
+    ``async def`` functions alike. That is .NET's ``Task.Run`` on every call.
+
+    ``@task(inline=True)`` is for ``async def`` functions only and starts each call with
+    ``Task.run_inline``: the coroutine runs on the calling thread until its first
+    ``await`` of something not yet complete, which is how calling an ``async`` method
+    behaves in .NET. A plain function is rejected, because running it inline would just
+    be calling it.
     """
-    | Wraps sync functions and non-asyncio dependent coroutines to eagerly executed await-able tasks
-    """
+    if function is None:
+        def decorator(target: Callable[..., Any], /) -> Callable[..., Task[Any]]:
+            return _task_wrapper(target, inline)
+
+        return decorator
+    return _task_wrapper(function, inline)
+
+
+def _task_wrapper(function: Callable[..., Any], inline: bool) -> Callable[..., Task[Any]]:
+    if inline:
+        if not _is_async_callable(function):
+            raise TypeError(
+                "@task(inline=True) needs an async def function: a plain function started "
+                "inline would simply run to its end at the call. Use @task for it."
+            )
+
+        @wraps(function)
+        def inline_wrapper(*args: Any, **kwargs: Any) -> Task[Any]:
+            return Task.run_inline(function, *args, **kwargs)
+
+        return inline_wrapper
+
     @wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Task[Any]:
         return Task.run(function, *args, **kwargs)

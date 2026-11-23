@@ -6,7 +6,8 @@ description: A lightweight, asyncio-free task runtime for Python modelled on the
 FlpIt includes a lightweight, `asyncio`-free task runtime for scheduling and coordinating concurrent work,
 modelled on the .NET thread pool: synchronous callables and coroutines both run on pooled worker threads.
 
-- **Scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables.
+- **Scheduling:** `Task.run()` schedules coroutines, awaitables, and synchronous callables. `Task.run_inline()`
+  starts them on the calling thread instead, as calling an `async` method does in .NET.
 - **Coordination:** `Task.when_all()`, `Task.when_any()` and `Task.when_each()`, also as query operators.
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation,
   callbacks, timeouts, and linked tokens. See [Cancellation](cancellation.md).
@@ -111,10 +112,41 @@ Blocking work that runs for a long time should not occupy a pool worker:
 --8<-- "examples/task/overview.py:long_running"
 ```
 
+## Start on the calling thread
+
+`Task.run` always queues the work: even a coroutine that would finish at once waits for a worker to pick it up.
+`Task.run_inline` takes the same arguments and starts the work right here, the way calling an `async` method does
+in .NET. The coroutine runs on the calling thread until its first `await` of something that has not completed.
+Only then does the caller get control back, holding a pending `Task`, and the rest resumes on the pool. A coroutine
+that never suspends has completed when `run_inline` returns:
+
+```python
+--8<-- "examples/task/overview.py:run_inline"
+```
+
+`@task(inline=True)` on an `async def` does the same for every call. This suits code that is already running on a
+worker and starts mostly-synchronous async work, such as a web framework calling an `async def` endpoint.
+[Ways to start work](starting-work.md) compares this with `Task.run`, `@task` and plain `await`. The rules:
+
+- **Exceptions** raised before the first suspension complete the returned `Task` as faulted (or canceled, for
+  `OperationCanceledError`). They are not raised into the caller.
+- **Awaiting a completed task** continues on the same thread. `await Task.yield_now()` is a real suspension.
+- **Context:** the work runs in a copy of the caller's context, so `AsyncLocal` changes inside never reach the
+  caller.
+- **Cancellation:** an already cancelled `token` gives a canceled `Task` without running anything, as with
+  `Task.run`.
+- **Nesting:** nested inline starts grow the calling thread's stack. Past a fixed depth the work is queued instead.
+- `creation_options` behave as with `Task.run`; `LONG_RUNNING` is rejected.
+
+Started from a thread outside the pool, the coroutine also runs there until it suspends, and then resumes on the
+pool. That is what .NET does on a thread without a `SynchronizationContext`; flpit has no synchronization contexts.
+
 ## Workers and shutdown
 
 Work beyond the worker limit queues up, and workers are added when the pool is starved or blocked in
 `Task.result()`. Calling `result()` inside a task on a task that has not started yet runs it inline, as .NET does.
+To put a plain call on the pool without creating a `Task`, use
+[`ThreadPool.queue`](../concurrency/threading.md#threadpool).
 Set the limits with `Task.configure(min_workers=..., max_workers=...)` before the runtime first starts, and stop
 the process-wide runtime with `Task.shutdown(grace_timeout=..., worker_timeout=...)`, which returns a report of
 work that could not be stopped.

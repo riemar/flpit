@@ -162,6 +162,36 @@ async def waits_and_continuations():
     assert_type(error.task, Task[Any] | None)
     assert_type(error.inner_exception, BaseException | None)
 
+    # ========================================================
+    # run_inline: same inference as Task.run, plus coroutine objects
+    # ========================================================
+    async def answer(x: int) -> str:
+        return str(x)
+
+    assert_type(Task.run_inline(answer, 1), Task[str])
+    assert_type(Task.run_inline(answer(1)), Task[str])
+    assert_type(Task.run_inline(lambda: 42), Task[int])
+    assert_type(await Task.run_inline(answer(2)), str)
+
+    # ========================================================
+    # @task(inline=True) on async def, @task() as plain @task
+    # ========================================================
+    @task(inline=True)
+    async def inline_answer(x: int) -> str:
+        return str(x)
+
+    class ExpectedInline(Protocol):
+        def __call__(self, x: int) -> Task[str]: ...
+
+    assert_type(inline_answer, ExpectedInline)
+    assert_type(await inline_answer(3), str)
+
+    @task()
+    def queued(x: int) -> int:
+        return x
+
+    assert_type(queued(1), Task[int])
+
 
 # ========================================================
 # Main startup must not rais an "await missing"

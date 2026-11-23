@@ -1,5 +1,5 @@
 ---
-description: SemaphoreSlim, ThreadLocal, AsyncLocal and ManualResetEvent for Python, modelled on .NET System.Threading. Limit parallelism from threads and from tasks.
+description: SemaphoreSlim, ThreadLocal, AsyncLocal, ManualResetEvent and ThreadPool work items for Python, modelled on .NET System.Threading. Limit parallelism from threads and from tasks.
 ---
 # Threading primitives
 
@@ -65,6 +65,26 @@ changes.
 
 `wait_one(timeout)` returns `False` when the timeout elapses first. It blocks the calling thread, so inside a task it
 occupies a pool worker while it waits.
+
+## ThreadPool
+
+`ThreadPool.queue(callback, state)` queues a plain call on the
+[task runtime's](../task/index.md) worker pool. It creates no `Task`: there is no result to wait for, nothing
+to cancel and nothing to await, which makes it the cheapest way onto a worker. It can be called from any thread,
+for example a server's IO thread that has to hand a request off at once:
+
+```python
+--8<-- "examples/threading/overview.py:thread_pool"
+```
+
+The callback is called as `callback(state)`, or as `callback()` when `state` is left out. It runs in a fresh, empty
+`contextvars.Context`, as .NET runs a work item with the default execution context: it sees none of the caller's
+`AsyncLocal` values, and what it sets ends with the work item. `ThreadPool.queue_user_work_item` runs it
+in a copy of the caller's context instead, at the cost of copying it.
+
+An exception that escapes the callback goes to the handler installed with `Task.set_exception_handler`, or is
+logged. .NET terminates the process instead. Queuing while the runtime shuts down raises `RuntimeShutdownError`.
+`prefer_local` is accepted for porting and has no effect, because the pool has one shared queue.
 
 More programs:
 [`examples/threading/`](https://github.com/riemar/flpit/tree/main/examples/threading).
