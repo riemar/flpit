@@ -88,9 +88,14 @@ def test_completed_tasks_are_not_retained() -> None:
     refs = [weakref.ref(t) for t in tasks]
     del tasks
 
-    _collect()
+    # result() returns as soon as a task completes, which happens inside the worker's call of it:
+    # the worker drops its own reference just after, and on free-threaded builds a release by
+    # another thread is merged a little later still. A retained task never goes away.
+    def all_freed() -> bool:
+        _collect()
+        return sum(ref() is not None for ref in refs) == 0
 
-    assert sum(ref() is not None for ref in refs) == 0
+    _wait_until(all_freed)
 
 
 # ---------------------------------------------------------------------------
