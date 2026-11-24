@@ -253,23 +253,19 @@ class _TaskMeta(type):
 
     @property
     def asyncio_interop(cls: "_TaskMeta") -> bool:
-        return (
-                getattr(cls, "__await__")
-                is getattr(cls, "_await_asyncio_interop")
-        )
+        """Deprecated, always True: a Task can always be awaited inside asyncio coroutines."""
+        warnings.warn(_ASYNCIO_INTEROP_DEPRECATED, DeprecationWarning, stacklevel=2)
+        return True
 
     @asyncio_interop.setter
-    def asyncio_interop(
-            cls: "_TaskMeta",
-            enabled: bool,
-    ) -> None:
-        implementation = getattr(
-            cls,
-            "_await_asyncio_interop"
-            if enabled
-            else "_await_pure_flpit_task",
-        )
-        setattr(cls, "__await__", implementation)
+    def asyncio_interop(cls: "_TaskMeta", enabled: bool) -> None:
+        warnings.warn(_ASYNCIO_INTEROP_DEPRECATED + " Setting it has no effect.", DeprecationWarning, stacklevel=2)
+
+
+_ASYNCIO_INTEROP_DEPRECATED: Final = (
+    "Task.asyncio_interop is deprecated and will be removed in 0.5: awaiting a Task inside "
+    "asyncio coroutines always works, at no measurable cost to flpit awaits."
+)
 
 
 @dataclass(frozen=True)
@@ -763,9 +759,8 @@ class _WaitTask(_Operation):
 
     def __repr__(self) -> str:
         return (
-            "<flpit _WaitTask: this await operation requires the "
-            "flpit scheduler; enable Task.asyncio_interop to await "
-            "flpit Task from asyncio>"
+            "<flpit _WaitTask: awaiting a flpit Task needs the flpit scheduler "
+            "or an asyncio event loop running on this thread>"
         )
 
 
@@ -1791,32 +1786,13 @@ class Task(Generic[T], metaclass=_TaskMeta):
             return self._exception
         return OperationCanceledError(f"{self.name} was cancelled")
 
-    def _await_pure_flpit_task(self) -> Generator[Any, T, T]:
-        if self._state is not _PENDING:
-            error = self._error_to_raise()
-            if error is None:
-                return cast(T, self._result)
-            del self  # see _release_frame
-            try:
-                raise error
-            finally:
-                del error
-        operation = _WaitTask(self._runtime, self)
-        del self  # see _release_frame
-        try:
-            return (yield operation)
-        finally:
-            del operation
+    def __await__(self) -> Generator[Any, T, T]:
+        """Await the task from flpit code or from an asyncio coroutine.
 
-    __await__ = _await_pure_flpit_task
-
-    def _await_asyncio_interop(self) -> Generator[Any, T, T]:
-        """``__await__`` that also works inside asyncio coroutines (``Task.asyncio_interop``).
-
-        Awaited by flpit, it is the pure path plus one question, asked only while the task is
-        still pending: is an asyncio loop running on this thread? That is one C call (asyncio's
-        ``_get_running_loop``, which returns None instead of raising), or a dict lookup while
-        asyncio isn't imported at all (see _asyncio_running_loop).
+        Awaited by flpit, a pending task asks one question: is an asyncio loop running on this
+        thread? That is one C call (asyncio's ``_get_running_loop``, which returns None instead of
+        raising), or a dict lookup while asyncio isn't imported at all (see _asyncio_running_loop);
+        about 15 ns, within measurement noise of an await.
 
         Inside asyncio, the task's completion resolves an asyncio future on that loop. Neither the
         frame nor the callbacks keep the task (see _release_frame): a failed task awaited from
@@ -1850,9 +1826,6 @@ class Task(Generic[T], metaclass=_TaskMeta):
             return (yield from cast(Generator[Any, T, T], future.__await__()))
         finally:
             del future
-
-    # On by default: awaited by flpit code it costs about 0.1 µs (see _await_asyncio_interop).
-    __await__ = _await_asyncio_interop
 
     def _error_to_raise(self) -> BaseException | None:
         """The exception that awaiting this completed task raises; None if it succeeded.

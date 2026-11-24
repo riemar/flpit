@@ -1,14 +1,14 @@
-"""What ``Task.asyncio_interop`` costs a flpit await, and what an await from asyncio costs.
+"""What asyncio interop costs a flpit await, and what an await from asyncio costs.
 
-With interop enabled, every await of a pending Task first asks whether an asyncio loop runs on
-this thread. Asked with ``asyncio.get_running_loop()`` that raises and catches an exception on a
-flpit worker; asked with asyncio's ``_get_running_loop()`` it is one C call returning None.
+Every await of a pending Task first asks whether an asyncio loop runs on this thread. Asked with
+``asyncio.get_running_loop()`` that raises and catches an exception on a flpit worker; asked with
+asyncio's ``_get_running_loop()`` (what flpit does) it is one C call returning None.
 
     python benchmarks/scripts/asyncio_interop_bench.py [--rounds 20000] [--repeats 3]
 
-"await setup" times one pending await up to its yield (the part interop changes), without the
-queueing and wake-ups around it; on a busy machine the end-to-end figure varies by microseconds
-between runs, far more than the check costs.
+"await setup" times one pending await up to its yield, without the queueing and wake-ups around
+it; on a busy machine the end-to-end figure varies by microseconds between runs, far more than
+the check costs.
 """
 from __future__ import annotations
 
@@ -53,14 +53,13 @@ def asyncio_round_trips(rounds: int) -> float:
     return elapsed
 
 
-def await_setup(enabled: bool) -> float:
-    """ns for one pending await of a Task up to its yield: the path interop changes."""
+def await_setup() -> float:
+    """ns for one pending await of a Task up to its yield, including the asyncio check."""
     source: TaskCompletionSource[int] = TaskCompletionSource()
     pending = source.task
-    implementation = Task._await_asyncio_interop if enabled else Task._await_pure_flpit_task
 
     def step() -> None:
-        awaiting = implementation(pending)
+        awaiting = pending.__await__()
         next(awaiting)
         awaiting.close()
 
@@ -94,20 +93,12 @@ def main(argv: list[str] | None = None) -> None:
     print("|---|---:|")
     print(f"| is a loop running? `asyncio.get_running_loop()` + `except` on a flpit worker | {raising:.0f} ns |")
     print(f"| is a loop running? asyncio's `_get_running_loop()` | {c_call:.0f} ns |")
-    for enabled in (False, True):
-        print(f"| pending await setup, interop {'on' if enabled else 'off'} | {await_setup(enabled):.0f} ns |")
-    previous = Task.asyncio_interop
-    try:
-        for enabled in (False, True):
-            Task.asyncio_interop = enabled
-            pending_awaits(min(2000, args.rounds))
-            best = min(pending_awaits(args.rounds) for _ in range(args.repeats))
-            print(f"| pending await by flpit code, end to end, interop {'on' if enabled else 'off'} | {best:.2f} µs |")
-        Task.asyncio_interop = True
-        best = min(asyncio_round_trips(max(1, args.rounds // 4)) for _ in range(args.repeats))
-        print(f"| `await Task.run(...)` from an asyncio loop thread | {best:.1f} µs |")
-    finally:
-        Task.asyncio_interop = previous
+    print(f"| pending await setup | {await_setup():.0f} ns |")
+    pending_awaits(min(2000, args.rounds))
+    best = min(pending_awaits(args.rounds) for _ in range(args.repeats))
+    print(f"| pending await by flpit code, end to end | {best:.2f} µs |")
+    best = min(asyncio_round_trips(max(1, args.rounds // 4)) for _ in range(args.repeats))
+    print(f"| `await Task.run(...)` from an asyncio loop thread | {best:.1f} µs |")
 
 
 if __name__ == "__main__":

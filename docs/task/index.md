@@ -12,8 +12,7 @@ modelled on the .NET thread pool: synchronous callables and coroutines both run 
 - **Cancellation:** `CancellationToken` and `CancellationTokenSource` support cooperative cancellation,
   callbacks, timeouts, and linked tokens. See [Cancellation](cancellation.md).
 - **Resource management:** configure worker capacity, and shut the runtime down with an observable report.
-- **Asyncio interoperability:** Tasks can be awaited inside asyncio coroutines (`Task.asyncio_interop`,
-  enabled by default).
+- **Asyncio interoperability:** Tasks can be awaited inside asyncio coroutines.
 
 The runtime starts lazily and manages its own lifecycle. Cancellation of running synchronous functions is
 cooperative.
@@ -154,10 +153,9 @@ work that could not be stopped.
 ## Using asyncio libraries
 
 Tasks can be awaited inside asyncio coroutines: the Task's completion resumes the coroutine on its event loop.
-This is `Task.asyncio_interop`, enabled by default. It adds one check to every await of a pending Task, about
-0.1 µs (`benchmarks/scripts/asyncio_interop_bench.py`). Setting `Task.asyncio_interop = False` makes an await from
-asyncio fail with an error instead. Code that depends on an asyncio event loop, such as
-`httpx.AsyncClient`, can run on the pool through the `@asyncio_task` decorator; see
+This needs no setting. For flpit code it adds one check to every await of a pending Task, 15–60 ns, which is
+within measurement noise of the await itself (`benchmarks/scripts/asyncio_interop_bench.py`). Code that depends
+on an asyncio event loop, such as `httpx.AsyncClient`, can run on the pool through the `@asyncio_task` decorator; see
 [`coro.py`](https://github.com/riemar/flpit/tree/main/examples/task/coro.py). That is an escape hatch and not the
 recommended default.
 

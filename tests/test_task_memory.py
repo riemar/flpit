@@ -173,19 +173,9 @@ def test_a_failed_task_and_its_frames_are_freed_without_the_cyclic_gc(
     wait_until_dead(payloads[0], timeout=TIMEOUT)  # a local of the failed frame
 
 
-@pytest.fixture
-def asyncio_interop() -> Iterator[None]:
-    previous = Task.asyncio_interop
-    Task.asyncio_interop = True
-    try:
-        yield
-    finally:
-        Task.asyncio_interop = previous
-
-
 @pytest.mark.parametrize("start", list(FAILING.values()), ids=list(FAILING))
 def test_a_failed_task_awaited_from_asyncio_is_freed_without_the_cyclic_gc(
-        no_cyclic_gc: None, several_workers: None, asyncio_interop: None, start: Any
+        no_cyclic_gc: None, several_workers: None, start: Any
 ) -> None:
     import asyncio
 
@@ -216,7 +206,7 @@ def test_a_failed_task_awaited_from_asyncio_is_freed_without_the_cyclic_gc(
 
 
 def test_a_cancelled_task_awaited_from_asyncio_is_freed_without_the_cyclic_gc(
-        no_cyclic_gc: None, several_workers: None, asyncio_interop: None
+        no_cyclic_gc: None, several_workers: None
 ) -> None:
     import asyncio
 
