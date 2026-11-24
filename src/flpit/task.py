@@ -1364,6 +1364,9 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if grace_timeout < 0 or worker_timeout < 0:
             raise ValueError("shutdown timeouts must be >= 0")
         global _runtime
+        bridge = sys.modules.get("flpit.asyncio_bridge")
+        if bridge is not None:
+            bridge.shutdown(timeout=grace_timeout)  # its loops still need the pool to wind down
         with _runtime_lock:
             runtime = _runtime
         if runtime is None:
@@ -4112,23 +4115,28 @@ def await_using[**P, T](
 def asyncio_task[**P, T](
         async_function: Callable[P, Awaitable[T]]
 ) -> Callable[P, Task[T]]:
-    """
-    | Wraps async functions with a dependency on asyncio to be compatible with Task.run(coro)
+    """Make every call of an ``async def`` that needs asyncio start a Task on an asyncio event loop.
 
-    Use with caution as this transfers execution control to an isolated asyncio loop runner.
-    """
-    import asyncio
+    For code that depends on asyncio, such as ``httpx.AsyncClient`` or asyncpg. Each call runs on
+    the asyncio loop already running on the calling thread, if any, otherwise on one of the
+    pool's shared loops (see ``flpit.asyncio_bridge``): no loop is created per call, and no pool
+    worker is blocked while the call waits for I/O.
 
-    async def _await(awaitable: Awaitable[T]) -> T:
-        return await awaitable
+    A ``CancellationToken`` passed as an argument also cancels the call, as in .NET: the asyncio
+    task is cancelled and the returned Task ends cancelled.
+
+    Loop-bound objects that should be reused across calls (clients, connection pools) belong in
+    a ``LoopLocal`` (``flpit.asyncio_bridge.LoopLocal``): one per loop.
+    """
 
     @functools.wraps(async_function)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        with asyncio.Runner() as runner:
-            # Call the function with its arguments to generate the awaitable instance
-            return runner.run(_await(async_function(*args, **kwargs)))
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> Task[T]:
+        from .asyncio_bridge import run_asyncio  # imports asyncio on first use only
 
-    return task(wrapper)
+        token = next((value for value in (*args, *kwargs.values()) if isinstance(value, CancellationToken)), None)
+        return run_asyncio(async_function(*args, **kwargs), token=token)
+
+    return wrapper
 
 
 class _SyncBridge:

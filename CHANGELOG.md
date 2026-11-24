@@ -42,9 +42,22 @@ All notable changes to FlpIt are documented here. The format follows
   creating a Task. `queue` runs it in a fresh, empty context, `queue_user_work_item` in a copy of the
   caller's. Exceptions go to the `Task.set_exception_handler` handler, or are logged.
 - `benchmarks/scripts/task_start_bench.py` measures what it costs to start, resume and complete tasks.
+- `flpit.asyncio_bridge` (provisional: its API may change in 0.5): asyncio libraries on the flpit runtime. A pool of standard asyncio event loops, one
+  per CPU by default and created on first use. On Linux each loop is a serialized queue on the flpit pool (one
+  reactor thread for all loops' I/O, timers on flpit's timer queue, no thread per loop); elsewhere, or with
+  `configure(backend="threads")`, each loop has its own thread. `run_asyncio(awaitable, token=...)` runs asyncio
+  code on the calling thread's loop or the least busy pool loop and returns a Task; `LoopLocal` keeps one value
+  per loop (an `httpx.AsyncClient`, a connection pool) and closes it with the loop; `shutdown()` is also run by
+  `Task.shutdown` and at interpreter exit. `loop.run_in_executor(None, ...)` runs on the flpit pool. asyncio code
+  that raises `KeyboardInterrupt`, `SystemExit` or another `BaseException` fails its Task with it, as a flpit
+  coroutine does, and the loop goes on serving its other work.
 
 ### Changed
 
+- `@asyncio_task` runs calls on the shared loops of `flpit.asyncio_bridge` instead of a new `asyncio.Runner`
+  (a new event loop) per call on a blocked pool worker. A call made inside asyncio code runs on that code's loop,
+  a `CancellationToken` argument cancels the call, and loop-bound clients can be reused across calls through
+  `LoopLocal`.
 - `ThreadPool.queue` costs about 40% less on the calling thread: it no longer creates the work item's
   context there and checks the runtime inline.
 - Starting and stepping tasks is cheaper: `Task.run` costs about 25–40% less per task. `Task` keeps rarely
