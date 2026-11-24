@@ -769,6 +769,46 @@ class _WaitTask(_Operation):
         )
 
 
+#: asyncio's ``_get_running_loop`` once asyncio is imported (C-accelerated; None instead of raising).
+_asyncio_get_running_loop: Callable[[], Any] | None = None
+
+
+def _asyncio_running_loop() -> Any:
+    """The asyncio event loop running on this thread, or None.
+
+    Costs one C call once asyncio is imported; before that no loop can be running, and a dict
+    lookup is all it takes. Unlike ``asyncio.get_running_loop()`` it never raises, so asking on
+    a flpit worker costs about 16 ns instead of ~150-190 ns for a raised and caught exception.
+    """
+    global _asyncio_get_running_loop
+    get_running_loop = _asyncio_get_running_loop
+    if get_running_loop is None:
+        events = sys.modules.get("asyncio.events")
+        if events is None:
+            return None
+        get_running_loop = _asyncio_get_running_loop = events._get_running_loop
+    return get_running_loop()
+
+
+def _notify_asyncio_future(loop: Any, future: Any, completed: Task[Any]) -> None:
+    """Continuation of a Task awaited from asyncio: resolve ``future`` on its loop."""
+    try:
+        loop.call_soon_threadsafe(_complete_asyncio_future, future, completed)
+    except RuntimeError:
+        pass  # the loop is closed: nobody is left to resume
+
+
+def _complete_asyncio_future(future: Any, completed: Task[Any]) -> None:
+    """Runs on the asyncio loop: pass the task's outcome to the future its waiter awaits."""
+    if future.done():
+        return  # the waiter was cancelled and the future with it
+    error = completed._error_to_raise()
+    if error is None:
+        future.set_result(completed._result)
+    else:
+        future.set_exception(error)
+
+
 def _resume_from(waiter: "Task[Any]", completed: "Task[Any]") -> None:
     """Store the outcome of ``completed`` as the next value sent into ``waiter``.
 
@@ -1771,49 +1811,48 @@ class Task(Generic[T], metaclass=_TaskMeta):
     __await__ = _await_pure_flpit_task
 
     def _await_asyncio_interop(self) -> Generator[Any, T, T]:
+        """``__await__`` that also works inside asyncio coroutines (``Task.asyncio_interop``).
+
+        Awaited by flpit, it is the pure path plus one question, asked only while the task is
+        still pending: is an asyncio loop running on this thread? That is one C call (asyncio's
+        ``_get_running_loop``, which returns None instead of raising), or a dict lookup while
+        asyncio isn't imported at all (see _asyncio_running_loop).
+
+        Inside asyncio, the task's completion resolves an asyncio future on that loop. Neither the
+        frame nor the callbacks keep the task (see _release_frame): a failed task awaited from
+        asyncio is freed by reference counting too.
+        """
         if self._state is not _PENDING:
-            return self._raise_or_return()
-
-        if "asyncio" in sys.modules:
-            import asyncio
-
+            error = self._error_to_raise()
+            if error is None:
+                return cast(T, self._result)
+            del self  # see _release_frame
             try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-            else:
-                future: asyncio.Future[T] = loop.create_future()
-
-                def complete_future() -> None:
-                    if future.done():
-                        return
-
-                    try:
-                        result = self._raise_or_return()
-                    except BaseException as exc:
-                        future.set_exception(exc)
-                    else:
-                        future.set_result(result)
-
-                def notify(_: Task[Any]) -> None:
-                    try:
-                        loop.call_soon_threadsafe(complete_future)
-                    except RuntimeError:
-                        pass
-
-                if not self._add_continuation(notify):
-                    notify(self)
-
-                return (
-                    yield from cast(Generator[Any, T, T], future.__await__())
-                )
-
-        operation = _WaitTask(self._runtime, self)
-        del self  # see _release_frame
+                raise error
+            finally:
+                del error
+        loop = _asyncio_running_loop()
+        if loop is None:
+            operation = _WaitTask(self._runtime, self)
+            del self  # see _release_frame
+            try:
+                return (yield operation)
+            finally:
+                del operation
+        future = loop.create_future()
+        # No closures: the task's continuation must stay valid after this frame is gone
+        # (an asyncio waiter can be cancelled while the task still runs).
+        notify = functools.partial(_notify_asyncio_future, loop, future)
+        if not self._add_continuation(notify):
+            notify(self)
+        del self, notify  # see _release_frame
         try:
-            return (yield operation)
+            return (yield from cast(Generator[Any, T, T], future.__await__()))
         finally:
-            del operation
+            del future
+
+    # On by default: awaited by flpit code it costs about 0.1 µs (see _await_asyncio_interop).
+    __await__ = _await_asyncio_interop
 
     def _error_to_raise(self) -> BaseException | None:
         """The exception that awaiting this completed task raises; None if it succeeded.
