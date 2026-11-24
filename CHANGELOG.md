@@ -11,8 +11,14 @@ All notable changes to FlpIt are documented here. The format follows
 
 - A finished Task, its result and the `AsyncLocal` values set inside it were only freed by the cyclic
   garbage collector, because a Task and its context referenced each other. They are now freed as soon
-  as the last reference goes. A failed task is still freed by the cyclic garbage collector, as is any
-  exception that Python code keeps: its traceback leads back to the task.
+  as the last reference goes.
+- A failed or cancelled Task, its exception and the objects in its frames were only freed by the cyclic
+  garbage collector, whether the failure was awaited, read with `result()` or never looked at: the
+  runtime's frames in the exception's traceback still referenced the task. They are now freed as soon as
+  the last reference goes. (A variable of your own that holds the task in a frame of that traceback
+  still ties it into a cycle, as with any exception Python code keeps.)
+- The timer thread kept the task of its next timer, such as a cancelled `Task.delay`, alive until that
+  timer's deadline.
 - Free-threaded builds: objects created on an idle pool worker, the timer thread or the IO thread
   and released elsewhere stayed allocated until that thread ran again, up to 20 s. Idle runtime
   threads now wake every 0.5 s, which frees them within that time.
@@ -36,6 +42,8 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Changed
 
+- `ThreadPool.queue` costs about 40% less on the calling thread: it no longer creates the work item's
+  context there and checks the runtime inline.
 - Starting and stepping tasks is cheaper: `Task.run` costs about 25–40% less per task. `Task` keeps rarely
   changed fields as class defaults, the start path skips `inspect.isawaitable` for plain functions and plain
   results, and a coroutine step no longer passes through an extra frame when no `AsyncLocal` change handler

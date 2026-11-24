@@ -8,6 +8,7 @@ import time as _time
 from collections.abc import Callable
 from contextvars import Context, ContextVar
 from dataclasses import dataclass
+from functools import partial as _partial
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final, cast, overload
 
@@ -434,7 +435,20 @@ class ThreadPool:
         shared queue. Returns ``True``. Raises ``RuntimeShutdownError`` while the runtime
         is shutting down.
         """
-        return _task._queue_work_item(callback, state, flow_context=False)
+        # _task._queue_work_item(callback, state, flow_context=False), inlined: a
+        # server's dispatch thread calls this for every request.
+        if callback is None:
+            raise ArgumentNullError("callBack")
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+        runtime = _task._runtime
+        if runtime is None or runtime._closed:
+            runtime = _task._get_runtime()
+        if runtime._shutdown_requested or not runtime._pool.queue(
+                _partial(_task._run_work_item, runtime, callback, state)
+        ):
+            raise _task.RuntimeShutdownError("Task runtime is shutting down")
+        return True
 
     @overload
     @staticmethod
