@@ -830,6 +830,7 @@ def test_running_function_may_finish_within_worker_timeout(pool) -> None:
 def test_shutdown_rejects_new_work_and_releases_blocked_waiters(pool) -> None:
     pool(max_workers=2)
     entered = threading.Event()
+    shutting_down = threading.Event()
 
     async def stubborn() -> None:
         while True:
@@ -837,6 +838,7 @@ def test_shutdown_rejects_new_work_and_releases_blocked_waiters(pool) -> None:
                 entered.set()
                 await Task.delay(30)
             except OperationCanceledError:
+                shutting_down.set()
                 continue  # ignores cancellation: must be forced
 
     task = Task.run(stubborn)
@@ -854,7 +856,10 @@ def test_shutdown_rejects_new_work_and_releases_blocked_waiters(pool) -> None:
     rejected: list[bool] = []
 
     def submit_during_shutdown() -> None:
-        time.sleep(0.05)
+        # Submit once shutdown has visibly started; it then lasts the whole grace period,
+        # because stubborn ignores the cancellation. (A fixed sleep could also land after
+        # shutdown finished, where a fresh runtime accepts the work.)
+        assert shutting_down.wait(2)
         try:
             Task.run(lambda: 1)
         except RuntimeShutdownError:

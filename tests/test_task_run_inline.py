@@ -566,8 +566,10 @@ class TestShutdown:
     def test_rejected_while_the_runtime_shuts_down(self) -> None:
         tcs: TaskCompletionSource[None] = TaskCompletionSource()
         attempt: dict[str, Any] = {}
+        running = threading.Event()
 
         async def blocker() -> None:
+            running.set()
             try:
                 await tcs.task
             except OperationCanceledError:
@@ -584,7 +586,9 @@ class TestShutdown:
                 raise
 
         Task.run(blocker)
-        Task.run(lambda: None).wait()  # let blocker park
+        # The blocker must be running when shutdown starts: a task still queued then is
+        # cancelled before it runs (correctly), and its except block never executes.
+        assert running.wait(2)
         Task.shutdown(grace_timeout=1.0, worker_timeout=1.0)
         assert isinstance(attempt.get("error"), RuntimeShutdownError)
         assert attempt["closed"]
