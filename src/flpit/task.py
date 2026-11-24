@@ -421,6 +421,9 @@ class _TimerQueue:
                             break
                     if due:
                         break
+                    # Not while waiting: the next entry's callback references
+                    # its task (a cancelled delay, say) until its deadline.
+                    handle = callback = None
                     if heap:
                         condition.wait(min(heap[0][0] - now, park))
                     else:
@@ -431,6 +434,7 @@ class _TimerQueue:
                 except BaseException:
                     _LOG.exception("Unhandled exception in Task timer callback")
             due.clear()
+            callback = None  # the last one ran: do not keep its task while waiting
 
 
 def _fresh_context() -> dict[str, Any]:
@@ -1107,7 +1111,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
             task._run_coroutine_inline(state, work, args, kwargs)
         else:
             runtime._submit_inline(task, work, args, kwargs, state)
-        return task
+        try:
+            return task
+        finally:
+            del task, work, args, kwargs  # see _release_frame
 
     @classmethod
     def _create(
@@ -1360,7 +1367,14 @@ class Task(Generic[T], metaclass=_TaskMeta):
         """
         if self._state is _PENDING:
             self._wait()
-        return self._raise_or_return()
+        error = self._error_to_raise()
+        if error is None:
+            return cast(T, self._result)
+        del self  # see _release_frame
+        try:
+            raise error
+        finally:
+            del error
 
     # ------------------------------------------------------------------
     # Blocking waits (.NET Task.Wait / Task.WaitAll / Task.WaitAny)
@@ -1552,7 +1566,12 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if self._state is _PENDING:
             self._wait()
         if self._state is _CANCELLED:
-            raise self._cancellation_exception()
+            error = self._cancellation_exception()
+            del self  # see _release_frame
+            try:
+                raise error
+            finally:
+                del error
         return self._exception
 
     def _wait(self) -> None:
@@ -1570,6 +1589,9 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 and state.inline < _MAX_INLINE_DEPTH
         ):
             self._run_inline(state)
+            if self._state is not _PENDING:
+                del self  # see _release_frame
+                return
         with self._lock:
             if self._state is not _PENDING:
                 return
@@ -1598,6 +1620,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             self._start()
         finally:
             _exit_inline(state, tail, hooks)
+            del self  # see _release_frame
 
     def _run_coroutine_inline(
             self, state: _ThreadState, target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -1645,6 +1668,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
         depth = state.inline
         state.inline = depth + 1
         drove = False
+        coroutine: Any = None
         try:
             context.run(_current_task._value.set, self)
             try:
@@ -1696,6 +1720,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 _exit_inline_slot(state, tail)
             if hooks is not None:
                 sys.set_asyncgen_hooks(*hooks)
+            del self, context, target, args, kwargs, coroutine  # see _release_frame
 
     def _add_continuation(self, continuation: Callable[[Task[Any]], Any]) -> bool:
         """Call ``continuation(self)`` on completion; False if already complete.
@@ -1728,9 +1753,20 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
     def _await_pure_flpit_task(self) -> Generator[Any, T, T]:
         if self._state is not _PENDING:
-            return self._raise_or_return()
-        result = yield _WaitTask(self._runtime, self)
-        return result
+            error = self._error_to_raise()
+            if error is None:
+                return cast(T, self._result)
+            del self  # see _release_frame
+            try:
+                raise error
+            finally:
+                del error
+        operation = _WaitTask(self._runtime, self)
+        del self  # see _release_frame
+        try:
+            return (yield operation)
+        finally:
+            del operation
 
     __await__ = _await_pure_flpit_task
 
@@ -1772,8 +1808,33 @@ class Task(Generic[T], metaclass=_TaskMeta):
                     yield from cast(Generator[Any, T, T], future.__await__())
                 )
 
-        result = yield _WaitTask(self._runtime, self)
-        return result
+        operation = _WaitTask(self._runtime, self)
+        del self  # see _release_frame
+        try:
+            return (yield operation)
+        finally:
+            del operation
+
+    def _error_to_raise(self) -> BaseException | None:
+        """The exception that awaiting this completed task raises; None if it succeeded.
+
+        _release_frame: a failed task's exception keeps its traceback, and the
+        traceback keeps the frames it passed through, with their locals, even
+        after those functions returned (and, through each frame's caller, the
+        frames below them). A runtime frame that still held the task there
+        would tie the task, its exception and every object in those frames into
+        a cycle that only the cyclic garbage collector frees. So the runtime's
+        frames on such a path delete their references to the task (``del
+        self``) before they raise or return.
+        """
+        state = self._state
+        if state is _SUCCEEDED:
+            return None
+        if state is _CANCELLED:
+            return self._cancellation_exception()
+        if state is _FAILED:
+            return self._exception
+        return InvalidStateError(f"{self.name} has not completed")
 
     def _raise_or_return(self) -> T:
         state = self._state
@@ -1917,7 +1978,16 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 else:
                     self._sync_running = True
                     try:
-                        value = _run_with_context(context, target, *args, **kwargs)
+                        if _context_flow._notifications_enabled:
+                            value = _run_with_context(context, target, *args, **kwargs)
+                        else:
+                            # Inlined (see _drive): no extra frame between the
+                            # function and this one in a traceback.
+                            try:
+                                value = context.run(target, *args, **kwargs)
+                            finally:
+                                if _context_flow._notifications_enabled:
+                                    _notify_context_exit(context)
                     finally:
                         self._sync_running = False
                         state.tail = True
@@ -1935,11 +2005,13 @@ class Task(Generic[T], metaclass=_TaskMeta):
             state.tail = True
             self._finish(_CANCELLED, exception=error)
             self._execution_context = None  # break the cycle with the context
+            del self, context, target, args, kwargs, work  # see _release_frame
             return
         except BaseException as error:
             state.tail = True
             self._finish(_FAILED, exception=error)
             self._execution_context = None  # break the cycle with the context
+            del self, context, target, args, kwargs, work  # see _release_frame
             return
 
         self._coroutine = coroutine
@@ -1947,7 +2019,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
             # A synchronous function that returned an awaitable after the
             # shutdown sweep: it missed the cancellation request.
             self._cancel_requested = True
-        self._drive()
+        try:
+            self._drive()
+        finally:
+            del self, context, target, args, kwargs, work, coroutine, value  # see _release_frame
 
     def _drive(self) -> None:
         """Run coroutine steps until the task parks, yields or completes."""
@@ -1958,6 +2033,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
         while True:
             value: Any = None
             error: BaseException | None = None
+            # The previous step's operation references what the task waited on.
+            yielded: Any = None
             with lock:
                 coroutine = self._coroutine
                 alive = self._state is _PENDING
@@ -2008,20 +2085,25 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 self._coroutine = None
                 self._finish(_SUCCEEDED, result=stop.value)
                 self._execution_context = None  # break the cycle with the context
+                del self, context, coroutine, value, error, yielded  # see _release_frame
                 return
             except OperationCanceledError as cancellation:
                 state.tail = True
                 self._coroutine = None
                 self._finish(_CANCELLED, exception=cancellation)
                 self._execution_context = None  # break the cycle with the context
+                del self, context, coroutine, value, error, yielded  # see _release_frame
                 return
             except BaseException as failure:
                 state.tail = True
                 self._coroutine = None
                 self._finish(_FAILED, exception=failure)
                 self._execution_context = None  # break the cycle with the context
+                del self, context, coroutine, value, error, yielded  # see _release_frame
                 return
 
+            # Delivered: a caught exception must not stay in this frame.
+            value = error = None
             state.tail = True
             try:
                 resume = runtime._suspend(self, yielded)
@@ -3491,6 +3573,7 @@ class _Runtime:
             _close_if_coroutine(work)
             raise
         task._run_inline(state)
+        del task, work, args, kwargs  # see _release_frame
 
     def _submit_long_running(
             self, task: Task[Any], work: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -3756,24 +3839,36 @@ class _Runtime:
 
 
 def _queue_work_item(callback: Any, state: Any, *, flow_context: bool) -> bool:
-    """``ThreadPool.queue`` / ``queue_user_work_item``: queue ``callback`` without a Task."""
+    """``ThreadPool.queue`` / ``queue_user_work_item``: queue ``callback`` without a Task.
+
+    ``ThreadPool.queue`` has its own inlined copy of the ``flow_context=False`` path:
+    it runs on a server's dispatch thread for every request.
+    """
     if callback is None:
         raise ArgumentNullError("callBack")
     if not callable(callback):
         raise TypeError("callback must be callable")
     runtime = _get_runtime()
+    context: Context | None = None
     if flow_context:
         context = copy_context()
         if context.get(_current_task._value) is not None:
             # A work item is not part of the task that queued it.
             context.run(_current_task._value.set, None)
-    else:
-        context = Context()
-    runtime._post(functools.partial(_run_work_item, runtime, context, callback, state))
+    if runtime._shutdown_requested or not runtime._pool.queue(
+            functools.partial(_run_work_item, runtime, callback, state, context)
+    ):
+        raise RuntimeShutdownError("Task runtime is shutting down")
     return True
 
 
-def _run_work_item(runtime: _Runtime, context: Context, callback: Callable[..., Any], state: Any) -> None:
+def _run_work_item(
+        runtime: _Runtime, callback: Callable[..., Any], state: Any, context: Context | None = None
+) -> None:
+    """Run a work item; without a context of the caller's, in a fresh, empty one."""
+    if context is None:
+        # Created here, not on the queuing thread: one allocation less there.
+        context = Context()
     try:
         if state is _NO_STATE:
             _run_with_context(context, callback)
