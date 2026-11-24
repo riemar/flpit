@@ -155,13 +155,15 @@ work that could not be stopped.
 Tasks can be awaited inside asyncio coroutines: the Task's completion resumes the coroutine on its event loop.
 This needs no setting. For flpit code it adds one check to every await of a pending Task, 15–60 ns, which is
 within measurement noise of the await itself (`benchmarks/scripts/asyncio_interop_bench.py`). Code that depends
-on an asyncio event loop, such as `httpx.AsyncClient`, can run on the pool through the `@asyncio_task` decorator; see
-[`coro.py`](https://github.com/riemar/flpit/tree/main/examples/task/coro.py). That is an escape hatch and not the
-recommended default.
+on an asyncio event loop runs through the `@asyncio_task` decorator on a pool of shared asyncio loops that live
+on the flpit runtime (provisional); for HTTP and databases, prefer their sync clients. See
+[asyncio libraries](asyncio.md) and
+[`coro.py`](https://github.com/riemar/flpit/tree/main/examples/task/coro.py).
 
 ## Related
 
 - [Cancellation](cancellation.md)
+- [asyncio libraries](asyncio.md)
 - [Async queries](../async/index.md)
 - [Channels](../concurrency/channels.md), [concurrent collections](../concurrency/collections.md) and
   [threading primitives](../concurrency/threading.md)

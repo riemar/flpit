@@ -12,8 +12,9 @@ Key Takeaways:
     but it works. It flips the execution model—allowing regular blocking functions
     to seamlessly invoke and resolve async coroutines.
 
-2. **Dynamic Runner Provisioning**:
-    Behind the scenes, `@asyncio_task` spins up an independent `asyncio.Runner` on every invocation.
+2. **Shared loops**:
+    Behind the scenes, `@asyncio_task` runs the coroutine on one of the shared asyncio loops of
+    `flpit.asyncio_bridge`; no event loop is created per call.
 """
 from flpit.task import Task, task, asyncio_task, twait
 
