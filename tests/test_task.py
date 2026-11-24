@@ -1,4 +1,3 @@
-from functools import wraps
 
 import pytest
 
@@ -20,22 +19,9 @@ from flpit.task import (
     twait
 )
 
-from typing import Any, Callable
+from typing import Any
 
 from flpit.threading import AsyncLocal
-
-def interop[**P, R](test: Callable[P, R]) -> Callable[P, R]:
-    @wraps(test)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        previous = Task.asyncio_interop
-        Task.asyncio_interop = True
-
-        try:
-            return test(*args, **kwargs)
-        finally:
-            Task.asyncio_interop = previous
-
-    return wrapper
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -777,24 +763,38 @@ def test_twait_RejectsUseInsideAsyncFunction() -> None:
 
     Task.run(async_caller).result()
 
-def test_task_in_asyncio_coroutine_without_interopt() -> None:
-    import asyncio
-    async def iomain():
-        await Task.delay(1)
+def test_task_awaited_by_a_foreign_driver_names_what_it_needs() -> None:
+    """Neither flpit nor asyncio drives the coroutine: the yielded operation says what is missing."""
+    from flpit.task import TaskCompletionSource
 
-    previous = Task.asyncio_interop
-    Task.asyncio_interop = False
+    source: TaskCompletionSource[int] = TaskCompletionSource()
+
+    async def awaits() -> int:
+        return await source.task
+
+    coroutine = awaits()
     try:
-        with pytest.raises(RuntimeError, match="enable Task.asyncio_interop to await flpit Task"):
-            asyncio.run(iomain())
+        yielded = coroutine.send(None)
+        assert "flpit scheduler or an asyncio event loop" in repr(yielded)
     finally:
-        Task.asyncio_interop = previous
+        coroutine.close()
+        source.set_result(0)
 
 
-def test_asyncio_interop_is_on_by_default() -> None:
-    assert Task.asyncio_interop
+def test_asyncio_interop_is_deprecated_and_always_on() -> None:
+    with pytest.warns(DeprecationWarning, match="asyncio_interop is deprecated"):
+        assert Task.asyncio_interop is True
+    with pytest.warns(DeprecationWarning, match="Setting it has no effect"):
+        Task.asyncio_interop = False  # type: ignore[misc]
+    with pytest.warns(DeprecationWarning):
+        assert Task.asyncio_interop is True
 
-@interop
+    async def iomain() -> None:
+        await Task.delay(0.01)
+
+    import asyncio
+    asyncio.run(iomain())  # still works after "disabling" it
+
 def test_task_in_asyncio_coroutine() -> None:
     import asyncio
     async def iomain():
@@ -802,7 +802,6 @@ def test_task_in_asyncio_coroutine() -> None:
 
     asyncio.run(iomain())
 
-@interop
 def test_task_exception_in_asyncio_coroutine() -> None:
     import asyncio
 
@@ -825,7 +824,6 @@ def test_task_exception_in_asyncio_coroutine() -> None:
     with pytest.raises(ValueError, match="expected failure"):
         asyncio.run(iomain())
 
-@interop
 def test_task_cancellation_in_asyncio_coroutine() -> None:
     import asyncio
 
@@ -843,7 +841,6 @@ def test_task_cancellation_in_asyncio_coroutine() -> None:
     finally:
         source.dispose()
 
-@interop
 def test_asyncio_waiter_cancellation_does_not_cancel_flpit_task() -> None:
     import asyncio
     from flpit.task import TaskCompletionSource
@@ -874,7 +871,6 @@ def test_asyncio_waiter_cancellation_does_not_cancel_flpit_task() -> None:
     assert not task.cancelled()
 
 
-@interop
 def test_task_completing_after_its_asyncio_waiter_was_cancelled(
         capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -906,7 +902,6 @@ def test_task_completing_after_its_asyncio_waiter_was_cancelled(
     assert "Error" not in capsys.readouterr().err
 
 
-@interop
 def test_completed_tasks_in_asyncio_coroutine() -> None:
     import asyncio
 
@@ -927,7 +922,6 @@ def test_completed_tasks_in_asyncio_coroutine() -> None:
     assert asyncio.run(iomain()) == 7
 
 
-@interop
 def test_pending_task_result_in_asyncio_coroutine() -> None:
     import asyncio
 
@@ -943,7 +937,6 @@ def test_pending_task_result_in_asyncio_coroutine() -> None:
     assert asyncio.run(iomain()) == (42, True)
 
 
-@interop
 def test_flpit_tasks_mixed_with_asyncio_in_gather() -> None:
     import asyncio
 
@@ -966,7 +959,6 @@ def test_asyncio_running_loop_check() -> None:
     assert asyncio.run(iomain())
 
 
-@interop
 def test_flpit_await_on_a_worker_takes_the_pure_path_with_interop_enabled() -> None:
     # Awaited by flpit code, interop changes nothing: the waiter is resumed by the flpit scheduler.
     async def inner() -> int:
