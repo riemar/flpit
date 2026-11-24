@@ -782,8 +782,17 @@ def test_task_in_asyncio_coroutine_without_interopt() -> None:
     async def iomain():
         await Task.delay(1)
 
-    with pytest.raises(RuntimeError, match="enable Task.asyncio_interop to await flpit Task"):
-        asyncio.run(iomain())
+    previous = Task.asyncio_interop
+    Task.asyncio_interop = False
+    try:
+        with pytest.raises(RuntimeError, match="enable Task.asyncio_interop to await flpit Task"):
+            asyncio.run(iomain())
+    finally:
+        Task.asyncio_interop = previous
+
+
+def test_asyncio_interop_is_on_by_default() -> None:
+    assert Task.asyncio_interop
 
 @interop
 def test_task_in_asyncio_coroutine() -> None:
@@ -863,3 +872,108 @@ def test_asyncio_waiter_cancellation_does_not_cancel_flpit_task() -> None:
 
     assert task.result() is None
     assert not task.cancelled()
+
+
+@interop
+def test_task_completing_after_its_asyncio_waiter_was_cancelled(
+        capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    import asyncio
+
+    from flpit.task import TaskCompletionSource
+
+    source: TaskCompletionSource[int] = TaskCompletionSource()
+    loop_errors: list[Any] = []
+
+    async def iomain() -> None:
+        asyncio.get_running_loop().set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+        async def wait() -> None:
+            await source.task
+
+        waiter = asyncio.create_task(wait())
+        await asyncio.sleep(0.01)
+        waiter.cancel()  # the asyncio side gives up while the flpit task still runs
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        source.set_result(1)  # completes while the loop still runs: its continuation must not fail
+        await asyncio.sleep(0.05)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(iomain())
+    assert loop_errors == []
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+    assert "Error" not in capsys.readouterr().err
+
+
+@interop
+def test_completed_tasks_in_asyncio_coroutine() -> None:
+    import asyncio
+
+    from flpit.task import TaskCompletionSource
+
+    succeeded_source: TaskCompletionSource[int] = TaskCompletionSource()
+    succeeded_source.set_result(7)
+    succeeded = succeeded_source.task
+    failed_source: TaskCompletionSource[int] = TaskCompletionSource()
+    failed_source.set_exception(ValueError("already failed"))
+
+    async def iomain() -> int:
+        value = await succeeded
+        with pytest.raises(ValueError, match="already failed"):
+            await failed_source.task
+        return value
+
+    assert asyncio.run(iomain()) == 7
+
+
+@interop
+def test_pending_task_result_in_asyncio_coroutine() -> None:
+    import asyncio
+
+    def work() -> int:
+        time.sleep(0.02)
+        return 42
+
+    async def iomain() -> tuple[int, Any]:
+        loop = asyncio.get_running_loop()
+        value = await Task.run(work)
+        return value, asyncio.get_running_loop() is loop  # resumed on the same loop
+
+    assert asyncio.run(iomain()) == (42, True)
+
+
+@interop
+def test_flpit_tasks_mixed_with_asyncio_in_gather() -> None:
+    import asyncio
+
+    async def iomain() -> list[Any]:
+        return await asyncio.gather(Task.run(lambda: "flpit"), asyncio.sleep(0.001, result="asyncio"),
+                                    Task.delay(0.001))
+
+    assert asyncio.run(iomain()) == ["flpit", "asyncio", None]
+
+
+def test_asyncio_running_loop_check() -> None:
+    import asyncio
+
+    # On a flpit worker no asyncio loop runs; inside asyncio.run the check finds that loop.
+    assert Task.run(task_module._asyncio_running_loop).result() is None
+
+    async def iomain() -> bool:
+        return task_module._asyncio_running_loop() is asyncio.get_running_loop()
+
+    assert asyncio.run(iomain())
+
+
+@interop
+def test_flpit_await_on_a_worker_takes_the_pure_path_with_interop_enabled() -> None:
+    # Awaited by flpit code, interop changes nothing: the waiter is resumed by the flpit scheduler.
+    async def inner() -> int:
+        await Task.yield_now()
+        return 5
+
+    async def outer() -> int:
+        return await Task.run(inner) + await Task.run(inner)
+
+    assert Task.run(outer).result() == 10

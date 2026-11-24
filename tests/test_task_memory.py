@@ -173,6 +173,75 @@ def test_a_failed_task_and_its_frames_are_freed_without_the_cyclic_gc(
     wait_until_dead(payloads[0], timeout=TIMEOUT)  # a local of the failed frame
 
 
+@pytest.fixture
+def asyncio_interop() -> Iterator[None]:
+    previous = Task.asyncio_interop
+    Task.asyncio_interop = True
+    try:
+        yield
+    finally:
+        Task.asyncio_interop = previous
+
+
+@pytest.mark.parametrize("start", list(FAILING.values()), ids=list(FAILING))
+def test_a_failed_task_awaited_from_asyncio_is_freed_without_the_cyclic_gc(
+        no_cyclic_gc: None, several_workers: None, asyncio_interop: None, start: Any
+) -> None:
+    import asyncio
+
+    payloads: list[weakref.ref[Payload]] = []
+    original = Payload.__init__
+
+    def track(self: Payload) -> None:
+        original(self)
+        payloads.append(weakref.ref(self))
+
+    async def waiter() -> weakref.ref[Any]:
+        inner = start()
+        ref = weakref.ref(inner)
+        try:
+            await inner
+        except RuntimeError:
+            pass
+        del inner
+        return ref
+
+    Payload.__init__ = track  # type: ignore[method-assign]
+    try:
+        task_ref = asyncio.run(waiter())
+    finally:
+        Payload.__init__ = original  # type: ignore[method-assign]
+    wait_until_dead(task_ref, timeout=TIMEOUT)
+    wait_until_dead(payloads[0], timeout=TIMEOUT)
+
+
+def test_a_cancelled_task_awaited_from_asyncio_is_freed_without_the_cyclic_gc(
+        no_cyclic_gc: None, several_workers: None, asyncio_interop: None
+) -> None:
+    import asyncio
+
+    refs: list[weakref.ref[Any]] = []
+
+    async def waits(token: CancellationToken) -> None:
+        payload = Payload()
+        refs.append(weakref.ref(payload))
+        await Task.delay(60, token=token)
+
+    async def waiter() -> weakref.ref[Any]:
+        cts = CancellationTokenSource()
+        inner = Task.run(waits, cts.token)
+        ref = weakref.ref(inner)
+        asyncio.get_running_loop().call_later(0.02, cts.cancel)
+        with pytest.raises(OperationCanceledError):
+            await inner
+        del inner, cts
+        return ref
+
+    task_ref = asyncio.run(waiter())
+    wait_until_dead(task_ref, timeout=TIMEOUT)
+    wait_until_dead(refs[0], timeout=TIMEOUT)
+
+
 @pytest.mark.parametrize("inline", [False, True], ids=["Task.run", "run_inline"])
 def test_a_cancelled_task_and_its_frames_are_freed_without_the_cyclic_gc(
         no_cyclic_gc: None, several_workers: None, inline: bool

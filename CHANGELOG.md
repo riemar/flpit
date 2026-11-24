@@ -22,6 +22,9 @@ All notable changes to FlpIt are documented here. The format follows
 - Free-threaded builds: objects created on an idle pool worker, the timer thread or the IO thread
   and released elsewhere stayed allocated until that thread ran again, up to 20 s. Idle runtime
   threads now wake every 0.5 s, which frees them within that time.
+- With `Task.asyncio_interop` enabled, a failed or cancelled Task awaited from an asyncio coroutine, its
+  exception and the objects in its frames were only freed by the cyclic garbage collector: the interop
+  await kept the task in its frame and its callbacks. They are now freed as soon as the last reference goes.
 
 ### Added
 
@@ -48,6 +51,13 @@ All notable changes to FlpIt are documented here. The format follows
   changed fields as class defaults, the start path skips `inspect.isawaitable` for plain functions and plain
   results, and a coroutine step no longer passes through an extra frame when no `AsyncLocal` change handler
   exists.
+- `Task.asyncio_interop` is enabled by default: Tasks can be awaited inside asyncio coroutines without opting in.
+  Set it to `False` to make such an await fail instead.
+- `Task.asyncio_interop` costs a flpit await about 0.1 µs instead of 0.4–0.6 µs. To find out whether an
+  asyncio loop runs on the thread, an await of a pending Task now makes one C call (asyncio's
+  `_get_running_loop`, which returns None) instead of raising and catching an exception through
+  `asyncio.get_running_loop()`, and no longer runs an `import` statement each time
+  (`benchmarks/scripts/asyncio_interop_bench.py`).
 
 ### Documentation
 
