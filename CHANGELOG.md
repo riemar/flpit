@@ -28,6 +28,12 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Added
 
+- `flpit.asyncio_bridge`: values per loop without `LoopLocal` in user code. `provide(T, factory)` makes
+  `Loop[T]` parameters of `@asyncio_task` functions receive the `T` of the loop the call runs on (the caller
+  leaves them out; `= injected` tells type checkers so). `PerLoop[T]` is for objects that live longer than a
+  call, such as singletons: `.current` is the value of the running loop. `warm=True` creates the values on
+  each loop before it takes work; a factory that fails there fails that work with `LoopStartError` and the
+  loop is replaced. `PerLoop.close()` closes the values of every loop.
 - `Task.run_inline` starts work on the calling thread, the way calling an `async` method does in .NET: a
   coroutine runs until its first `await` of something not yet complete, then resumes on the pool. A coroutine
   that never suspends has completed when the call returns, with no queue hop and no wake-up. It takes the same

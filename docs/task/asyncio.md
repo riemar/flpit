@@ -1,7 +1,7 @@
 # asyncio libraries
 
 !!! note "Provisional"
-    `flpit.asyncio_bridge` (`LoopLocal`, `run_asyncio`, `configure`, `shutdown`) is provisional: its API may
+    `flpit.asyncio_bridge` (`provide`, `Loop`, `PerLoop`, `run_asyncio`, `configure`, `shutdown`) is provisional: its API may
     still change in 0.5. The default backend on Linux drives CPython's asyncio internals; the `"threads"`
     backend uses public asyncio API only and is the fallback should a Python release change them.
     `@asyncio_task` keeps its signature.
@@ -42,20 +42,24 @@ those loops on the flpit runtime, and `@asyncio_task` runs a function on them. T
 
 ```python
 import httpx
-from flpit.asyncio_bridge import LoopLocal
+from flpit import asyncio_bridge
+from flpit.asyncio_bridge import Loop, injected
 from flpit.task import CancellationToken, asyncio_task
 
-clients = LoopLocal(httpx.AsyncClient)  # one client per loop, closed with the loop
+# One client per loop, created when the loop starts, closed with the loop.
+asyncio_bridge.provide(httpx.AsyncClient, lambda: httpx.AsyncClient(timeout=10), warm=True)
 
 
 @asyncio_task
-async def fetch(url: str, token: CancellationToken) -> dict:
-    client = await clients.get()
+async def fetch(url: str, token: CancellationToken, client: Loop[httpx.AsyncClient] = injected) -> dict:
     return (await client.get(url)).json()
 
 
 task = fetch("https://example.org/data.json", token)  # a flpit Task; await it, or .result()
 ```
+
+The caller does not pass `client`: a `Loop[T]` parameter receives the `T` of the loop the call runs on.
+`= injected` tells type checkers that it may be left out; a value the caller does pass wins.
 
 ## How it runs
 
@@ -95,14 +99,47 @@ token starts nothing. Code that catches `asyncio.CancelledError` and returns nor
 
 ## Objects that outlive one call
 
-Clients and connection pools are bound to the loop that created them. Keep them in a `LoopLocal`: one value per
-loop, created on first use on that loop. `await local.get()` works with plain and `async def` factories;
-`local.value` works with plain factories. When a loop is closed, its values are closed with it
-(`await value.aclose()` if the value has one, otherwise `value.close()`).
+Clients and connection pools are bound to the loop that created them, so an object that lives longer than a
+call, such as a singleton, must not keep one: it would keep the client of the loop it was built on. It keeps a
+`PerLoop[T]` instead and reads `.current`, the value of the loop the call runs on:
+
+```python
+from flpit.asyncio_bridge import PerLoop
+
+clients = PerLoop(lambda: httpx.AsyncClient(base_url="https://api.github.com"), warm=True)
+
+
+class GitHubApi:
+    def __init__(self, clients: PerLoop[httpx.AsyncClient]) -> None:
+        self._clients = clients
+
+    @asyncio_task
+    async def repo(self, name: str) -> dict:
+        return (await self._clients.current.get(f"/repos/{name}")).json()
+
+
+api = GitHubApi(clients)
+```
+
+`provide()` returns the `PerLoop` it uses, so both styles can share one set of clients, and it also accepts
+an existing `PerLoop`. Providing a type again replaces the provider and closes the values its factory made.
+
+- **Factories** may be plain functions or `async def`. `await per_loop.get()` works with both; `.current`
+  needs a plain factory or `warm=True`.
+- **`warm=True`** creates the value on each pool loop when the loop starts, before it takes work, and on the
+  loops that exist already, so no call pays for it. If the factory fails there, the work waiting for that loop
+  fails with `LoopStartError` (the factory's error as its cause) and the loop is replaced by a new one.
+- **Other loops.** On a loop the bridge did not create (your application's own), values are created on first
+  use and not warmed.
+- **Closing.** When a loop is closed, its values are closed with it (`await value.aclose()` if the value has
+  one, otherwise `value.close()`), on that loop. `per_loop.close()` closes the values of every loop.
+
+A client whose async API is thread-safe, such as pyreqwest's `Client`, needs none of this: one instance can
+be shared by every loop. `LoopLocal`, the earlier form of `PerLoop`, keeps working.
 
 ## Shutdown
 
-`asyncio_bridge.shutdown(timeout)` cancels the calls still running, closes the `LoopLocal` values and async
+`asyncio_bridge.shutdown(timeout)` cancels the calls still running, closes the per-loop values and async
 generators of each loop, and closes the loops. `Task.shutdown` calls it first, and it runs at interpreter exit.
 Later calls create new loops.
 

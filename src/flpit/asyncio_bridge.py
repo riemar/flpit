@@ -23,7 +23,10 @@ calling more asyncio code stays on its loop), otherwise to the least busy of the
 ("power of two choices"). Loops are created on demand, up to ``configure(loops=...)``.
 
 Loop-bound objects that should outlive one call (an ``httpx.AsyncClient``, an asyncpg pool)
-belong in a ``LoopLocal``: one value per loop, created on first use, closed with the loop.
+are kept one per loop and closed with the loop. Register them with ``provide()`` and take them as
+a ``Loop[T]`` parameter of an ``@asyncio_task`` function, or hold a ``PerLoop[T]`` in an object that
+lives longer than a call (a singleton) and read ``.current`` on the loop. ``warm=True`` creates the
+value on every pool loop before the loop takes work.
 
 Strand loops drive asyncio's ``BaseEventLoop._run_once`` and replace two private hooks
 (``_write_to_self``, the selector's wait); the thread backend needs none of that and is the
@@ -35,23 +38,25 @@ import asyncio
 import atexit
 import concurrent.futures
 import contextvars
+import inspect
 import os
 import random
 import select
 import selectors
 import sys
 import threading
+import typing
 import weakref
 from asyncio import events
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
-from typing import Any, Generic, TypeVar, cast, override
+from typing import Annotated, Any, Final, Generic, TypeAlias, TypeVar, cast, get_args, get_origin, override
 
 from . import task as _task
 from .task import CancellationToken, OperationCanceledError, Task, TaskCompletionSource
 from .threading import ThreadPool
 
-__all__ = ["LoopLocal", "configure", "run_asyncio", "shutdown"]
+__all__ = ["Loop", "LoopLocal", "LoopStartError", "PerLoop", "configure", "injected", "provide", "run_asyncio", "shutdown"]
 
 T = TypeVar("T")
 
@@ -380,12 +385,33 @@ class _LoopPool:
             loop = self._new_loop()
             loops.append(loop)
             self.load[loop] = 1
+            # Queued before the caller queues its work, so the warm-up gate exists first.
+            loop.call_soon_threadsafe(_begin_warm, loop, self, None)
             return loop
 
     def release(self, loop: asyncio.AbstractEventLoop) -> None:
         with self.lock:
             if loop in self.load:
                 self.load[loop] -= 1
+
+    def retire(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Take ``loop`` out of service (its start failed) and close it once its work has ended."""
+        with self.lock:
+            if loop not in self.load:
+                return
+            self.loops.remove(loop)
+            del self.load[loop]
+            runner = next((r for r in self.threads if r.loop is loop), None)
+            if runner is not None:
+                self.threads.remove(runner)
+
+        def close(_state: Any) -> None:
+            _close_loop(loop, 1.0)
+            if runner is not None:
+                runner.stop()
+                runner.loop.close()
+
+        ThreadPool.queue(close, None)
 
     def _new_loop(self) -> asyncio.AbstractEventLoop:
         if self.backend == "strands":
@@ -576,6 +602,13 @@ def _start(loop: asyncio.AbstractEventLoop, pool: _LoopPool | None, coroutine: C
     run = _Run(loop, pool, source, token)
     if token is not None:
         run.registration = token.register(run.on_cancel)
+    gate: asyncio.Task[None] | None = getattr(loop, _GATE, None)
+    if gate is not None:
+        if gate.done() and not gate.cancelled() and gate.exception() is None:
+            if getattr(loop, _GATE, None) is gate:
+                setattr(loop, _GATE, None)
+        else:
+            coroutine = _after_gate(gate, coroutine)
     task = loop.create_task(coroutine, context=context)
     run.task = task
     task.add_done_callback(run.finish)
@@ -677,6 +710,276 @@ async def _dispose_loop_locals(loop: asyncio.AbstractEventLoop) -> None:
             await _close_value(value)
         except Exception:  # noqa: BLE001 - one value's close must not keep the others open
             _task._LOG.exception("closing a LoopLocal value failed")
+
+
+# ---------------------------------------------------------------------------
+# PerLoop, provide() and Loop[T] parameters
+# ---------------------------------------------------------------------------
+
+class LoopStartError(RuntimeError):
+    """A ``warm=True`` value could not be created on a new loop; the loop was taken out of service."""
+
+
+#: Attribute of a pool loop holding the asyncio task that warms it (None once warm).
+_GATE: Final = "_flpit_warm_gate"
+_warm_per_loops: weakref.WeakSet[PerLoop[Any]] = weakref.WeakSet()
+_warm_lock = threading.Lock()
+
+
+def _begin_warm(loop: asyncio.AbstractEventLoop, pool: _LoopPool, per_loops: list[PerLoop[Any]] | None) -> None:
+    """On ``loop``: start creating the warm values; work started meanwhile waits for them."""
+    if per_loops is None:
+        with _warm_lock:
+            per_loops = list(_warm_per_loops)
+    if not per_loops:
+        return
+    previous: asyncio.Task[None] | None = getattr(loop, _GATE, None)
+    setattr(loop, _GATE, loop.create_task(_warm(loop, pool, per_loops, previous)))
+
+
+async def _warm(loop: asyncio.AbstractEventLoop, pool: _LoopPool, per_loops: list[PerLoop[Any]],
+                previous: asyncio.Task[None] | None) -> None:
+    if previous is not None:
+        await previous
+    for per_loop in per_loops:
+        if per_loop._closed:
+            continue
+        try:
+            await per_loop.get()
+        except Exception as error:
+            pool.retire(loop)
+            raise LoopStartError(f"creating the per-loop value {per_loop!r} on a new asyncio loop failed") from error
+
+
+async def _after_gate(gate: asyncio.Task[None], coroutine: Coroutine[Any, Any, T]) -> T:
+    try:
+        await asyncio.shield(gate)
+    except BaseException:
+        coroutine.close()
+        raise
+    return await coroutine
+
+
+class PerLoop(LoopLocal[T]):
+    """One ``T`` per asyncio event loop, for objects that live longer than a call.
+
+    Hold a ``PerLoop`` where the object itself must not be held: a singleton built once cannot
+    keep a loop-bound client (it would use the client of the loop it was built on), but it can
+    keep the ``PerLoop`` and read ``current`` in each call:
+
+    ```python
+    clients = PerLoop(lambda: httpx.AsyncClient(timeout=10), warm=True)
+
+    class GitHubApi:
+        def __init__(self, clients: PerLoop[httpx.AsyncClient]) -> None:
+            self._clients = clients
+
+        @asyncio_task
+        async def repo(self, name: str) -> dict:
+            return (await self._clients.current.get(f"/repos/{name}")).json()
+    ```
+
+    ``factory`` may be a plain function or an ``async def``. With ``warm=True`` the value is created
+    on each pool loop when the loop starts, before it takes work, so ``current`` never creates one
+    during a call; a factory that fails there fails the work waiting for that loop with
+    ``LoopStartError`` and the loop is replaced. ``close()`` closes the values on every loop.
+    """
+
+    def __init__(self, factory: Callable[[], T | Awaitable[T]], *, warm: bool = False) -> None:
+        super().__init__(factory)
+        self.warm = warm
+        self._closed = False
+        if warm:
+            with _warm_lock:
+                _warm_per_loops.add(self)
+            pool = _pool
+            if pool is not None:
+                with pool.lock:
+                    loops = list(pool.loops)
+                only: list[PerLoop[Any]] = [self]
+                for loop in loops:
+                    try:
+                        loop.call_soon_threadsafe(_begin_warm, loop, pool, only)
+                    except RuntimeError:
+                        pass  # closed meanwhile
+
+    @property
+    def current(self) -> T:
+        """The value of the loop running on this thread; created now if it does not exist yet.
+
+        Raises ``RuntimeError`` outside asyncio code. An async factory cannot run here: with
+        ``warm=True`` the value exists on every pool loop; elsewhere use ``await per_loop.get()``.
+        """
+        if self._closed:
+            raise RuntimeError(f"{self!r} is closed")
+        loop = self._loop()
+        values = self._values
+        if loop in values:
+            return values[loop]
+        created = self._factory()
+        if asyncio.iscoroutine(created) or isinstance(created, asyncio.Future):
+            if asyncio.iscoroutine(created):
+                created.close()
+            raise RuntimeError(f"{self!r} has an async factory and no value on this loop yet: "
+                               "create it with warm=True, or use 'await per_loop.get()'")
+        value = cast(T, created)
+        values[loop] = value
+        return value
+
+    @override
+    async def get(self) -> T:
+        if self._closed:
+            raise RuntimeError(f"{self!r} is closed")
+        return await super().get()
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Close the value of every loop (``aclose()`` or ``close()``, on its loop) and stop creating new ones."""
+        self._closed = True
+        with _warm_lock:
+            _warm_per_loops.discard(self)
+        with _providers_lock:
+            for service_type, registered in list(_providers.items()):
+                if registered is self:
+                    del _providers[service_type]
+        running = events._get_running_loop()
+        pending: list[concurrent.futures.Future[None]] = []
+        for loop, value in list(self._values.items()):
+            self._values.pop(loop, None)
+            if loop.is_closed():
+                continue
+            if loop is running:
+                loop.create_task(_close_value(value))  # cannot wait for our own loop
+                continue
+            try:
+                pending.append(asyncio.run_coroutine_threadsafe(_close_value(value), loop))
+            except RuntimeError:
+                pass  # the loop closed meanwhile
+        if pending:
+            done, _ = concurrent.futures.wait(pending, timeout=timeout)
+            for future in done:
+                if future.exception() is not None:
+                    _task._LOG.error("closing a PerLoop value failed", exc_info=future.exception())
+
+    async def aclose(self) -> None:
+        """``close()`` without blocking the awaiting coroutine's thread."""
+        await Task.run(self.close)
+
+    @override
+    def __repr__(self) -> str:
+        name = getattr(self._factory, "__qualname__", None) or repr(self._factory)
+        return f"PerLoop({name})"
+
+
+class _LoopParameter:
+    __slots__ = ()
+
+    @override
+    def __repr__(self) -> str:
+        return "Loop"
+
+
+_LOOP_PARAMETER: Final = _LoopParameter()
+
+Loop: TypeAlias = Annotated[T, _LOOP_PARAMETER]
+"""A parameter of an ``@asyncio_task`` function that receives the ``provide()``-d ``T`` of the loop the call runs on.
+
+```python
+asyncio_bridge.provide(httpx.AsyncClient, lambda: httpx.AsyncClient(timeout=10), warm=True)
+
+@asyncio_task
+async def fetch(url: str, client: Loop[httpx.AsyncClient] = injected) -> dict:
+    return (await client.get(url)).json()
+
+data = await fetch("https://...")
+```
+
+The caller does not pass it (``= injected`` tells type checkers so); a value the caller does pass wins.
+"""
+
+
+class _Injected:
+    __slots__ = ()
+
+    @override
+    def __repr__(self) -> str:
+        return "injected"
+
+
+injected: Final[Any] = _Injected()
+"""Default for a ``Loop[T]`` parameter: the bridge fills it in, the caller does not pass it."""
+
+_providers: dict[Any, PerLoop[Any]] = {}
+_owned_providers: weakref.WeakSet[PerLoop[Any]] = weakref.WeakSet()
+_providers_lock = threading.Lock()
+
+
+def provide(service_type: type[T], source: Callable[[], T | Awaitable[T]] | PerLoop[T], *,
+            warm: bool = False) -> PerLoop[T]:
+    """Make ``Loop[service_type]`` parameters of ``@asyncio_task`` functions receive one value per loop.
+
+    ``source`` is a factory (plain or ``async def``; ``warm`` as for ``PerLoop``) or an existing
+    ``PerLoop``, which stays the caller's to close. Providing a type again replaces the provider;
+    values created by a replaced factory are closed. Returns the ``PerLoop`` in use.
+    """
+    if isinstance(source, PerLoop):
+        per_loop = cast(PerLoop[T], source)
+    else:
+        per_loop = PerLoop(source, warm=warm)
+        _owned_providers.add(per_loop)
+    with _providers_lock:
+        replaced = _providers.get(service_type)
+        _providers[service_type] = per_loop
+    if replaced is not None and replaced is not per_loop and replaced in _owned_providers:
+        ThreadPool.queue(lambda: replaced.close())
+    return per_loop
+
+
+def _provider(service_type: Any) -> PerLoop[Any]:
+    per_loop = _providers.get(service_type)
+    if per_loop is None:
+        name = getattr(service_type, "__qualname__", repr(service_type))
+        raise LookupError(f"no per-loop value is provided for {name}: "
+                          f"call asyncio_bridge.provide({name}, factory) at startup")
+    return per_loop
+
+
+def _loop_parameters(function: Callable[..., Any]) -> tuple[inspect.Signature, tuple[tuple[str, Any], ...]] | None:
+    """The signature and the ``Loop[T]`` parameters of ``function``, or None if it has none."""
+    try:
+        hints = typing.get_type_hints(function, include_extras=True)
+    except Exception as error:
+        raw = getattr(function, "__annotations__", {})
+        if not any("Loop[" in str(annotation) for annotation in raw.values()):
+            return None
+        raise TypeError(f"cannot read the annotations of {function.__qualname__} "
+                        f"to find its Loop[...] parameters: {error}") from error
+    found = tuple(
+        (name, get_args(hint)[0]) for name, hint in hints.items()
+        if get_origin(hint) is Annotated and any(m is _LOOP_PARAMETER for m in hint.__metadata__)
+    )
+    return (inspect.signature(function), found) if found else None
+
+
+def _call_asyncio_task(function: Callable[..., Awaitable[T]], args: tuple[Any, ...], kwargs: dict[str, Any],
+                       token: CancellationToken | None, cache: list[Any]) -> Task[T]:
+    """One call of an ``@asyncio_task`` function: fill its ``Loop[T]`` parameters on the loop, run it."""
+    if not cache:
+        cache.append(_loop_parameters(function))
+    plan = cache[0]
+    if plan is None:
+        return run_asyncio(function(*args, **kwargs), token=token)
+    signature, parameters = plan
+    bound = signature.bind_partial(*args, **kwargs)  # wrong arguments fail here, in the caller
+    missing = [(name, service_type) for name, service_type in parameters
+               if bound.arguments.get(name, injected) is injected]
+    return run_asyncio(_with_loop_values(function, bound, missing), token=token)
+
+
+async def _with_loop_values(function: Callable[..., Awaitable[T]], bound: inspect.BoundArguments,
+                            missing: list[tuple[str, Any]]) -> T:
+    for name, service_type in missing:
+        bound.arguments[name] = await _provider(service_type).get()
+    return await function(*bound.args, **bound.kwargs)
 
 
 # ---------------------------------------------------------------------------
