@@ -13,6 +13,11 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Fixed
 
+- On macOS and Windows, a worker that computes could count as waiting and get a replacement thread after
+  about 10 ms. Without per-thread CPU clocks the pool judges from the process's CPU, and it measured that over one
+  5 ms tick; Windows' `process_time()` moves in 15.625 ms steps, so the sample read 0 most of the time. It is
+  measured over at least 100 ms now. On a machine whose CPU is busy with other processes the guess can still be
+  wrong; Linux reads each worker's own CPU clock and is not affected.
 - `flpit.json` (msgspec backend) could crash a free-threaded interpreter (a segmentation fault in
   `msgspec._core`) when threads used a dataclass type for the first time at once: msgspec 0.22 builds its
   information for a type lazily and caches it on the type, and a thread could use it while another was still

@@ -317,12 +317,18 @@ class _WorkerInfo:
         # This thread's CPU-time clock, where the platform has one (Linux, BSDs; not macOS
         # or Windows): it barely moves while the thread waits, and moves while it computes.
         self.cpu_clock: int | None = None
-        getcpuclockid = getattr(time, "pthread_getcpuclockid", None)
+        getcpuclockid = _thread_cpu_clock_id
         if getcpuclockid is not None:
             try:
                 self.cpu_clock = getcpuclockid(threading.get_ident())
             except OSError:
                 pass
+
+
+# The CPU clocks the pool's gate reads (module level, so tests can stand in for another platform).
+# Per-thread clocks exist on Linux and the BSDs, not on macOS or Windows.
+_thread_cpu_clock_id: Callable[[int], int] | None = getattr(time, "pthread_getcpuclockid", None)
+_process_time: Callable[[], float] = time.process_time
 
 
 def _cpu_capacity() -> float:
@@ -3559,12 +3565,13 @@ def _spin_count() -> int:
 class _Stall:
     """The gate's view of one worker's current item: since when, and its CPU time then."""
 
-    __slots__ = ("items", "ticks", "since", "cpu")
+    __slots__ = ("items", "ticks", "since", "cpu", "process_cpu")
 
     def __init__(self, info: _WorkerInfo) -> None:
         self.items = info.items
         self.ticks = 0
         self.since = time.monotonic()
+        self.process_cpu = _process_time()
         self.cpu: float | None = None
         if info.cpu_clock is not None:
             try:
@@ -3628,6 +3635,10 @@ class _WorkerPool:
     # A stalled worker whose own CPU clock moved less than this share of the time it has been
     # on its item is waiting (it measures 0.000; computing ones get a share even when contended).
     _WAITING_CPU_SHARE: Final = 0.02
+    # Without per-thread CPU clocks (macOS, Windows) the process's CPU decides, measured over at
+    # least this long: Windows' process_time() moves in 15.625 ms steps, so a shorter sample reads
+    # 0 while a worker computes, and one tick is too short to average out scheduling noise.
+    _FALLBACK_WINDOW: Final = 0.1
 
     def __init__(
             self,
@@ -3885,7 +3896,7 @@ class _WorkerPool:
             last = self._completed
             starvation_due = time.monotonic() + self._starvation_interval()
             stalls: dict[_WorkerInfo, _Stall] = {}
-            cpu_then = time.process_time()
+            cpu_then = _process_time()
             wall_then = time.monotonic()
             tick = self._GATE_TICK
             while True:
@@ -3898,7 +3909,7 @@ class _WorkerPool:
                     if not items:
                         break
                     signal.set()
-                cpu_now = time.process_time()
+                cpu_now = _process_time()
                 now = time.monotonic()
                 cores_used = (cpu_now - cpu_then) / max(now - wall_then, 1e-6)
                 cpu_then, wall_then = cpu_now, now
@@ -3993,8 +4004,13 @@ class _WorkerPool:
                 waiting += 1
         else:
             return waiting
-        # No per-thread CPU clocks here: decide from the CPU the process used.
-        if cores_used >= self._CPU_SATURATED * min(self._capacity, workers):
+        # No per-thread CPU clocks here: decide from the CPU the process used while the workers
+        # were stalled, over at least _FALLBACK_WINDOW. Until then they count as computing.
+        oldest = min((record for _, record in stalled), key=lambda record: record.since)
+        window = now - oldest.since
+        if window < self._FALLBACK_WINDOW:
+            return 0
+        if (_process_time() - oldest.process_cpu) / window >= self._CPU_SATURATED * min(self._capacity, workers):
             return 0
         return len(stalled)
 

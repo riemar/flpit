@@ -15,6 +15,7 @@ import socket
 import threading
 import time
 import warnings
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -251,7 +252,11 @@ def test_starved_pool_injects_workers_beyond_min(pool) -> None:
     try:
         # Not quickly: the one worker keeps the CPU it may use busy ...
         time.sleep(0.1)
-        assert not victim.done()
+        if task_module._thread_cpu_clock_id is not None:
+            # Only certain with per-thread CPU clocks. Without them (macOS, Windows) the gate
+            # judges from the process's CPU, which a busy machine can starve: see
+            # test_without_thread_cpu_clocks_a_computing_worker_is_not_replaced_quickly.
+            assert not victim.done()
         # ... but the starvation rule adds a worker well before the blocker stops.
         deadline = time.monotonic() + 5
         while not victim.done() and time.monotonic() < deadline:
@@ -262,6 +267,31 @@ def test_starved_pool_injects_workers_beyond_min(pool) -> None:
         stop.set()
     assert victim.result().startswith("Task-worker")
     blocker.result()
+
+
+@pytest.mark.parametrize(
+    ("stalled_for", "process_cpu_used", "expected_waiting"),
+    [
+        (0.02, 0.0, 0),  # shorter than the window: 0 CPU on Windows' 15.625 ms clock proves nothing yet
+        (0.2, 0.1875, 0),  # 12 clock steps in 0.2 s: the worker computes
+        (0.2, 0.0, 1),  # no CPU over the whole window: the worker waits
+    ],
+)
+def test_without_thread_cpu_clocks_the_gate_judges_over_a_window(
+        monkeypatch, stalled_for: float, process_cpu_used: float, expected_waiting: int
+) -> None:
+    """macOS and Windows have no per-thread CPU clock; the process's CPU decides.
+
+    It used to be measured over one 5 ms tick. On Windows, process_time() moves in 15.625 ms
+    steps, so that read 0 most of the time and a computing worker counted as waiting.
+    """
+    monkeypatch.setattr(task_module, "_process_time", lambda: 10.0 + process_cpu_used)
+    gate = task_module._WorkerPool.__new__(task_module._WorkerPool)
+    gate._capacity = 1.0
+    info = SimpleNamespace(cpu_clock=None)
+    record = SimpleNamespace(since=time.monotonic() - stalled_for, process_cpu=10.0, cpu=None)
+    # cores_used=0.0: the last tick read nothing, as on Windows between two clock steps.
+    assert gate._count_waiting([(info, record)], 0.0, 1) == expected_waiting  # type: ignore[arg-type]
 
 
 def test_surplus_workers_retire_when_idle(pool, monkeypatch) -> None:
