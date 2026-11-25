@@ -34,8 +34,8 @@ from flpit import (
     SourceNoneError,
 )
 
-_SKIP_COMPARER = pytest.mark.skip("comparer not implemented yet")
-_SKIP_INTERSECT_BY = pytest.mark.skip("intersect_by not implemented yet")
+_SKIP_COMPARER = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
+_SKIP_INTERSECT_BY = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: intersect_by")
 
 
 def _run_once(source):

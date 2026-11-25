@@ -876,7 +876,7 @@ _MIN_GENERIC_DATA = [
 ]
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, comparer, expected", _MIN_GENERIC_DATA)
 def test_Min_Generic_HasExpectedOutput(flp_type, source, comparer, expected):
     # EXPECTED FAIL: no comparer overload (TypeError); an empty source also raises EmptySequenceError
@@ -884,7 +884,7 @@ def test_Min_Generic_HasExpectedOutput(flp_type, source, comparer, expected):
     assert expected == flp_type(source).min(comparer=comparer)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, comparer, expected", _MIN_GENERIC_DATA)
 def test_Min_Generic_RunOnce_HasExpectedOutput(flp_type, run_once, source, comparer, expected):
     assert expected == flp.it(run_once(source)).min(comparer=comparer)
@@ -903,23 +903,16 @@ def test_MinBy_Generic_NullSource_ThrowsArgumentNullException(flp_type):
         flp_type(None).min_by(lambda x: x, _Comparer(lambda _a, _b: 0))
 
 
+@pytest.mark.xfail(strict=True, reason="Undecided deviation: flpit validates a None key selector only once there is an element (an empty "
+           "source returns None); .NET throws ArgumentNullException('keySelector') at the call")
 def test_MinBy_Generic_NullKeySelector_ThrowsArgumentNullException(flp_type):
     source = []
     key_selector = None
 
-    # EmptySequenceError, a None selector is never called) and has no comparer overload.
-
-    # once there are real runtime generics we can enforce exception on empty source
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).min_by(key_selector)
-
-    # until then
-    assert flp_type(source).min_by(key_selector) is None
-
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).min_by(key_selector, comparer=None)
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).min_by(key_selector, _Comparer(lambda _a, _b: 0))
+    with pytest.raises(SelectorNoneError):
+        flp_type(source).min_by(key_selector)
+    # MinBy(keySelector, comparer: null) and MinBy(keySelector, comparer): min_by has no comparer
+    # parameter, so the three upstream calls collapse into the one above.
 
 
 def test_MinBy_Generic_EmptyStructSource_ThrowsInvalidOperationException(flp_type):
@@ -997,14 +990,14 @@ _MIN_BY_DATA = [
      _Comparer(lambda x, y: -_default_compare(x, y)), _Person("Harry", 20)),
 ]
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, key_selector, comparer, expected", _MIN_BY_DATA)
 def test_MinBy_Generic_HasExpectedOutput(flp_type, source, key_selector, comparer, expected):
     # EXPECTED FAIL: no comparer overload (TypeError on rows that pass a comparer or a None comparer
     # positionally), and empty sources raise EmptySequenceError where .NET returns null.
     assert expected == flp_type(source).min_by(key_selector, comparer)
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, key_selector, comparer, expected", _MIN_BY_DATA)
 def test_MinBy_Generic_RunOnce_HasExpectedOutput(flp_type, run_once, source, key_selector, comparer, expected):
     # EXPECTED FAIL: same reasons as test_MinBy_Generic_HasExpectedOutput.

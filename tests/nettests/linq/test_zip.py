@@ -509,7 +509,7 @@ def test_Zip2_TupleNames(flp_type: FlpIt | FlpList):
 # "TypeError: 'list' object is not callable" during enumeration.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_FirstIsNull(flp_type):
     second = [4, 5, 6]
     third = [7, 8, 9]
@@ -518,7 +518,7 @@ def test_Zip3_FirstIsNull(flp_type):
     with pytest.raises(SourceNoneError):
         flp_type(None).zip(second, third)
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_SecondIsNull(flp_type):
     first = flp_type([1, 2, 3])
     third = [4, 5, 6]
@@ -529,7 +529,7 @@ def test_Zip3_SecondIsNull(flp_type):
         first.zip(None, third)
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdIsNull(flp_type):
     first = flp_type([1, 2, 3])
     second = [4, 5, 6]
@@ -541,7 +541,7 @@ def test_Zip3_ThirdIsNull(flp_type):
         first.zip(second, None)
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdEmpty(flp_type):
     first = flp_type([1, 2, 3])
     second = [4, 5, 6]
@@ -551,7 +551,7 @@ def test_Zip3_ThirdEmpty(flp_type):
     assert list(first.zip(second, third)) == []
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ImplicitTypeParameters(flp_type):
     first = flp_type([1, 2])
     second = [3, 4]
@@ -561,7 +561,7 @@ def test_Zip3_ImplicitTypeParameters(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5), (2, 4, 6)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ExplicitTypeParameters(flp_type):
     first = flp_type([1, 2])
     second = [3, 4]
@@ -572,7 +572,7 @@ def test_Zip3_ExplicitTypeParameters(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5), (2, 4, 6)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdOneMore(flp_type):
     first = flp_type([1, 2])
     second = [3, 4]
@@ -582,7 +582,7 @@ def test_Zip3_ThirdOneMore(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5), (2, 4, 6)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdManyMore(flp_type):
     first = flp_type([1, 2])
     second = [3, 4]
@@ -592,7 +592,7 @@ def test_Zip3_ThirdManyMore(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5), (2, 4, 6)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdOneLess(flp_type):
     first = flp_type([1, 2])
     second = [3, 4]
@@ -602,7 +602,7 @@ def test_Zip3_ThirdOneLess(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_ThirdManyLess(flp_type):
     first = flp_type([1, 2, 3])
     second = [3, 4, 5]
@@ -612,7 +612,7 @@ def test_Zip3_ThirdManyLess(flp_type):
     assert list(first.zip(second, third)) == [(1, 3, 5)]
 
 
-@pytest.mark.skip("third not supported yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: zip(second, third)")
 def test_Zip3_RunOnce(run_once):
     first = flp.it(run_once([1, 2]))
     second = run_once([3, 4])

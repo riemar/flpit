@@ -12,7 +12,7 @@ This file is an independent Python port adapted to FlpIt's API and semantics.
 import pytest
 
 from conftest import create_sources
-from flpit import flp, ArgumentOutOfRangeError
+from flpit import ArgumentOutOfRangeError, InvalidOperationError, SourceNoneError, flp
 
 def assert_equal(expected, actual):
     assert list(actual) == list(expected)
@@ -62,12 +62,12 @@ def test_SkipAllExactlyIList(flp_type):
 
 
 def test_SkipThrowsOnNull(flp_type):
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).skip(3)
 
 
 def test_SkipThrowsOnNullIList(flp_type):
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).skip(3)
 
 
@@ -158,7 +158,7 @@ def test_ElementAt(flp_type):
             remaining.element_at(4)
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: element_at_or_default")
 def test_ElementAtOrDefault(flp_type):
     for source in create_sources(flp_type)([1, 2, 3, 4, 5, 6]):
         remaining = source.skip(2)
@@ -174,7 +174,7 @@ def test_First(flp_type):
         assert source.skip(0).first() == 1
         assert source.skip(2).first() == 3
         assert source.skip(4).first() == 5
-        with pytest.raises((RuntimeError, ValueError, StopIteration)):
+        with pytest.raises(InvalidOperationError):
             source.skip(5).first()
 
 
@@ -191,10 +191,9 @@ def test_Last(flp_type):
         assert source.skip(0).last() == 5
         assert source.skip(1).last() == 5
         assert source.skip(4).last() == 5
-        with pytest.raises((RuntimeError, ValueError, StopIteration)):
+        with pytest.raises(InvalidOperationError):
             source.skip(5).last()
 
-@pytest.mark.skip("not implemented yet")
 def test_LastOrDefault(flp_type):
     for source in create_sources(flp_type)([1, 2, 3, 4, 5]):
         assert source.skip(0).last_or_default(default=0) == 5
@@ -203,7 +202,7 @@ def test_LastOrDefault(flp_type):
         assert source.skip(5).last_or_default(default=0) == 0
 
 
-@pytest.mark.skip("not implemented yet, and most likely to_array, never will ")
+@pytest.mark.skip("Not portable to Python: ToArray (Python has no array type; to_list is ported as ToList)")
 def test_ToArray(flp_type):
     for source in create_sources(flp_type)([1, 2, 3, 4, 5]):
         assert_equal([1, 2, 3, 4, 5], source.skip(0).to_array())

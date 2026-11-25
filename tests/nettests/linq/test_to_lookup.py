@@ -42,7 +42,7 @@ from flpit import (
     SourceNoneError,
 )
 
-_SKIP_COMPARER = pytest.mark.skip("comparer not implemented yet")
+_SKIP_COMPARER = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 
 _Item = namedtuple("_Item", ["name", "score"])
 
@@ -293,7 +293,7 @@ class RoleMetadata:
     countr_b: int
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 @pytest.mark.parametrize("enum_type", [1, 2, 3])
 def test_ApplyResultSelectorForGroup(flp_type, enum_type):
     # .NET exercises GroupBy(keySelector, resultSelector) here (Lookup's internal ApplyResultSelector);
@@ -329,7 +329,7 @@ def test_ApplyResultSelectorForGroup(flp_type, enum_type):
     assert list(result) == expected
 
 
-@pytest.mark.skip("apply_result_selector() not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: apply_result_selector")
 def test_ApplyResultSelector(flp_type):
     lookup = flp_type([1, 2, 2, 3, 3, 3]).to_lookup(lambda i: i)
 

@@ -214,7 +214,7 @@ def test_RunOnce():
     assert expected == list(flp.it(_run_once(list(source))).select(lambda e: e["name"]))  # ToList
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_EmptyWithIndexedSelector():
     # select() has no index overload.
     assert list(flp.it([]).select(lambda s, i: len(s) + i)) == []
@@ -227,7 +227,7 @@ def test_EnumerateFromDifferentThread():
     Task.when_all(tasks).result()
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_SingleElementIndexedSelector():
     # select() has no index overload.
     source = [{"name": "Prakash", "custID": 98088}]
@@ -236,7 +236,7 @@ def test_SingleElementIndexedSelector():
     assert expected == list(flp.it(source).select(lambda e, index: e["name"]))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_SelectPropertyPassingIndex():
     # select() has no index overload.
     source = [
@@ -251,7 +251,7 @@ def test_SelectPropertyPassingIndex():
     assert expected == list(flp.it(source).select(lambda e, i: e["name"]))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_SelectPropertyUsingIndex():
     # select() has no index overload.
     source = [
@@ -264,7 +264,7 @@ def test_SelectPropertyUsingIndex():
     assert expected == list(flp.it(source).select(lambda e, i: e["name"] if i == 0 else None))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_SelectPropertyPassingIndexOnLast():
     # select() has no index overload.
     source = [
@@ -296,7 +296,7 @@ def test_Select_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
         flp_type(None).select(selector)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_Select_SelectorIsNull_ArgumentNullExceptionThrown_Indexed(flp_type):
     # Selector is the (value, index) overload; without it this would be
     # indistinguishable from the non-indexed test.
@@ -306,7 +306,7 @@ def test_Select_SelectorIsNull_ArgumentNullExceptionThrown_Indexed(flp_type):
         source.select(None)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_Select_SourceIsNull_ArgumentNullExceptionThrown_Indexed(flp_type):
     selector = lambda e, i: i + 1
 
@@ -792,7 +792,7 @@ def test_ForcedToEnumeratorDoesntEnumerate():
     assert not _is_enumerator_that_enumerates(iterator)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select((item, index) selector)")
 def test_ForcedToEnumeratorDoesntEnumerateIndexed():
     # select() has no index overload.
     iterator = flp.it(range(0, 3)).select(lambda e, i: i)
@@ -974,7 +974,7 @@ def test_Select_SourceIsIList_ElementAt():
         source.skip(2).element_at(9)
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: element_at_or_default")
 def test_Select_SourceIsArray_ElementAtOrDefault():
     # element_at_or_default does not exist yet; (default, index) is assumed,
     # following first_or_default(default, predicate).
@@ -990,7 +990,7 @@ def test_Select_SourceIsArray_ElementAtOrDefault():
     assert source.skip(2).element_at_or_default(0, 9) == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: element_at_or_default")
 def test_Select_SourceIsList_ElementAtOrDefault():
     # element_at_or_default does not exist yet; (default, index) is assumed,
     # following first_or_default(default, predicate).
@@ -1006,7 +1006,7 @@ def test_Select_SourceIsList_ElementAtOrDefault():
     assert source.skip(2).element_at_or_default(0, 9) == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: element_at_or_default")
 def test_Select_SourceIsIList_ElementAtOrDefault():
     # element_at_or_default does not exist yet; (default, index) is assumed,
     # following first_or_default(default, predicate).
@@ -1094,10 +1094,8 @@ def test_Select_SourceIsIList_First():
     assert empty.first_or_default(0) == 0
 
 
-@pytest.mark.skip("not implemented yet")
 def test_Select_SourceIsArray_Last():
-    # last_or_default does not exist yet; the default is passed first, following
-    # first_or_default(default, predicate).
+    # LastOrDefault() is last_or_default(default(int)) = last_or_default(0).
     source = flp.it([1, 2, 3, 4]).select(lambda i: i * 2)
 
     assert source.last() == 8
@@ -1118,10 +1116,8 @@ def test_Select_SourceIsArray_Last():
     assert empty.skip(1).last_or_default(0) == 0
 
 
-@pytest.mark.skip("not implemented yet")
 def test_Select_SourceIsList_Last():
-    # last_or_default does not exist yet; the default is passed first, following
-    # first_or_default(default, predicate).
+    # LastOrDefault() is last_or_default(default(int)) = last_or_default(0).
     source = flp.lst([1, 2, 3, 4]).select(lambda i: i * 2)
 
     assert source.last() == 8
@@ -1142,10 +1138,8 @@ def test_Select_SourceIsList_Last():
     assert empty.skip(1).last_or_default(0) == 0
 
 
-@pytest.mark.skip("not implemented yet")
 def test_Select_SourceIsIList_Last():
-    # last_or_default does not exist yet; the default is passed first, following
-    # first_or_default(default, predicate).
+    # LastOrDefault() is last_or_default(default(int)) = last_or_default(0).
     source = flp.it((1, 2, 3, 4)).select(lambda i: i * 2)
 
     assert source.last() == 8

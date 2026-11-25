@@ -24,7 +24,7 @@ FLOAT_MAX = 3.4028235e38
 DECIMAL_MIN = Decimal('-79228162514264337593543950335')
 DECIMAL_MAX = Decimal('79228162514264337593543950335')
 
-from flpit import flp
+from flpit import SelectorNoneError, SourceNoneError, flp
 
 def _is_nan(val) -> bool:
     if isinstance(val, Decimal):
@@ -217,19 +217,19 @@ def test_NullableFoatRunOnce(flp_type, source, expected): # Typo carried over fr
     assert_equal(flp_type((item for item in source)).average(lambda x: x), expected)
 
 def test_NullableFloat_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_NullableFloat_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 def test_Int_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 
@@ -253,7 +253,7 @@ def test_NullableFloat_WithSelector(flp_type):
     assert_equal(flp_type(source).average(lambda e: e["num"]), expected)
 
 def test_Int_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 @pytest.mark.parametrize("source, expected", int_test_data())
@@ -283,13 +283,13 @@ def test_NullableInt(flp_type, source, expected):
     assert_equal(flp_type(source).average(lambda x: x), expected)
 
 def test_NullableInt_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_NullableInt_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 def test_NullableInt_WithSelector(flp_type):
@@ -311,13 +311,13 @@ def test_Long_EmptySource_ThrowsInvalidOperationException(flp_type):
             flp_type(s).average(lambda i: i)
 
 def test_Long_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_Long_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 @pytest.mark.parametrize("source, expected", long_test_data())
@@ -347,13 +347,13 @@ def test_NullableLong(flp_type, source, expected):
     assert_equal(flp_type(source).average(lambda x: x), expected)
 
 def test_NullableLong_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_NullableLong_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 def test_NullableLong_WithSelector(flp_type):
@@ -375,13 +375,13 @@ def test_Double_EmptySource_ThrowsInvalidOperationException(flp_type):
             flp_type(s).average(lambda i: i)
 
 def test_Double_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_Double_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 @pytest.mark.parametrize("source, expected", double_test_data())
@@ -404,13 +404,13 @@ def test_NullableDouble(flp_type, source, expected):
     assert_equal(flp_type(source).average(lambda x: x), expected)
 
 def test_NullableDouble_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_NullableDouble_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 def test_NullableDouble_WithSelector(flp_type):
@@ -432,13 +432,13 @@ def test_Decimal_EmptySource_ThrowsInvalidOperationException(flp_type):
             flp_type(s).average(lambda i: i)
 
 def test_Decimal_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_Decimal_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 @pytest.mark.parametrize("source, expected", decimal_test_data())
@@ -461,13 +461,13 @@ def test_NullableDecimal(flp_type, source, expected):
     assert_equal(flp_type(source).average(lambda x: x), expected)
 
 def test_NullableDecimal_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_NullableDecimal_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 def test_NullableDecimal_WithSelector(flp_type):
@@ -495,13 +495,13 @@ def test_Float_EmptySource_ThrowsInvalidOperationException(flp_type):
             flp_type(s).average(lambda i: i)
 
 def test_Float_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average()
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         flp_type(None).average(lambda i: i)
 
 def test_Float_NullSelector_ThrowsArgumentNullException(flp_type):
-    with pytest.raises(TypeError):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).average(None)
 
 @pytest.mark.parametrize("source, expected", float_test_data())

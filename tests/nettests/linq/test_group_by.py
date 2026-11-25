@@ -41,9 +41,9 @@ from flpit import (
     SelectorNoneError, FlpIt,
 )
 
-_SKIP_ELEMENT = pytest.mark.skip("element selector not implemented yet")
-_SKIP_RESULT = pytest.mark.skip("result selector not implemented yet")
-_SKIP_COMPARER = pytest.mark.skip("comparer not implemented yet")
+_SKIP_ELEMENT = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, element_selector)")
+_SKIP_RESULT = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
+_SKIP_COMPARER = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 
 
 def _run_once(source):
@@ -225,7 +225,7 @@ def test_Grouping_ICollection_Contains(flp_type):
     assert 3 not in evens
 
 
-@pytest.mark.skip("index_of not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: index_of")
 def test_Grouping_IList_IndexOf():
     odds_evens = flp.it([1, 2, 3, 4]).group_by(lambda i: i % 2 == 0)
 

@@ -468,6 +468,8 @@ class FlpIt[TItem](Iterable[TItem]):
 
         Evaluation stops as soon as the result is known.
         """
+        if predicate is None:
+            raise PredicateNoneError()
         if predicate is not _SENTINEL:
             return builtins.any(map(predicate, self))
 
@@ -489,6 +491,8 @@ class FlpIt[TItem](Iterable[TItem]):
         Returns True for an empty sequence.
         Evaluation stops at the first element that fails the predicate.
         """
+        if predicate is None:
+            raise PredicateNoneError()
         return builtins.all(map(predicate, self))
 
     def concat(self, second: Iterable[TItem]) -> "FlpIt[TItem]":
@@ -1455,7 +1459,7 @@ class FlpIt[TItem](Iterable[TItem]):
         if key_selector is None:
             raise SelectorNoneError()
         if element_selector is None:
-            raise SelectorNoneError()
+            raise ElementSelectorNoneError()
 
         result: dict[Any, Any] = {}
         for item in self:
@@ -1836,6 +1840,9 @@ class FlpList[TItem](Collection[TItem]):
         return item in self.__list.data
 
     def exists(self, predicate: Callable[[TItem], bool]) -> bool:
+        if predicate is None:
+            raise PredicateNoneError()
+
         return any(predicate(item) for item in self.__list.data)
 
     def find(self, predicate: Callable[[TItem], bool]) -> TItem | None:
@@ -1953,6 +1960,8 @@ class FlpList[TItem](Collection[TItem]):
     ) -> bool:
         if predicate is _SENTINEL:
             return len(self.__list.data) > 0
+        if predicate is None:
+            raise PredicateNoneError()
 
         return any(predicate(item) for item in self.__list.data)
 
@@ -1960,6 +1969,9 @@ class FlpList[TItem](Collection[TItem]):
             self,
             predicate: Callable[[TItem], bool],
     ) -> bool:
+        if predicate is None:
+            raise PredicateNoneError()
+
         return all(predicate(item) for item in self.__list.data)
 
     def append(self, element: TItem) -> FlpIt[TItem]:

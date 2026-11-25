@@ -10,6 +10,8 @@ Original source attribution: .NET Foundation / dotnet/runtime, MIT License.
 This file is an independent Python port adapted to FlpIt's API and semantics.
 """
 import pytest
+
+from flpit import SelectorNoneError, SourceNoneError
 import random
 import re
 from types import SimpleNamespace
@@ -102,7 +104,7 @@ def test_DescendingKeyThenDescendingKey(flp_type):
 
 
 def test_OrderIsStable(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     text = "Because I could not stop for Death -\nHe kindly stopped for me -\nThe Carriage held but just Ourselves -\nAnd Immortality."
     words = [w for w in re.split(r'[\s\-]+', text) if w]
     source = flp_type(words)
@@ -116,7 +118,7 @@ def test_OrderIsStable(flp_type):
 
 
 def test_OrderIsStableCustomComparer(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     text = "Because I could not stop for Death -\nHe kindly stopped for me -\nThe Carriage held but just Ourselves -\nAnd Immortality."
     words = [w for w in re.split(r'[\s\-]+', text) if w]
     source = flp_type(words)
@@ -130,7 +132,7 @@ def test_OrderIsStableCustomComparer(flp_type):
 
 
 def test_RunOnce(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 
     text = "Because I could not stop for Death -\nHe kindly stopped for me -\nThe Carriage held but just Ourselves -\nAnd Immortality."
     words = (w for w in re.split(r'[\s\-]+', text) if w) # one-shot generator
@@ -145,26 +147,23 @@ def test_RunOnce(flp_type):
     assert list(source.order_by(lambda word: word[0].isupper()).then_by_descending(lambda word: len(word), reverse_int_cmp)) == expected
 
 
-def test_NullSource():
-    source = None
-    with pytest.raises((TypeError, AttributeError)):
-        source.then_by_descending(lambda i: i)
+def test_NullSource(flp_type):
+    # A None receiver: the source is the ordered sequence, so it is None before then_by_descending is reached.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).order_by(lambda e: e).then_by_descending(lambda i: i)
 
 
 def test_NullKeySelector(flp_type):
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).order_by(lambda e: e).then_by_descending(None)
 
 
 def test_NullSourceComparer():
-    source = None
-    with pytest.raises((TypeError, AttributeError)):
-        source.then_by_descending(lambda i: i, None)
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: then_by_descending(key_selector, comparer)")
 
 
 def test_NullKeySelectorComparer(flp_type):
-    with pytest.raises((TypeError, ValueError)):
-        flp_type([]).order_by(lambda e: e).then_by_descending(None, None)
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: then_by_descending(key_selector, comparer)")
 
 
 @pytest.mark.parametrize("then_bys", [1, 2, 3])

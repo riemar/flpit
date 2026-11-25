@@ -16,10 +16,17 @@ each generic type argument.
 """
 from flpit import ArgumentOutOfBoundsError
 from flpit import ArgumentNonNegError
-from flpit import ArgumentError
-from flpit.core.linq import CollectionNoneError
+from flpit.core.linq import CollectionNoneError, PredicateNoneError, SourceNoneError
 import pytest
 from flpit import FlpList, ArgumentOutOfRangeError
+
+
+def _unsupported(api):
+    pytest.skip(f"Upstream .NET test requires unsupported FlpIt API: {api}")
+
+
+def _not_portable(reason):
+    pytest.skip(f"Not portable to Python: {reason}")
 
 VALID_COLLECTION_SIZES = [0, 1, 10, 100]
 INT_MIN = -2147483648
@@ -50,17 +57,14 @@ def test_Constructor_Default():
 
 @pytest.mark.parametrize("capacity", [0, 10, 15, 16, 17, 100])
 def test_Constructor_Capacity(capacity):
-    # C# tests capacity allocation, Python lists are dynamic
-    lst = FlpList()
-    assert lst.count() == 0
+    _not_portable("List<T>(int capacity): Python lists have no capacity")
 
 @pytest.mark.parametrize("capacity", [-1, INT_MIN])
 def test_Constructor_NegativeCapacity_ThrowsArgumentOutOfRangeException(capacity):
-    with pytest.raises(ValueError):
-        raise ValueError("Capacity cannot be negative")
+    _not_portable("List<T>(int capacity): Python lists have no capacity")
 
 def test_Constructor_NullIEnumerable_ThrowsArgumentNullException():
-    with pytest.raises(TypeError):
+    with pytest.raises(SourceNoneError):
         FlpList(None)
 
 
@@ -91,8 +95,8 @@ def test_AddRange(list_length, enumerable_length):
         assert enumerable[i] == lst[i + list_length]
 
 def test_AddRange_NullList_ThrowsArgumentNullException():
-    with pytest.raises(TypeError):
-        lst = generic_list_factory(5)
+    lst = generic_list_factory(5)
+    with pytest.raises(CollectionNoneError):
         lst.add_range(None)
 
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
@@ -100,7 +104,7 @@ def test_AddRange_NullEnumerable_ThrowsArgumentNullException(count):
     lst = generic_list_factory(count)
     before_add = [lst[i] for i in range(lst.count())]
 
-    with pytest.raises(TypeError):
+    with pytest.raises(CollectionNoneError):
         lst.add_range(None)
 
     verify_list(lst, before_add)
@@ -144,7 +148,7 @@ def test_Contains_Valid():
 def test_Exists_VerifyExceptions():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3])
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         lst.exists(None)
 
 def test_Exists_Valid():
@@ -161,73 +165,74 @@ def test_Exists_Valid():
 def test_FindVerifyExceptions(count):
     lst = generic_list_factory(count)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         lst.find(None)
-    # with pytest.raises(TypeError):
-    #     lst.find_last(None)
-    # with pytest.raises(TypeError):
-    #     lst.find_last_index(None)
-    # with pytest.raises(TypeError):
-    #     lst.find_all(None)
-    # with pytest.raises(TypeError):
-    #     lst.find_index(None)
+    with pytest.raises(PredicateNoneError):
+        lst.find_all(None)
+    # FindLast / FindLastIndex / FindIndex: see test_FindVerifyExceptions_FindLastAndIndexes
 
-@pytest.mark.skip("not implemented yet")
+
+@pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
+def test_FindVerifyExceptions_FindLastAndIndexes(count):
+    # The rest of upstream FindVerifyExceptions.
+    _unsupported("FlpList.find_last / find_last_index / find_index")
+
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.find_last_index(int start_index, predicate)")
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
 def test_FindLastIndexInt_VerifyExceptions(count):
     lst = generic_list_factory(count)
 
     # Missing overload test: Requires C# implementation of FindLastIndex(int startIndex, Predicate match)
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         lst.find_last_index(0, None)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_last_index(INT_MIN, always_true)
 
     if lst.count() > 0:
-        with pytest.raises(ValueError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.find_last_index(-1, always_true)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_last_index(lst.count() + 1, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_last_index(lst.count(), always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_last_index(INT_MAX, always_true)
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.find_index(int start_index, int count, predicate)")
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
 def test_FindIndexIntInt_VerifyExceptions(count):
     lst = generic_list_factory(count)
 
     # Missing overload test: Requires C# implementation of FindIndex(int startIndex, int count, Predicate match)
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         lst.find_index(0, 0, None)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(INT_MIN, 0, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(-1, 0, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(lst.count() + 1, 0, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(lst.count(), 1, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(INT_MAX, 0, always_true)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(0, INT_MIN, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(0, -1, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(0, lst.count() + 1, always_true)
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentOutOfRangeError):
         lst.find_index(0, INT_MAX, always_true)
 
     if count > 0:
-        with pytest.raises(ValueError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.find_index(1, count, always_true)
-        with pytest.raises(ValueError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.find_index(0, count + 1, always_true)
 
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
@@ -309,20 +314,20 @@ def test_FindAll_ListSizeCanBeChanged():
     verify_list(result, expected_list)
     verify_list(lst, expected_list)
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.find_index")
 def test_FindIndex_VerifyVanilla():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3, 4, 5])
     assert lst.find_index(lambda x: x == 3) == 2
     assert lst.find_index(lambda x: x == 99) == -1
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.find_last")
 def test_FindLast_VerifyVanilla():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3, 2, 5])
     assert lst.find_last(lambda x: x == 2) == 2
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.find_last_index")
 def test_FindLastIndex_VerifyVanilla():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3, 2, 5])
@@ -333,14 +338,14 @@ def test_FindLastIndex_VerifyVanilla():
 # ==========================================
 # IndexOf & LastIndexOf Tests
 # ==========================================
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.index_of")
 def test_IndexOf_Valid():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3, 2, 5])
     assert lst.index_of(2) == 1
     assert lst.index_of(99) == -1
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.last_index_of")
 def test_LastIndexOf_Valid():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3, 2, 5])
@@ -425,7 +430,7 @@ def test_RemoveAt_InvalidIndex():
     lst.add_range([1, 2, 3])
     bad_indices = [-1, 3, 10]
     for idx in bad_indices:
-        with pytest.raises(ArgumentError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.remove_at(idx)
 
 @pytest.mark.parametrize("count", VALID_COLLECTION_SIZES)
@@ -453,7 +458,7 @@ def test_RemoveAll_SomeElements():
     verify_list(lst, [1, 3])
 
 def test_RemoveAll_NullMatchPredicate():
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         generic_list_factory(0).remove_all(None)
 
 @pytest.mark.parametrize("list_length, index, count", [
@@ -548,14 +553,14 @@ def test_Reverse_NegativeParameters(list_length):
     ]
 
     for idx, cnt in invalid_parameters:
-        with pytest.raises(ArgumentError):
+        with pytest.raises(ArgumentOutOfRangeError):
             lst.reverse(idx, cnt)
 
 
 # ==========================================
 # TrueForAll Tests
 # ==========================================
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.true_for_all")
 @pytest.mark.parametrize("count", [1, 10, 100])
 def test_TrueForAll_VerifyVanilla(count):
     lst = generic_list_factory(count)
@@ -566,14 +571,14 @@ def test_TrueForAll_VerifyVanilla(count):
     assert lst.true_for_all(always_true)
     assert lst.true_for_all(always_false) == False
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.true_for_all")
 def test_TrueForAll_NoElements():
     lst = generic_list_factory(0)
     assert lst.true_for_all(always_false) == True
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: FlpList.true_for_all")
 def test_TrueForAll_VerifyExceptions():
     lst = generic_list_factory(0)
     lst.add_range([1, 2, 3])
-    with pytest.raises(TypeError):
+    with pytest.raises(PredicateNoneError):
         lst.true_for_all(None)
