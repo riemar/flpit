@@ -20,6 +20,7 @@ from nettests.task.test_task_completion_source import (
 )
 
 from flpit.task import (
+    CancellationToken,
     CancellationTokenSource,
     InvalidStateError,
     Task,
@@ -27,24 +28,11 @@ from flpit.task import (
 )
 
 
-def _from_result(value: object) -> Task[object]:
-    source: TaskCompletionSource[object] = TaskCompletionSource()
-    source.set_result(value)
-    return source.task
-
-
-def _from_exception(error: Exception) -> Task[object]:
-    source: TaskCompletionSource[object] = TaskCompletionSource()
-    source.set_exception(error)
-    return source.task
-
-
-def _from_canceled() -> Task[object]:
+def _canceled_token() -> CancellationToken:
+    """``new CancellationToken(canceled: true)``"""
     cts = CancellationTokenSource()
     cts.cancel()
-    source: TaskCompletionSource[object] = TaskCompletionSource()
-    source.set_canceled(cts.token)
-    return source.task
+    return cts.token
 
 
 @pytest.mark.parametrize("try_method", [False, True])
@@ -68,16 +56,16 @@ def test_SetFromTask_AlreadyCompleted_ReturnsFalseOrThrows() -> None:
     tcs: TaskCompletionSource[object] = TaskCompletionSource()
     tcs.set_result(result)
 
-    assert not tcs.try_set_from_task(_from_result(object()))
-    assert not tcs.try_set_from_task(_from_exception(Exception()))
-    assert not tcs.try_set_from_task(_from_canceled())
+    assert not tcs.try_set_from_task(Task.from_result(object()))
+    assert not tcs.try_set_from_task(Task.from_exception(Exception()))
+    assert not tcs.try_set_from_task(Task.from_canceled(_canceled_token()))
 
     with pytest.raises(InvalidStateError):
-        tcs.set_from_task(_from_result(object()))
+        tcs.set_from_task(Task.from_result(object()))
     with pytest.raises(InvalidStateError):
-        tcs.set_from_task(_from_exception(Exception()))
+        tcs.set_from_task(Task.from_exception(Exception()))
     with pytest.raises(InvalidStateError):
-        tcs.set_from_task(_from_canceled())
+        tcs.set_from_task(Task.from_canceled(_canceled_token()))
 
     assert tcs.task.status == Task.SUCCEEDED
     assert tcs.task.result() is result
@@ -86,7 +74,7 @@ def test_SetFromTask_AlreadyCompleted_ReturnsFalseOrThrows() -> None:
 @pytest.mark.parametrize("try_method", [False, True])
 def test_SetFromTask_CompletedSuccessfully(try_method: bool) -> None:
     tcs: TaskCompletionSource[object] = TaskCompletionSource()
-    source = _from_result(object())
+    source = Task.from_result(object())
 
     if try_method:
         assert tcs.try_set_from_task(source)

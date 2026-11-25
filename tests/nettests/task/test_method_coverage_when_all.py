@@ -20,18 +20,6 @@ import pytest
 from flpit.task import AggregateError, CancellationTokenSource, Task, TaskCompletionSource
 
 
-def _faulted(error: Exception) -> Task[int]:
-    source: TaskCompletionSource[int] = TaskCompletionSource()
-    source.set_exception(error)
-    return source.task
-
-
-def _succeeded(value: int) -> Task[int]:
-    source: TaskCompletionSource[int] = TaskCompletionSource()
-    source.set_result(value)
-    return source.task
-
-
 def _canceled() -> Task[int]:
     source: TaskCompletionSource[int] = TaskCompletionSource()
     source.set_canceled()
@@ -47,8 +35,8 @@ def _inner_exceptions(task: Task[object]) -> tuple[Exception, ...]:
 @pytest.mark.parametrize("first_faulted", [True, False])
 def test_Task_WhenAll_TwoTasks_WhenPreCompletedFromException(first_faulted: bool) -> None:
     error = ValueError("expected")
-    other = _succeeded(1)
-    combined = Task.when_all(_faulted(error), other) if first_faulted else Task.when_all(other, _faulted(error))
+    other = Task.from_result(1)
+    combined = Task.when_all(Task.from_exception(error), other) if first_faulted else Task.when_all(other, Task.from_exception(error))
 
     assert combined.status == Task.FAILED
     assert _inner_exceptions(combined)[0] is error  # Exception.InnerException
@@ -56,7 +44,7 @@ def test_Task_WhenAll_TwoTasks_WhenPreCompletedFromException(first_faulted: bool
 
 def test_Task_WhenAll_TwoTasks_WhenBothPreCompletedFromException() -> None:
     first, second = ValueError("first"), KeyError("second")
-    combined = Task.when_all(_faulted(first), _faulted(second))
+    combined = Task.when_all(Task.from_exception(first), Task.from_exception(second))
 
     assert combined.status == Task.FAILED
     assert _inner_exceptions(combined) == (first, second)  # InnerExceptions, in argument order
@@ -154,7 +142,7 @@ def test_Task_WhenAll_TwoTasks_WakesOnBothCompletionWithExceptionAndCancellation
 def test_Task_WhenAll_PreCanceledAndPreFaulted_FaultWins() -> None:
     """FlpIt addition: the precedence rule with both inputs already complete."""
     error = ValueError("expected")
-    combined = Task.when_all(_canceled(), _faulted(error))
+    combined = Task.when_all(_canceled(), Task.from_exception(error))
 
     assert combined.status == Task.FAILED
     assert _inner_exceptions(combined) == (error,)

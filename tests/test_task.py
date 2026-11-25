@@ -976,3 +976,32 @@ def test_flpit_await_on_a_worker_takes_the_pure_path_with_interop_enabled() -> N
         return await Task.run(inner) + await Task.run(inner)
 
     assert Task.run(outer).result() == 10
+
+
+def test_from_canceled_requires_a_cancelled_token_and_keeps_it():
+    from flpit.core.linq import ArgumentOutOfRangeError
+    from flpit.task import CancellationToken, TaskCanceledError
+
+    with pytest.raises(ArgumentOutOfRangeError, match="cancellationToken"):
+        Task.from_canceled(CancellationToken.none())
+    with pytest.raises(ArgumentOutOfRangeError, match="cancellationToken"):
+        Task.from_canceled(CancellationTokenSource().token)
+
+    cts = CancellationTokenSource()
+    cts.cancel()
+    task = Task.from_canceled(cts.token)
+    assert task.cancelled()
+    assert task.cancellation_token == cts.token
+    with pytest.raises(TaskCanceledError) as raised:
+        task.result()
+    assert raised.value.token == cts.token
+    assert raised.value.task is task
+
+
+def test_from_exception_fails_the_task_even_for_a_cancellation():
+    error = OperationCanceledError()
+    task = Task.from_exception(error)
+    assert task.status == Task.FAILED
+    with pytest.raises(OperationCanceledError) as raised:
+        task.result()
+    assert raised.value is error

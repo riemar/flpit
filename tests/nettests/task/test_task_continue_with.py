@@ -507,8 +507,7 @@ def test_RunContinuationCancelTest_State() -> None:
         pytest.fail("RunContinuationCancelTest_State    > Failed!  t3 should have run.")
 
 
-@pytest.mark.skip(reason="its Choose() helper needs TaskFactory.ContinueWhenAll and Task.FromCanceled, "
-                         "which are not part of FlpIt's continue_with support")
+@pytest.mark.skip(reason="its Choose() helper needs TaskFactory.ContinueWhenAll, which FlpIt does not have")
 def test_TestNoDeadlockOnContinueWith() -> None:
     pass
 

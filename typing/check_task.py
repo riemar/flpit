@@ -157,6 +157,9 @@ async def waits_and_continuations():
     assert_type(Task.run(lambda: "x", creation_options=TaskCreationOptions.LONG_RUNNING), Task[str])
     assert_type(t.creation_options, TaskCreationOptions)
     assert_type(Task.completed_task, Task[None])
+    assert_type(Task.from_result(1), Task[int])
+    assert_type(Task.from_exception(ValueError()), Task[Any])
+    assert_type(Task.from_canceled(CancellationToken.none()), Task[Any])
 
     error = TaskCanceledError(t)
     assert_type(error.task, Task[Any] | None)
