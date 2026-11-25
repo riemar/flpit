@@ -12,15 +12,15 @@ flpit runs your code on threads, so the first choice for I/O is a library's **sy
 and meant to be shared: one `httpx.Client` for the whole process, one psycopg `ConnectionPool`. They need no event
 loop, no bridge and no per-loop copies.
 
-A sync call holds its worker while it waits. Give the pool as many workers as you expect calls in flight, and
-the client as many connections:
+A sync call holds its worker while it waits. The pool notices: a worker that has waited for a few milliseconds
+while work is queued is replaced, up to `burst_workers` (default 256), so the pool grows with the calls in flight
+(see [the Task runtime](index.md)). Give the client as many connections:
 
 ```python
 import httpx
-from flpit.task import Task, task
+from flpit.task import task
 
-Task.configure(min_workers=64)  # before the runtime starts
-client = httpx.Client(limits=httpx.Limits(max_connections=64, max_keepalive_connections=64))
+client = httpx.Client(limits=httpx.Limits(max_connections=256, max_keepalive_connections=64))
 
 
 @task
@@ -28,9 +28,9 @@ def fetch(url: str) -> dict:
     return client.get(url).json()
 ```
 
-With the default pool (CPU count + 4 workers), 100 parallel calls that each wait 50 ms ran in about 1.6 s on a
-2-core machine, because only that many ran at once; with 32 workers, in about 0.24 s, on par with one asyncio
-loop and one `httpx.AsyncClient`.
+100 parallel calls that each wait 50 ms took about 0.9 s on a 2-core machine with the pool's default size
+(CPU count + 4 workers) and no replacement, and 0.12–0.25 s with it, on par with one asyncio loop and one
+`httpx.AsyncClient`.
 
 ## When a library only exists for asyncio
 

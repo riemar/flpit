@@ -146,7 +146,16 @@ Work beyond the worker limit queues up, and workers are added when the pool is s
 `Task.result()`. Calling `result()` inside a task on a task that has not started yet runs it inline, as .NET does.
 To put a plain call on the pool without creating a `Task`, use
 [`ThreadPool.queue`](../concurrency/threading.md#threadpool).
-Set the limits with `Task.configure(min_workers=..., max_workers=...)` before the runtime first starts, and stop
+A worker that waits instead of computing (on a socket, a database driver, a lock, a file, a sleep) is replaced
+within a few milliseconds while work is queued, up to `burst_workers` (default 256) workers in total: a pool
+running sync clients grows with the calls in flight, like the .NET thread pool does for blocked workers. The pool
+patches nothing to see this: a worker stalled on one item is waiting if its own CPU clock barely moves (Linux and
+other platforms with per-thread CPU clocks), or, elsewhere, if the process leaves most of its CPU unused. Workers
+that compute are not replaced: more threads would not make CPU work faster. `Task.configure(burst_workers=1)`
+turns quick replacement off.
+
+Set the limits with `Task.configure(min_workers=..., max_workers=..., burst_workers=...)` before the runtime first
+starts, and stop
 the process-wide runtime with `Task.shutdown(grace_timeout=..., worker_timeout=...)`, which returns a report of
 work that could not be stopped.
 
