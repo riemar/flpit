@@ -25,7 +25,7 @@ import pytest
 from flpit import AsyncFlpIt, SelectorNoneError, SourceNoneError, flp
 from nettests.async_linq.async_helpers import (
     assert_equal, async_test, cancel_while_enumerating, consume, create_source, create_sources, fill_random_ints,
-    not_portable, track,
+    not_portable, track, unsupported,
 )
 
 
@@ -42,6 +42,12 @@ def test_InvalidInputs_Throws():
         flp.ait(None)
     with pytest.raises(SelectorNoneError):
         AsyncFlpIt.empty().select_many(None)
+
+
+def test_InvalidInputs_Throws_OtherOverloads():
+    # The rest of upstream InvalidInputs_Throws: the (item, index) selector overloads ("selector") and the
+    # collectionSelector / resultSelector overloads.
+    unsupported("select_many((item, index) selector) / select_many(collection_selector, result_selector)")
 
 
 def test_Empty_ProducesEmpty():

@@ -34,12 +34,13 @@ def test_InvalidInputs_Throws():
         flp.ait(None)
 
 
-@async_test
-async def test_InvalidInputs_NullKeySelector_Throws():
-    # Like FlpIt.min_by, a None key selector is reported once there is an element to select a key for.
-    assert await AsyncFlpIt.empty().min_by(None) is None
+@pytest.mark.xfail(strict=True, reason="Undecided deviation: flpit validates a None key selector only once there is an element (an empty "
+           "source returns None); .NET throws ArgumentNullException('keySelector') at the call")
+def test_InvalidInputs_Throws_KeySelector():
+    # The keySelector half of upstream InvalidInputs_Throws, split off so the source half above stays a plain
+    # test. The sync and async (i, ct) selector overloads are one Python method: one call covers both.
     with pytest.raises(SelectorNoneError):
-        await flp.ait([1]).min_by(None)
+        AsyncFlpIt.empty().min_by(None)
 
 
 @async_test
