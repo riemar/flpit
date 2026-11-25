@@ -2,6 +2,7 @@ import pytest
 import pytest
 
 from flpit import AsyncFlpIt, flp
+from flpit.core.linq import ArgumentError
 from flpit.task import (
     Task,
     TaskCompletionSource,
@@ -308,7 +309,7 @@ class TestWhenAnyOperator:
         assert _tasks_as_flpit(sources).when_any().result() is sources[0].task
 
     def test_empty_query_is_invalid(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ArgumentError):
             flp.it([]).select(lambda n: Task.run(lambda: n)).when_any()
 
     def test_flpit_starts_every_task_before_waiting(self):

@@ -142,9 +142,13 @@ class AggregateError(Exception):
             exceptions: Iterable[Exception],
             message: str = "One or more errors occurred.",
     ) -> None:
+        if exceptions is None:
+            raise ArgumentNullError("innerExceptions")  # .NET ArgumentNullException; a TypeError, as before
         self.exceptions = tuple(exceptions)
         if not self.exceptions:
             raise ValueError("exceptions must contain at least one exception")
+        if any(error is None for error in self.exceptions):
+            raise ArgumentError("An element of innerExceptions was null. (Parameter 'innerExceptions')")
         if not all(isinstance(error, Exception) for error in self.exceptions):
             raise TypeError("exceptions must contain Exception instances")
         super().__init__(message)
@@ -1324,6 +1328,13 @@ class Task(Generic[T], metaclass=_TaskMeta):
         queried fluently and iterated with ``async for``.
         """
         from flpit.core.async_linq import async_flpit  # async_linq imports this module
+        # .NET validates the arguments at the call, not when the stream is first iterated.
+        if len(tasks) == 1 and tasks[0] is None:
+            raise ArgumentNullError("tasks")
+        if len(tasks) == 1 and not isinstance(tasks[0], Task) and not inspect.isawaitable(tasks[0]):
+            tasks = tuple(tasks[0])
+        if any(task is None for task in tasks):
+            raise ArgumentError("The tasks argument included a null value. (Parameter 'tasks')")
         return async_flpit(_collect_each)(tasks)
 
     collect = when_each
@@ -2843,6 +2854,8 @@ def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task
     coroutine objects supplied to this call are closed so Python does not emit
     "coroutine was never awaited" warnings for rejected inputs.
     """
+    if len(items) == 1 and items[0] is None:
+        raise ArgumentNullError("tasks")  # .NET Task.WhenAll((Task[])null)
     # A single awaitable is one operation, not an iterable of operations.
     if (
             len(items) == 1
@@ -2857,7 +2870,7 @@ def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task
             pass
 
     if not items and not allow_empty:
-        raise ValueError("Task.when_any() requires at least one task or awaitable")
+        raise ArgumentError("The tasks argument contains no tasks. (Parameter 'tasks')")
 
     def close_raw_coroutines(values: tuple[Any, ...]) -> None:
         seen: set[int] = set()
@@ -2871,6 +2884,9 @@ def _normalize_tasks(items: tuple[Any, ...], *, allow_empty: bool) -> tuple[Task
 
     # Validate everything before scheduling anything, avoiding partial starts
     # when the caller accidentally mixes a coroutine with a non-awaitable.
+    if any(item is None for item in items):
+        close_raw_coroutines(items)
+        raise ArgumentError("The tasks argument included a null value. (Parameter 'tasks')")
     invalid = [item for item in items if not isinstance(item, Task) and not inspect.isawaitable(item)]
     if invalid:
         close_raw_coroutines(items)

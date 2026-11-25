@@ -587,10 +587,15 @@ def test_RunTaskWaitAnyTests_WithCancellationTokenTests() -> None:
 
 
 def test_RunTaskWaitAnyTests_Negative() -> None:
-    with pytest.raises(ValueError):
-        Task.when_any()
-    with pytest.raises(TypeError):
-        Task.when_any([object()])
+    # test exceptions
+    with pytest.raises(ArgumentNullError):
+        Task.wait_any(None)  # type: ignore[arg-type]
+    with pytest.raises(ArgumentError, match="tasks"):
+        Task.wait_any([None])  # type: ignore[list-item]
+    with pytest.raises(ArgumentOutOfRangeError):
+        Task.wait_any([Task.run(lambda: None)], timeout=-0.002)  # -2 ms
+    with pytest.raises(ArgumentOutOfRangeError):
+        Task.wait_any([Task.run(lambda: None)], timeout=timedelta(milliseconds=-2))
 
 
 def _wait_on_token(token: Any) -> None:
