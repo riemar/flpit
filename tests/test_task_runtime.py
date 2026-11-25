@@ -209,8 +209,8 @@ def test_max_workers_is_a_hard_limit(pool) -> None:
     blocker.result()
 
 
-def test_starved_pool_injects_workers_beyond_min(pool) -> None:
-    """With every worker stuck, queued work still gets a thread eventually."""
+def test_a_waiting_worker_is_replaced_quickly(pool) -> None:
+    """A worker waiting (not computing) while work is queued gets a replacement within ms."""
     pool(min_workers=1, max_workers=4)
     release = threading.Event()
     started = threading.Event()
@@ -223,17 +223,43 @@ def test_starved_pool_injects_workers_beyond_min(pool) -> None:
     assert started.wait(2)
     victim = Task.run(lambda: threading.current_thread().name)
     try:
-        # Not immediately (min_workers is 1) ...
+        deadline = time.monotonic() + 2
+        while not victim.done() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert victim.done()
+        assert not blocker.done()
+    finally:
+        release.set()
+    assert victim.result().startswith("Task-worker")
+    blocker.result()
+
+
+def test_starved_pool_injects_workers_beyond_min(pool) -> None:
+    """A worker that computes is not replaced quickly, but queued work still gets a thread."""
+    pool(min_workers=1, max_workers=4)
+    started = threading.Event()
+    stop = threading.Event()
+
+    def compute() -> None:
+        started.set()
+        while not stop.is_set():
+            pass
+
+    blocker = Task.run(compute)
+    assert started.wait(2)
+    victim = Task.run(lambda: threading.current_thread().name)
+    try:
+        # Not quickly: the one worker keeps the CPU it may use busy ...
         time.sleep(0.1)
         assert not victim.done()
-        # ... but well before the blocker lets go.
+        # ... but the starvation rule adds a worker well before the blocker stops.
         deadline = time.monotonic() + 5
         while not victim.done() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert victim.done()
         assert not blocker.done()
     finally:
-        release.set()
+        stop.set()
     assert victim.result().startswith("Task-worker")
     blocker.result()
 
@@ -480,9 +506,9 @@ def test_configure_validates_worker_limits(pool) -> None:
         Task.configure(min_workers=5, max_workers=2)
 
     Task.configure(max_workers=7)
-    assert task_module._runtime_config == {"min_workers": 7, "max_workers": 7}
+    assert task_module._runtime_config == {"min_workers": 7, "max_workers": 7, "burst_workers": 256}
     Task.configure(min_workers=2)
-    assert task_module._runtime_config == {"min_workers": 2, "max_workers": 7}
+    assert task_module._runtime_config == {"min_workers": 2, "max_workers": 7, "burst_workers": 256}
 
     assert Task.run(lambda: 1).result() == 1
     with pytest.raises(RuntimeError, match="before runtime startup"):

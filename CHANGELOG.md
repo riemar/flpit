@@ -42,6 +42,15 @@ All notable changes to FlpIt are documented here. The format follows
   creating a Task. `queue` runs it in a fresh, empty context, `queue_user_work_item` in a copy of the
   caller's. Exceptions go to the `Task.set_exception_handler` handler, or are logged.
 - `benchmarks/scripts/task_start_bench.py` measures what it costs to start, resume and complete tasks.
+- The worker pool replaces workers that wait instead of compute. While work is queued and no worker is free, a
+  worker that has sat on one item for a few milliseconds without using CPU (on a socket, a database driver, a
+  lock, a file, a sleep) gets a replacement right away, up to `burst_workers` workers (default 256, a new
+  `Task.configure` option); before, only the starvation rule added a worker, at most every 0.5 s. 100 work items
+  that each wait 50 ms on the default pool take about 55 ms instead of 855 ms; CPU-bound work adds no workers.
+  Nothing outside flpit is patched: each worker's own CPU clock tells waiting from computing on Linux and other
+  platforms that have per-thread CPU clocks; elsewhere the pool goes by how much CPU the process uses, which can
+  add a few workers for CPU work when other processes keep the CPU busy
+  (`benchmarks/scripts/worker_replacement_bench.py`).
 - `flpit.asyncio_bridge` (provisional: its API may change in 0.5): asyncio libraries on the flpit runtime. A pool of standard asyncio event loops, one
   per CPU by default and created on first use. On Linux each loop is a serialized queue on the flpit pool (one
   reactor thread for all loops' I/O, timers on flpit's timer queue, no thread per loop); elsewhere, or with

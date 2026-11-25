@@ -300,6 +300,34 @@ class _ThreadState(threading.local):
 _thread_state = _ThreadState()
 
 
+class _WorkerInfo:
+    """A pool worker's record, read by the gate."""
+
+    __slots__ = ("items", "cpu_clock")
+
+    def __init__(self) -> None:
+        # Work items started by this worker. Unchanged across the gate's ticks means the
+        # worker is still on the same item: it is stalled (waiting or computing).
+        self.items = 0
+        # This thread's CPU-time clock, where the platform has one (Linux, BSDs; not macOS
+        # or Windows): it barely moves while the thread waits, and moves while it computes.
+        self.cpu_clock: int | None = None
+        getcpuclockid = getattr(time, "pthread_getcpuclockid", None)
+        if getcpuclockid is not None:
+            try:
+                self.cpu_clock = getcpuclockid(threading.get_ident())
+            except OSError:
+                pass
+
+
+def _cpu_capacity() -> float:
+    """CPU cores Python code can use at once: 1 with the GIL, all of them without."""
+    if getattr(sys, "_is_gil_enabled", lambda: True)():
+        return 1.0
+    counter = getattr(os, "process_cpu_count", os.cpu_count)
+    return float(counter() or 1)
+
+
 def _start_dedicated_thread(task: "Task[Any]") -> None:
     """Run ``task._start`` on a new background thread (.NET LongRunning)."""
     threading.Thread(
@@ -930,6 +958,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             min_workers: int | None = None,
             max_workers: int | None = None,
             max_pending_background: int | None = None,
+            burst_workers: int | None = None,
     ) -> None:
         """Configure worker capacity before the runtime is first started.
 
@@ -945,6 +974,17 @@ class Task(Generic[T], metaclass=_TaskMeta):
         ``min_workers`` is set to the same value, so that many workers start
         on demand immediately and no more are ever added.
 
+        Workers that wait rather than compute are replaced within a few
+        milliseconds while work is queued: a worker stalled on one item while
+        the process leaves CPU unused is waiting (on a socket, a database
+        driver, a lock, a file, a sleep). A pool running sync clients thus
+        grows with the calls in flight instead of being limited to
+        ``min_workers``. When the CPU is saturated (one core with the GIL,
+        every core on free-threaded builds), more threads cannot help and
+        none are added. ``burst_workers`` (default 256) caps the pool size up
+        to which this happens; beyond it only the slow starvation rule adds
+        workers. Neither ever exceeds ``max_workers``.
+
         ``max_pending_background`` is accepted for backwards compatibility and
         ignored: like the .NET thread pool, the work queue is unbounded.
         """
@@ -953,7 +993,11 @@ class Task(Generic[T], metaclass=_TaskMeta):
             if _runtime is not None and not _runtime.closed:
                 raise RuntimeError("Task.configure() must be called before runtime startup")
             config = dict(_runtime_config)
-            for label, value in (("min_workers", min_workers), ("max_workers", max_workers)):
+            for label, value in (
+                    ("min_workers", min_workers),
+                    ("max_workers", max_workers),
+                    ("burst_workers", burst_workers),
+            ):
                 if value is None:
                     continue
                 if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -965,6 +1009,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 config["min_workers"] = min_workers
             if config["min_workers"] > config["max_workers"]:
                 raise ValueError("min_workers must not exceed max_workers")
+            if burst_workers is not None:
+                config["burst_workers"] = burst_workers
             if max_pending_background is not None:
                 if (
                         isinstance(max_pending_background, bool)
@@ -3164,6 +3210,23 @@ def _spin_count() -> int:
     return 400  # a few tens of microseconds
 
 
+class _Stall:
+    """The gate's view of one worker's current item: since when, and its CPU time then."""
+
+    __slots__ = ("items", "ticks", "since", "cpu")
+
+    def __init__(self, info: _WorkerInfo) -> None:
+        self.items = info.items
+        self.ticks = 0
+        self.since = time.monotonic()
+        self.cpu: float | None = None
+        if info.cpu_clock is not None:
+            try:
+                self.cpu = time.clock_gettime(info.cpu_clock)
+            except OSError:
+                pass
+
+
 class _WorkerPool:
     """Thread pool modelled on the .NET ThreadPool.
 
@@ -3174,6 +3237,11 @@ class _WorkerPool:
       (starvation), up to the hard limit ``max_workers``.
     * A worker blocked in ``Task.result()`` is reported to the pool, which may
       start a replacement right away (.NET's cooperative blocking detection).
+    * While work is queued and no worker is free, the gate looks every few
+      milliseconds: workers stalled on one item while the process leaves CPU
+      unused are waiting, not computing, and are replaced, up to
+      ``burst_workers``. Nothing outside flpit is patched: CPU time tells
+      waiting from computing, whatever the wait is.
     * Workers above ``min_workers`` retire after being idle for a while.
     * Workers are daemon threads, like .NET background threads: a worker stuck
       in user code never keeps the process from exiting.
@@ -3204,11 +3272,32 @@ class _WorkerPool:
     _IDLE_TIMEOUT: Final = 20.0  # same order as the .NET worker idle timeout
     _GATE_INTERVAL: Final = 0.5
     _GATE_INTERVAL_BLOCKED: Final = 0.25
+    # Waiting workers: how often the gate looks while work is queued and no worker is free,
+    # how many ticks a worker must sit on one item to count as stalled, and the share of the
+    # CPU capacity below which stalled workers are taken to be waiting rather than computing.
+    _GATE_TICK: Final = 0.005
+    _GATE_TICK_MAX: Final = 0.1
+    _STALL_TICKS: Final = 2
+    _CPU_SATURATED: Final = 0.5  # waiting workers use ~0 cores, computing ones 0.6-1 each
+    # A stalled worker whose own CPU clock moved less than this share of the time it has been
+    # on its item is waiting (it measures 0.000; computing ones get a share even when contended).
+    _WAITING_CPU_SHARE: Final = 0.02
 
-    def __init__(self, runtime: "_Runtime", min_workers: int, max_workers: int) -> None:
+    def __init__(
+            self,
+            runtime: "_Runtime",
+            min_workers: int,
+            max_workers: int,
+            *,
+            burst_workers: int = 256,
+    ) -> None:
         self._runtime = runtime
         self._min = min_workers
         self._max = max_workers
+        # Pool size up to which waiting workers are replaced without delay.
+        self._burst = min(max_workers, max(min_workers, burst_workers))
+        self._capacity = _cpu_capacity()
+        self._workers: set[_WorkerInfo] = set()  # one record per live worker; under _lock
         self._items: deque[Callable[[], Any]] = deque()
         self._lock = threading.Lock()
         self._exited = threading.Condition(self._lock)
@@ -3293,6 +3382,9 @@ class _WorkerPool:
     def _work(self) -> None:
         state = _thread_state
         state.pool = self
+        info = _WorkerInfo()
+        with self._lock:
+            self._workers.add(info)
         _install_asyncgen_hooks()
         items = self._items
         lock = self._lock
@@ -3386,6 +3478,7 @@ class _WorkerPool:
                         searching = True  # the waker counted this worker
 
                 state.tail = False
+                info.items += 1  # unsynchronized: only this worker writes it, the gate reads
                 try:
                     item()
                 except BaseException as error:
@@ -3403,6 +3496,7 @@ class _WorkerPool:
         finally:
             state.pool = None
             with lock:
+                self._workers.discard(info)
                 if searching:
                     self._searching -= 1
                 if counted:
@@ -3435,7 +3529,7 @@ class _WorkerPool:
         self._gate_signal.set()
 
     def _gate(self) -> None:
-        """Inject a worker when queued work makes no progress (starvation)."""
+        """Inject workers while queued work waits: for waiting workers, and on starvation."""
         _thread_state.internal = True
         items = self._items
         signal = self._gate_signal
@@ -3443,10 +3537,13 @@ class _WorkerPool:
         while True:
             signal.wait()
             last = self._completed
+            starvation_due = time.monotonic() + self._starvation_interval()
+            stalls: dict[_WorkerInfo, _Stall] = {}
+            cpu_then = time.process_time()
+            wall_then = time.monotonic()
+            tick = self._GATE_TICK
             while True:
-                if closing.wait(
-                        self._GATE_INTERVAL_BLOCKED if self._blocked else self._GATE_INTERVAL
-                ):
+                if closing.wait(tick):
                     return
                 if not items:
                     # Go dormant; re-check after clearing so that a request
@@ -3455,6 +3552,18 @@ class _WorkerPool:
                     if not items:
                         break
                     signal.set()
+                cpu_now = time.process_time()
+                now = time.monotonic()
+                cores_used = (cpu_now - cpu_then) / max(now - wall_then, 1e-6)
+                cpu_then, wall_then = cpu_now, now
+                if self._replace_waiting_workers(stalls, cores_used) is False:
+                    # The stalled workers compute: more threads cannot help; look less often.
+                    tick = min(tick * 2, self._GATE_TICK_MAX)
+                else:
+                    tick = self._GATE_TICK
+                if now < starvation_due:
+                    continue
+                starvation_due = now + self._starvation_interval()
                 current = self._completed
                 if current == last:
                     # Work is waiting and not a single item finished during
@@ -3468,6 +3577,80 @@ class _WorkerPool:
                         serial = self._serial
                     self._spawn(serial)
                 last = current
+
+    def _starvation_interval(self) -> float:
+        return self._GATE_INTERVAL_BLOCKED if self._blocked else self._GATE_INTERVAL
+
+    def _replace_waiting_workers(
+            self, stalls: dict[_WorkerInfo, _Stall], cores_used: float
+    ) -> bool | None:
+        """Start one worker per stalled worker that waits rather than computes.
+
+        True if it started any, False if the stalled workers compute (so the gate can look
+        less often), None if there is nothing to decide yet.
+
+        A worker is stalled when it has been on the same item for _STALL_TICKS ticks. Whether
+        it waits (on a socket, a driver, a lock, a file, a sleep) or computes comes from its own
+        CPU clock where the platform has one (see _count_waiting); elsewhere from how much CPU
+        the process used: stalled workers while most of the CPU capacity is unused are waiting.
+        """
+        with self._lock:
+            workers = list(self._workers)
+        stalled: list[tuple[_WorkerInfo, _Stall]] = []
+        for info in workers:
+            record = stalls.get(info)
+            if record is None or record.items != info.items:
+                stalls[info] = _Stall(info)  # a new item: start watching it
+                continue
+            record.ticks += 1
+            if record.ticks >= self._STALL_TICKS:
+                stalled.append((info, record))
+        if len(stalls) > len(workers):
+            for gone in set(stalls).difference(workers):
+                del stalls[gone]
+        if not stalled or self._searching or self._parked:
+            return None  # nothing stalled, or a free worker will pick the queued work up
+        waiting = self._count_waiting(stalled, cores_used, len(workers))
+        if not waiting:
+            return False
+        with self._lock:
+            if self._closed or self._searching or self._parked:
+                return None
+            wanted = min(waiting, len(self._items), self._burst - self._count, self._max - self._count)
+            if wanted <= 0:
+                return None
+            self._count += wanted
+            self._searching += wanted
+            serials = range(self._serial + 1, self._serial + wanted + 1)
+            self._serial += wanted
+        for serial in serials:
+            self._spawn(serial)
+        return True
+
+    def _count_waiting(self, stalled: list[tuple[_WorkerInfo, _Stall]], cores_used: float, workers: int) -> int:
+        """How many of the stalled workers wait rather than compute."""
+        gil = getattr(sys, "_is_gil_enabled", lambda: True)()
+        if gil and cores_used >= self._CPU_SATURATED:
+            # The GIL is busy: a thread waiting for it uses no CPU and looks like a waiting
+            # one, and more threads cannot run Python code any faster.
+            return 0
+        now = time.monotonic()
+        waiting = 0
+        for info, record in stalled:
+            if info.cpu_clock is None or record.cpu is None:
+                break
+            try:
+                cpu = time.clock_gettime(info.cpu_clock)
+            except OSError:
+                continue  # the thread just exited
+            if cpu - record.cpu < self._WAITING_CPU_SHARE * (now - record.since):
+                waiting += 1
+        else:
+            return waiting
+        # No per-thread CPU clocks here: decide from the CPU the process used.
+        if cores_used >= self._CPU_SATURATED * min(self._capacity, workers):
+            return 0
+        return len(stalled)
 
     def close(self) -> None:
         """Stop accepting work, drop queued items and tell workers to exit."""
@@ -3497,8 +3680,14 @@ class _WorkerPool:
 class _Runtime:
     """Private singleton runtime: worker pool + socket reactor + task registry."""
 
-    def __init__(self, *, min_workers: int, max_workers: int) -> None:
-        self._pool = _WorkerPool(self, min_workers, max_workers)
+    def __init__(
+            self,
+            *,
+            min_workers: int,
+            max_workers: int,
+            burst_workers: int = 256,
+    ) -> None:
+        self._pool = _WorkerPool(self, min_workers, max_workers, burst_workers=burst_workers)
         self._io = _IOReactor(self)
         # Pending tasks, so shutdown can cancel them. The registry is weak on
         # purpose: a pending task that nothing references can never make
@@ -3962,12 +4151,14 @@ def _default_min_workers() -> int:
 
 _runtime_lock = threading.RLock()
 _runtime: _Runtime | None = None
-_runtime_config: dict[str, int] = {
+_runtime_config: dict[str, Any] = {
     # Created on demand without delay; the same size the fixed pool used to have.
     "min_workers": _default_min_workers(),
     # Same default as the .NET thread pool: effectively unbounded, reached only
     # through slow injection while the pool is starved.
     "max_workers": 32767,
+    # Workers that wait instead of compute are replaced quickly up to this pool size.
+    "burst_workers": 256,
 }
 
 
