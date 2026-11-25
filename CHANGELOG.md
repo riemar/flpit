@@ -9,6 +9,14 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Fixed
 
+- `flpit.json` (msgspec backend) could crash a free-threaded interpreter (a segmentation fault in
+  `msgspec._core`) when threads used a dataclass type for the first time at once: msgspec 0.22 builds its
+  information for a type lazily and caches it on the type, and a thread could use it while another was still
+  building it. The first use of each type now runs once, under a lock; afterwards it is one set lookup. Building
+  the wire types also read the dataclass's own `__dict__` while msgspec added its cache to it
+  (`RuntimeError: dictionary changed size during iteration`); it reads a snapshot now. Seen in stoop's soak
+  test: the server crashed 10 s in, on the first concurrent requests with a JSON body.
+
 - A finished Task, its result and the `AsyncLocal` values set inside it were only freed by the cyclic
   garbage collector, because a Task and its context referenced each other. They are now freed as soon
   as the last reference goes.
