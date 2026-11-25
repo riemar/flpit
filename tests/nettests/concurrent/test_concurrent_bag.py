@@ -246,6 +246,27 @@ class TestConcurrentBagTests(ProducerConsumerCollectionTests):
             bag.clear()
             assert 0 == bag.count
 
+    def test_Clear_AfterRemoval_DoesNotExposeOldItems(self) -> None:
+        bag = ConcurrentBag([1, 2, 3])
+        assert bag.try_take()[0]
+
+        bag.clear()
+        assert list(bag) == []
+        assert not bag.try_peek()[0]
+        assert not bag.try_take()[0]
+
+        bag.add(4)
+        bag.add(5)
+        assert [4, 5] == sorted(bag)
+        remaining = {4, 5}
+        while True:
+            ok, item = bag.try_take()
+            if not ok:
+                break
+            assert item in remaining
+            remaining.remove(item)
+        assert not remaining
+
     def test_Clear_DuringEnumeration_DoesntAffectEnumeration(self) -> None:
         expected_count = 100
         bag = ConcurrentBag(range(expected_count))
