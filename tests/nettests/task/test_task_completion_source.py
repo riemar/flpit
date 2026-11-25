@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from flpit.core.linq import ArgumentError
 from flpit.task import (
     AggregateError,
     CancellationTokenSource,
@@ -71,16 +72,19 @@ def test_Ctor_ArgumentsRoundtrip() -> None:
     assert with_state.task.status == Task.PENDING
     assert with_state.task.async_state is state
 
+    # TaskCompletionSource(RunContinuationsAsynchronously) and (state, RunContinuationsAsynchronously): not
+    # ported, FlpIt's TaskCompletionSource takes no TaskCreationOptions (see Ctor_InvalidArguments_Throws).
+
     # Promise tasks are completed here so this test leaves no pending work.
     assert tcs.try_set_result()
     assert with_state.try_set_result()
 
 
 def test_Ctor_InvalidArguments_Throws() -> None:
-    # The .NET source validates TaskCreationOptions bit combinations. FlpIt has
-    # no TaskCreationOptions concept; reject that unsupported keyword explicitly.
-    with pytest.raises(TypeError):
-        TaskCompletionSource(creation_options=object())  # type: ignore[call-arg]
+    # The original validates TaskCreationOptions combinations of the TaskCompletionSource constructor
+    # (AttachedToParent | RunContinuationsAsynchronously is accepted, other combinations with both raise
+    # ArgumentOutOfRangeException). FlpIt has TaskCreationOptions, but TaskCompletionSource takes none.
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: TaskCompletionSource(TaskCreationOptions)")
 
 
 @pytest.mark.parametrize("try_method", [False, True])
@@ -259,6 +263,10 @@ def test_SetFromTask_Faulted(try_method: bool) -> None:
         tcs.set_from_task(source.task)
 
     assert tcs.task.status == Task.FAILED
+    # The .NET original: Assert.True(tcs.Task.Exception.InnerExceptions.Count == 2)
+    exception = tcs.task.exception()
+    assert isinstance(exception, AggregateError)
+    assert exception.exceptions == tuple(errors)
 
     _assert_completed_tcs_fails_to_complete_again(tcs)
 
@@ -342,9 +350,10 @@ def test_TaskCompletionSource_OnlyOneConcurrentTrySetWins() -> None:
 
 def test_TaskCompletionSource_RejectsEmptyOrInvalidExceptionCollections() -> None:
     tcs = TaskCompletionSource()
-    with pytest.raises(ValueError, match="must not be empty"):
+    # .NET ArgumentException for both; FlpIt's ArgumentError is a TypeError.
+    with pytest.raises(ArgumentError, match="no exceptions"):
         tcs.set_exception([])
-    with pytest.raises(TypeError, match="only Exception"):
+    with pytest.raises(ArgumentError, match="null element"):
         tcs.set_exception([ValueError("valid"), object()])  # type: ignore[list-item]
     assert not tcs.task.done()
     tcs.set_result()

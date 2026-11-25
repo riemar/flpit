@@ -1098,6 +1098,11 @@ class Task(Generic[T], metaclass=_TaskMeta):
         ``Task.run_inline`` to start it on the calling thread instead.
         """
         task = cls._create(work, args, kwargs, token, pass_token, creation_options)
+        if token is not None and token.is_cancellation_requested:
+            # .NET: a task created with a cancelled token is Canceled at once, without being queued.
+            _close_if_coroutine(work)
+            task._finish(_CANCELLED, exception=_task_canceled(task, f"{task.name} cancelled before start", token))
+            return task
         if creation_options and creation_options & _LONG_RUNNING:
             task._runtime._submit_long_running(task, work, args, kwargs)
         else:
@@ -1225,6 +1230,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 if is_coroutine:
                     cast(Any, work).close()
                 raise TypeError("args/kwargs/pass_token cannot be supplied with an awaitable instance")
+        elif work is None:
+            raise ArgumentNullError("function")  # .NET ArgumentNullException; a TypeError, as before
         elif not callable(work):
             raise TypeError("Task.run() expects an awaitable or a callable")
         if token is not None and not isinstance(token, CancellationToken):
@@ -2695,20 +2702,22 @@ class TaskCompletionSource(Generic[T]):
     def _normalize_exceptions(
             error: Exception | Iterable[Exception],
     ) -> tuple[Exception, ...] | Exception:
+        # .NET: ArgumentNullException for a null exception or list, ArgumentException for an empty list or a
+        # null element. ArgumentError is a TypeError, as these always were except the empty list (ValueError).
         if isinstance(error, Exception):
             return error
         if error is None:
-            raise TypeError("exception must not be None")
+            raise ArgumentNullError("exception")
         if isinstance(error, (str, bytes, bytearray)):
-            raise TypeError("exception must be an Exception or iterable of Exceptions")
+            raise ArgumentError("exception must be an Exception or iterable of Exceptions")
         try:
             exceptions = tuple(error)
         except TypeError as exc:
-            raise TypeError("exception must be an Exception or iterable of Exceptions") from exc
+            raise ArgumentError("exception must be an Exception or iterable of Exceptions") from exc
         if not exceptions:
-            raise ValueError("exception iterable must not be empty")
+            raise ArgumentError("The tasks argument contains no exceptions. (Parameter 'exceptions')")
         if not all(isinstance(item, Exception) for item in exceptions):
-            raise TypeError("exception iterable must contain only Exception instances")
+            raise ArgumentError("The exceptions collection included at least one null element. (Parameter 'exceptions')")
         return exceptions
 
     def set_exception(self, error: Exception | Iterable[Exception]) -> None:

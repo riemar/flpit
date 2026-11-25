@@ -15,6 +15,16 @@ All notable changes to FlpIt are documented here. The format follows
   (`RuntimeError: dictionary changed size during iteration`); it reads a snapshot now. Seen in stoop's soak
   test: the server crashed 10 s in, on the first concurrent requests with a JSON body.
 
+- `Task.run()` with an already cancelled token queued the work and cancelled the task only when a worker
+  picked it up. The task is cancelled at once and the work is never queued, as in .NET.
+- `Task.run(None)` raises `ArgumentNullError` (was `TypeError`), and `TaskCompletionSource.set_exception()` /
+  `try_set_exception()` raise `ArgumentNullError` for `None` and `ArgumentError` for an empty collection (was
+  `ValueError`) or one with a `None` element, as .NET does. Both are `TypeError` subclasses.
+- The ported .NET task tests (`tests/nettests/task`) were re-checked against the originals method by method:
+  `WaitAny` waits on a gate instead of delays (it was flaky on macOS), and parts that had been rewritten or
+  dropped are back. Tests for API FlpIt does not have are skips naming the missing API; `Task.Delay`'s
+  `TimeSpan` / `-1` / bounds contract is ported as strict xfails.
+
 - `task.wait()` and `Task.wait_all()` turned a `KeyboardInterrupt` or `SystemExit` from a task into a plain
   `Exception` inside their `AggregateError`, so `except Exception` swallowed a Ctrl-C. They raise it as it is
   now, as `result()` and `await` already did; `Task.when_all` no longer puts it in an `AggregateError` either.
