@@ -270,7 +270,7 @@ def _class_layout(cls: type, jso: JsonSerializerOptions) -> tuple[list[_FieldSpe
 
     field_names = {f.name for f in dataclasses.fields(cls)}
     properties: list[_PropertySpec] = []
-    for name, value in vars(cls).items():
+    for name, value in vars(cls).copy().items():
         if not isinstance(value, property) or name in field_names:
             continue
         if value.fset is not None:

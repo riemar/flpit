@@ -253,7 +253,8 @@ def _struct_fields(
         definitions.append(spec)
 
     # 2. Process properties automatically
-    for name, value in vars(info.source).items():
+    # A snapshot: msgspec stores its type cache on the class, so another thread may add to this dict meanwhile.
+    for name, value in vars(info.source).copy().items():
         if isinstance(value, property) and name not in dataclass_fields:
             # Extract the type annotation directly from the getter function signature
             if value.fset is not None:
@@ -300,7 +301,7 @@ def _register_forward_refs(
 def _behavior_namespace(source: type) -> dict[str, Any]:
     return {
         name: value
-        for name, value in vars(source).items()
+        for name, value in vars(source).copy().items()
         if (
                 not name.startswith("__")
                 and (callable(value) or isinstance(value, property))
@@ -423,6 +424,8 @@ def _make_hook(tp: Any) -> typing.Callable[[Any], Any]:
         # struct side of a registered collection: a validated plain list
         as_list: Any = list[item]
 
+        _ensure_type_info(as_list)
+
         def wire(obj: Any) -> Any:
             if type(obj) is not list:
                 if _not_array(obj):
@@ -439,6 +442,7 @@ def _make_hook(tp: Any) -> typing.Callable[[Any], Any]:
                      else typing.cast(Any, collection.base)[item])
         # Items coming from the struct side were validated already; plain values need no second pass.
         reuse = collection.base is list and item in _PLAIN_ITEMS
+        _ensure_type_info(base)
 
         def dataclass_side(obj: Any) -> Any:
             # Lists here come from decoded structs (msgspec validated them); plain items need no second pass.
@@ -504,8 +508,37 @@ def _enc_hook(obj: Any) -> Any:
     raise NotImplementedError(f"flpit.json: cannot serialize {type(obj).__qualname__}")
 
 
+_type_info_ready: set[Any] = set()
+_type_info_lock = threading.Lock()
+
+
+def _ensure_type_info(tp: Any) -> None:
+    """Have msgspec build its information for ``tp`` (and the types in it) on one thread, before first use.
+
+    msgspec builds that information lazily, on a type's first decode or convert, and caches it on the type.
+    On free-threaded Python, threads using a type for the first time at once can crash the interpreter (a
+    segmentation fault in msgspec._core, msgspec 0.22): one thread reads the information while another is
+    still building it. Once it is complete, concurrent use is safe. So the first use of each type runs here,
+    under a lock; afterwards this is one set lookup.
+    """
+    try:
+        if tp in _type_info_ready:
+            return
+    except TypeError:  # unhashable: nothing to remember it by; msgspec does not cache it on a type either
+        return
+    with _type_info_lock:
+        if tp in _type_info_ready:
+            return
+        try:
+            msgspec.json.Decoder(type=tp, dec_hook=_dec_hook)
+        except (TypeError, ValueError):
+            pass  # not a type msgspec handles itself: the conversion goes through the hooks
+        _type_info_ready.add(tp)
+
+
 @lru_cache(maxsize=256)
 def _get_decoder(wire_type: Any):
+    _ensure_type_info(wire_type)
     return msgspec.json.Decoder(type=wire_type, dec_hook=_dec_hook)
 
 
@@ -535,6 +568,7 @@ class Backend:
             if jso.native:
                 return parsed
 
+            _ensure_type_info(target)
             result = msgspec.convert(
                 parsed,
                 target,
@@ -567,6 +601,7 @@ class Backend:
             jso = JsonSerializerOptions()
 
         wire_type = wire_type_for(target, jso)
+        _ensure_type_info(wire_type)
         try:
             wire_obj = msgspec.convert(data, wire_type, from_attributes=True, dec_hook=_dec_hook)
             return _JSON_ENCODER.encode(wire_obj)
@@ -599,6 +634,7 @@ class Backend:
 
         first = True
         wire_type = wire_type_for(target, jso)
+        _ensure_type_info(wire_type)
 
         write(b"[")
 
