@@ -151,6 +151,13 @@ def test_SetException_Exception_CompletesSuccessfully(try_method: bool) -> None:
     assert tcs.task.status == Task.FAILED
     assert tcs.task.done()
 
+    # The .NET original: Assert.Same(e, Task.Exception.InnerException), InnerExceptions.Count == 1.
+    exception = tcs.task.exception()
+    assert isinstance(exception, AggregateError)
+    assert exception.exceptions[0] is error
+    assert len(exception.exceptions) == 1
+
+    # result() is GetAwaiter().GetResult(): the exception itself.
     with pytest.raises(ValueError, match="expected exception") as caught:
         tcs.task.result()
 
@@ -170,10 +177,17 @@ def test_SetException_Enumerable_CompletesSuccessfully(try_method: bool) -> None
 
     assert tcs.task.status == Task.FAILED
 
-    with pytest.raises(AggregateError) as result_error:
+    # The .NET original: Assert.NotNull(Task.Exception); Assert.Equal(e, Task.Exception.InnerExceptions).
+    exception = tcs.task.exception()
+    assert exception is not None
+    assert isinstance(exception, AggregateError)
+    assert exception.exceptions == tuple(errors)
+
+    # result() is GetAwaiter().GetResult(): the first exception itself.
+    with pytest.raises(ValueError, match="first") as result_error:
         tcs.task.result()
 
-    assert result_error.value.exceptions == tuple(errors)
+    assert result_error.value is errors[0]
     _assert_completed_tcs_fails_to_complete_again(tcs)
 
 
@@ -395,7 +409,9 @@ def test_FlpIt_TaskCompletionSource_CompetingCompletionKindsHaveSingleWinner() -
     if winners[0] == "result":
         assert tcs.task.result() == 123
     elif winners[0] == "exception":
-        assert isinstance(tcs.task.exception(), ValueError)
+        exception = tcs.task.exception()
+        assert isinstance(exception, AggregateError)
+        assert isinstance(exception.exceptions[0], ValueError)
     else:
         assert tcs.task.cancelled()
         with pytest.raises(OperationCanceledError):

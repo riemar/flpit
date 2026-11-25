@@ -66,7 +66,7 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from itertools import count
 from types import AsyncGeneratorType, CoroutineType, FunctionType, MethodType
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast, Iterable, Final, overload, override
+from typing import TYPE_CHECKING, Any, Generic, NoReturn, Protocol, TypeVar, cast, Iterable, Final, overload, override
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
@@ -896,7 +896,13 @@ class Task(Generic[T], metaclass=_TaskMeta):
     # and a task only gets its own attribute when it assigns one: a Task is created
     # for every unit of work, and each attribute stored in __init__ costs time.
     _result: Any = None
+    # The exception result() and await raise: the first failure, as .NET's GetAwaiter().GetResult().
     _exception: BaseException | None = None
+    # Every failure when there were several (when_all, TaskCompletionSource.set_exception of an
+    # iterable), in order; _exception is the first of them. None: _exception is the only one.
+    _inner_exceptions: tuple[Exception, ...] | None = None
+    # What exception() returns once built (.NET Task.Exception returns the same instance each time).
+    _aggregate: AggregateError | None = None
     _continuations: list[Callable[[Task[Any]], Any]] | None = None
     _done_event: threading.Event | None = None
     _work: tuple[Any, tuple[Any, ...], dict[str, Any]] | None = None
@@ -1259,8 +1265,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
         Accepts Task instances and raw awaitables (including coroutine objects)
         as positional arguments or in one iterable. Raw awaitables are scheduled
         automatically. Child tasks are not cancelled if this
-        aggregate task is cancelled. A single child failure is re-raised; if
-        several children fail, TaskAggregateError exposes all their exceptions.
+        aggregate task is cancelled. If children fail, ``result()`` and ``await``
+        raise the first failure in argument order and ``exception()`` / ``wait()``
+        give an ``AggregateError`` with all of them, as with .NET ``Task.WhenAll``;
+        a failure wins over a cancellation.
         If there are no tasks, the result is an empty list.
         """
         normalized = _normalize_tasks(tasks, allow_empty=True)
@@ -1438,6 +1446,10 @@ class Task(Generic[T], metaclass=_TaskMeta):
     def result(self) -> T:
         """Block the calling thread until completion and return/raise the result.
 
+        Raises like ``await`` and .NET's ``task.GetAwaiter().GetResult()``, not like ``Task.Result``:
+        the task's first failure as it is (not inside an ``AggregateError``), or its cancellation.
+        ``exception()`` and ``wait()`` report every failure.
+
         As with .NET's ``Task.Result`` this also blocks when called from inside
         a task. Two things keep that from starving the pool:
 
@@ -1475,7 +1487,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
 
         Like .NET ``Task.Wait`` and unlike ``result()``, a faulted or canceled task raises
         ``AggregateError`` (a canceled task contributes a ``TaskCanceledError``). A cancelled
-        ``token`` raises ``OperationCanceledError``; it does not cancel the task.
+        ``token`` raises ``OperationCanceledError``; it does not cancel the task. A
+        ``KeyboardInterrupt`` or ``SystemExit`` from the task is raised as it is.
         ``wait(token)`` is accepted as the token-only overload.
         """
         if isinstance(timeout, CancellationToken):
@@ -1491,7 +1504,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if self._state is _CANCELLED:
             token.throw_if_cancellation_requested()
         if self._state is not _SUCCEEDED:
-            raise AggregateError(_exceptions_of(self))
+            _raise_aggregate(_exceptions_of(self))
         return True
 
     def _internal_wait(self, seconds: float | None, token: CancellationToken) -> bool:
@@ -1533,7 +1546,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if exception_seen or any(task._state is _CANCELLED for task in items):
             if not exception_seen:
                 token.throw_if_cancellation_requested()
-            raise AggregateError([error for task in items for error in _exceptions_of(task)])
+            _raise_aggregate([error for task in items for error in _exceptions_of(task)])
         return True
 
     @classmethod
@@ -1649,6 +1662,15 @@ class Task(Generic[T], metaclass=_TaskMeta):
         return follower
 
     def exception(self) -> BaseException | None:
+        """Wait for completion; the task's failures as one ``AggregateError`` (.NET ``Task.Exception``).
+
+        ``None`` if the task succeeded. A failed task gives an ``AggregateError`` with every failure in
+        order, also when there is only one: ``result()`` and ``await`` raise the first of them, this
+        holds all of them. The same instance is returned each time. Two exceptions to the .NET contract:
+        a cancelled task raises its cancellation (.NET returns null; Python's
+        ``asyncio.Future.exception()`` raises too), and a ``KeyboardInterrupt`` or ``SystemExit`` from
+        the task is returned as it is, never inside an ``AggregateError``.
+        """
         if self._state is _PENDING:
             self._wait()
         if self._state is _CANCELLED:
@@ -1658,7 +1680,16 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 raise error
             finally:
                 del error
-        return self._exception
+        error = self._exception
+        if error is None or not isinstance(error, Exception):
+            return error
+        aggregate = self._aggregate
+        if aggregate is None:
+            with self._lock:
+                aggregate = self._aggregate
+                if aggregate is None:
+                    aggregate = self._aggregate = AggregateError(_faults_of(self))
+        return aggregate
 
     def _wait(self) -> None:
         state = _thread_state
@@ -1731,7 +1762,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             _close_if_coroutine(target)
             self._finish(
                 _CANCELLED,
-                exception=OperationCanceledError(f"{self.name} cancelled before start", token=token),
+                exception=_task_canceled(self, f"{self.name} cancelled before start", token),
             )
             return
 
@@ -1835,7 +1866,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
     def _cancellation_exception(self) -> OperationCanceledError:
         if isinstance(self._exception, OperationCanceledError):
             return self._exception
-        return OperationCanceledError(f"{self.name} was cancelled")
+        return _task_canceled(self, f"{self.name} was cancelled")
 
     def __await__(self) -> Generator[Any, T, T]:
         """Await the task from flpit code or from an asyncio coroutine.
@@ -1919,8 +1950,12 @@ class Task(Generic[T], metaclass=_TaskMeta):
             state: str,
             result: Any = None,
             exception: BaseException | None = None,
+            inner_exceptions: tuple[Exception, ...] | None = None,
     ) -> bool:
-        """Complete the task. Exactly one caller wins; the others get False."""
+        """Complete the task. Exactly one caller wins; the others get False.
+
+        ``inner_exceptions``: every failure when there are several; ``exception`` is the first.
+        """
         with self._lock:
             if self._state is not _PENDING:
                 return False
@@ -1930,6 +1965,8 @@ class Task(Generic[T], metaclass=_TaskMeta):
                 self._result = result
             if exception is not None:
                 self._exception = exception
+            if inner_exceptions is not None:
+                self._inner_exceptions = inner_exceptions
             # Published last: lock-free readers check the state first.
             self._state = state
             continuations = self._continuations
@@ -2013,9 +2050,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
             _close_if_coroutine(target)
             self._finish(
                 _CANCELLED,
-                exception=OperationCanceledError(
-                    f"{self.name} cancelled before start", token=token
-                ),
+                exception=_task_canceled(self, f"{self.name} cancelled before start", token),
             )
             return
 
@@ -2112,7 +2147,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
                     if self._cancel_requested:
                         self._cancel_requested = False
                         if not isinstance(error, OperationCanceledError):
-                            error = OperationCanceledError(f"{self.name} cancelled")
+                            error = _task_canceled(self, f"{self.name} cancelled")
                 else:
                     # Finished from outside (shutdown) while it was not ours.
                     self._coroutine = None
@@ -2213,14 +2248,14 @@ class Task(Generic[T], metaclass=_TaskMeta):
         if operation is not None:
             runtime = self._runtime
             runtime._release_wait(operation)
-            self._next_exception = OperationCanceledError(f"{self.name} cancelled")
+            self._next_exception = _task_canceled(self, f"{self.name} cancelled")
             runtime._enqueue_task(self)
         elif finish:
             if work is not None:
                 _close_if_coroutine(work[0])
             self._finish(
                 _CANCELLED,
-                exception=OperationCanceledError(f"{self.name} cancelled"),
+                exception=_task_canceled(self, f"{self.name} cancelled"),
             )
         return False
 
@@ -2234,7 +2269,7 @@ class Task(Generic[T], metaclass=_TaskMeta):
         runtime = self._runtime
         if operation is not None:
             runtime._release_wait(operation)
-        self._finish(_CANCELLED, exception=OperationCanceledError("runtime shutting down"))
+        self._finish(_CANCELLED, exception=_task_canceled(self, "runtime shutting down"))
         with self._lock:
             if self._running:
                 # A worker is inside a step; it cleans up when the step returns.
@@ -2407,21 +2442,45 @@ def _tasks_argument(tasks: tuple[Any, ...]) -> list[Task[Any]]:
     return items
 
 
-def _exceptions_of(task: Task[Any]) -> list[Exception]:
-    """A completed task's exceptions as .NET ``Task.Exception.InnerExceptions`` lists them."""
+def _exceptions_of(task: Task[Any]) -> list[BaseException]:
+    """A completed task's exceptions as .NET ``Task.Exception.InnerExceptions`` lists them.
+
+    A ``KeyboardInterrupt`` or ``SystemExit`` from the task body is returned as it is:
+    ``_raise_aggregate`` raises it instead of hiding it in an ``AggregateError``.
+    """
     if task._state is _CANCELLED:
         cancellation = task._cancellation_exception()
         if isinstance(cancellation, TaskCanceledError) and cancellation.task is task:
             return [cancellation]
         return [TaskCanceledError(task, inner_exception=None, token=cancellation.token)]
-    error = task._exception
-    if error is None or task._state is not _FAILED:
+    if task._state is not _FAILED or task._exception is None:
         return []
-    if isinstance(error, AggregateError):
-        return list(error.exceptions)
-    if isinstance(error, Exception):
-        return [error]
-    return [Exception(error)]  # BaseException (e.g. KeyboardInterrupt) from the task body
+    return list(_faults_of(task))
+
+
+def _faults_of(task: Task[Any]) -> tuple[Any, ...]:
+    """Every failure of a failed task, in order (one, unless it recorded several)."""
+    inner = task._inner_exceptions
+    return inner if inner is not None else (task._exception,)
+
+
+def _raise_aggregate(errors: list[BaseException]) -> NoReturn:
+    """Raise ``errors`` as one ``AggregateError`` (.NET ``Wait``/``WaitAll``).
+
+    A ``KeyboardInterrupt``/``SystemExit`` among them is raised as it is: inside an
+    ``AggregateError`` (an ``Exception``), ``except Exception`` would swallow it.
+    """
+    for error in errors:
+        if not isinstance(error, Exception):
+            raise error
+    raise AggregateError(cast(list[Exception], errors))
+
+
+def _task_canceled(task: Task[Any], message: str, token: CancellationToken | None = None) -> TaskCanceledError:
+    """The ``TaskCanceledError`` a task records when it is cancelled without an exception of its own."""
+    error = TaskCanceledError(message, token=token)
+    error.task = task
+    return error
 
 
 def _block_until(
@@ -2653,37 +2712,29 @@ class TaskCompletionSource(Generic[T]):
         return exceptions
 
     def set_exception(self, error: Exception | Iterable[Exception]) -> None:
-        normalized = self._normalize_exceptions(error)
-        exception = (
-            normalized
-            if isinstance(normalized, Exception)
-            else AggregateError(normalized)
-        )
-        if not self._try_complete(Task.FAILED, exception=exception):
+        if not self.try_set_exception(error):
             raise InvalidStateError("TaskCompletionSource task has already completed")
 
     def try_set_exception(self, error: Exception | Iterable[Exception]) -> bool:
+        # .NET TrySetException(IEnumerable): await raises the first, Task.Exception holds all.
         normalized = self._normalize_exceptions(error)
-        exception = (
-            normalized
-            if isinstance(normalized, Exception)
-            else AggregateError(normalized)
+        if isinstance(normalized, Exception):
+            return self._try_complete(Task.FAILED, exception=normalized)
+        return self._try_complete(
+            Task.FAILED,
+            exception=normalized[0],
+            inner_exceptions=normalized if len(normalized) > 1 else None,
         )
-        return self._try_complete(Task.FAILED, exception=exception)
 
     def set_canceled(self, token: CancellationToken | None = None) -> None:
         self._validate_token(token)
-        cancellation = OperationCanceledError(
-            "The task was canceled.", token=token
-        )
+        cancellation = _task_canceled(self._task, "The task was canceled.", token)
         if not self._try_complete(Task.CANCELLED, exception=cancellation):
             raise InvalidStateError("TaskCompletionSource task has already completed")
 
     def try_set_canceled(self, token: CancellationToken | None = None) -> bool:
         self._validate_token(token)
-        cancellation = OperationCanceledError(
-            "The task was canceled.", token=token
-        )
+        cancellation = _task_canceled(self._task, "The task was canceled.", token)
         return self._try_complete(Task.CANCELLED, exception=cancellation)
 
     @staticmethod
@@ -2713,7 +2764,9 @@ class TaskCompletionSource(Generic[T]):
             return self._try_complete(Task.SUCCEEDED, result=source._result)
         if source._state == Task.FAILED:
             assert source._exception is not None
-            return self._try_complete(Task.FAILED, exception=source._exception)
+            return self._try_complete(
+                Task.FAILED, exception=source._exception, inner_exceptions=source._inner_exceptions,
+            )
         if source._state == Task.CANCELLED:
             return self._try_complete(
                 Task.CANCELLED,
@@ -2729,11 +2782,12 @@ class TaskCompletionSource(Generic[T]):
             *,
             result: Any = None,
             exception: Exception | BaseException | None = None,
+            inner_exceptions: tuple[Exception, ...] | None = None,
     ) -> bool:
         # Safe from any thread and never blocks: the task's own lock decides
         # the winner and its continuations are handed to the pool, so the
         # caller of set_result() does not end up running awaiting coroutines.
-        return self._task._finish(state, result=result, exception=exception)
+        return self._task._finish(state, result=result, exception=exception, inner_exceptions=inner_exceptions)
 
 
 async def _collect_each(tasks: tuple[Any, ...]) -> AsyncGenerator[Task[Any], None]:
@@ -2872,20 +2926,24 @@ class _WhenAll:
             if self._remaining:
                 return
         tasks = self._tasks
-        failures = tuple(child._exception for child in tasks if child._state is _FAILED)
-        if len(failures) == 1:
-            self._promise._finish(_FAILED, exception=failures[0])
-        elif failures:
-            self._promise._finish(
-                _FAILED,
-                exception=AggregateError(cast(tuple[Exception, ...], failures)),
-            )
+        # .NET Task.WhenAll: faulted wins over canceled; the aggregate holds every failure of every
+        # child in order (a child's own several failures included), await/result raise the first.
+        failures = [error for child in tasks if child._state is _FAILED for error in _faults_of(child)]
+        if failures:
+            interrupt = next((error for error in failures if not isinstance(error, Exception)), None)
+            if interrupt is not None:  # KeyboardInterrupt/SystemExit: never inside an AggregateError
+                self._promise._finish(_FAILED, exception=interrupt)
+            else:
+                self._promise._finish(
+                    _FAILED,
+                    exception=failures[0],
+                    inner_exceptions=tuple(failures) if len(failures) > 1 else None,
+                )
         elif any(child._state is _CANCELLED for child in tasks):
-            self._promise._finish(
+            promise = self._promise
+            promise._finish(
                 _CANCELLED,
-                exception=OperationCanceledError(
-                    "One or more tasks passed to Task.when_all() were cancelled"
-                ),
+                exception=_task_canceled(promise, "One or more tasks passed to Task.when_all() were cancelled"),
             )
         else:
             self._promise._finish(_SUCCEEDED, result=[child._result for child in tasks])

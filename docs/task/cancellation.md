@@ -17,8 +17,9 @@ stop a running thread.
 that ends that way has the status `"cancelled"`. Use `cts.cancel_after(seconds)` instead of `cancel()` for a
 timeout.
 
-`result()` and `await` on a cancelled task raise `OperationCanceledError`. `task.wait()` and `Task.wait_all()` raise
-one `AggregateError` instead, as .NET does.
+`result()` and `await` on a cancelled task raise `OperationCanceledError` (a `TaskCanceledError` when the task
+was cancelled without raising one). `task.wait()` and `Task.wait_all()` raise one `AggregateError` instead, as
+.NET does. See [Exceptions](exceptions.md) for failures.
 
 ## Run code on cancellation
 

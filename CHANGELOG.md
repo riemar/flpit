@@ -5,8 +5,6 @@ All notable changes to FlpIt are documented here. The format follows
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### Fixed
 
 - `flpit.json` (msgspec backend) could crash a free-threaded interpreter (a segmentation fault in
@@ -16,6 +14,10 @@ All notable changes to FlpIt are documented here. The format follows
   the wire types also read the dataclass's own `__dict__` while msgspec added its cache to it
   (`RuntimeError: dictionary changed size during iteration`); it reads a snapshot now. Seen in stoop's soak
   test: the server crashed 10 s in, on the first concurrent requests with a JSON body.
+
+- `task.wait()` and `Task.wait_all()` turned a `KeyboardInterrupt` or `SystemExit` from a task into a plain
+  `Exception` inside their `AggregateError`, so `except Exception` swallowed a Ctrl-C. They raise it as it is
+  now, as `result()` and `await` already did; `Task.when_all` no longer puts it in an `AggregateError` either.
 
 - A finished Task, its result and the `AsyncLocal` values set inside it were only freed by the cyclic
   garbage collector, because a Task and its context referenced each other. They are now freed as soon
@@ -76,6 +78,22 @@ All notable changes to FlpIt are documented here. The format follows
   coroutine does, and the loop goes on serving its other work.
 
 ### Changed
+
+- **Breaking:** what a failed task raises no longer depends on how many tasks failed. It follows .NET, with
+  `result()` behaving like `GetAwaiter().GetResult()` (docs/task/exceptions.md):
+  - `result()` and `await` on a `Task.when_all` in which several tasks failed raise the first failure in
+    argument order instead of an `AggregateError`; so does a `TaskCompletionSource` given several exceptions.
+    One failure raised the failure itself before and still does.
+  - `exception()` returns an `AggregateError` with every failure, also for a single one (.NET `Task.Exception`),
+    the same instance each time; before, it returned the failure itself, or an `AggregateError` for several.
+  - `wait()` and `Task.wait_all()` are unchanged: an `AggregateError` with every failure. An `AggregateError`
+    that the task's own code raised is now kept in it as one failure, as .NET does, instead of being unpacked.
+  - A task cancelled without an exception of its own (before it started, by `TaskCompletionSource.set_canceled`,
+    a `Task.when_all` of cancelled tasks, shutdown) records a `TaskCanceledError`, a subclass of
+    `OperationCanceledError`, so `except OperationCanceledError` still catches it.
+
+  Code that catches `AggregateError` around `result()` or `await` of a `when_all` should catch the expected
+  exception and read `exception().exceptions` for all of them, or call `wait()` first.
 
 - `@asyncio_task` runs calls on the shared loops of `flpit.asyncio_bridge` instead of a new `asyncio.Runner`
   (a new event loop) per call on a blocked pool worker. A call made inside asyncio code runs on that code's loop,

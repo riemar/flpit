@@ -163,8 +163,10 @@ def test_RunTaskCompletionSourceTests_SetException() -> None:
     assert promise.try_set_exception(iter(errors))
     assert promise.task.status == Task.FAILED
 
-    with pytest.raises(AggregateError):
-        promise.task.result()
+    # The .NET original: Wait() throws an AggregateException with both inner exceptions.
+    with pytest.raises(AggregateError) as caught:
+        promise.task.wait()
+    assert caught.value.exceptions == tuple(errors)
 
 
 def test_RunTaskCompletionSourceTests_SetCanceled() -> None:

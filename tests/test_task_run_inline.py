@@ -25,6 +25,7 @@ import pytest
 import flpit.task as task_module
 from flpit.core.linq import ArgumentOutOfRangeError
 from flpit.task import (
+    AggregateError,
     CancellationTokenSource,
     task,
     OperationCanceledError,
@@ -134,7 +135,9 @@ def test_exception_after_awaiting_completed_tasks_is_still_captured() -> None:
 
     t = Task.run_inline(m)
     assert t.status == Task.FAILED
-    assert isinstance(t.exception(), ValueError)
+    exception = t.exception()
+    assert isinstance(exception, AggregateError)
+    assert isinstance(exception.exceptions[0], ValueError)
 
 
 def test_operation_canceled_before_the_first_suspension_cancels_the_task() -> None:

@@ -1556,8 +1556,9 @@ class FlpIt[TItem](Iterable[TItem]):
     def when_all[R](self: FlpIt[Task[R]]) -> Task[list[R]]:
         """
         A task that completes with the results of all tasks of this query, in query order. The query
-        form of ``Task.when_all`` (.NET ``Task.WhenAll``). Enumerating the query starts it in full. If a task fails the
-        exception is re-raised; if several fail, ``TaskAggregateError`` carries all of them.
+        form of ``Task.when_all`` (.NET ``Task.WhenAll``). Enumerating the query starts it in full. If tasks fail, ``result()``
+        and ``await`` raise the first failure in query order; ``exception()`` and ``wait()`` give an
+        ``AggregateError`` with all of them.
         An empty query gives an empty list.
         """
         from flpit.task import Task

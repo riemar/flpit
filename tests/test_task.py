@@ -292,11 +292,17 @@ def test_when_all_exposes_multiple_failures():
         raise ValueError(message)
 
     aggregate = Task.when_all(Task.run(fail, "one"), Task.run(fail, "two"))
-    with pytest.raises(AggregateError) as caught:
+    # result() and await raise the first failure in argument order (.NET GetAwaiter().GetResult())...
+    with pytest.raises(ValueError, match="one"):
         aggregate.result()
 
-    assert len(caught.value.exceptions) == 2
-    assert {str(error) for error in caught.value.exceptions} == {"one", "two"}
+    # ...exception() and wait() hold all of them, in argument order.
+    exception = aggregate.exception()
+    assert isinstance(exception, AggregateError)
+    assert [str(error) for error in exception.exceptions] == ["one", "two"]
+    with pytest.raises(AggregateError) as caught:
+        aggregate.wait()
+    assert [str(error) for error in caught.value.exceptions] == ["one", "two"]
 
 
 def test_when_any_returns_first_completed_task_without_cancelling_losers():
