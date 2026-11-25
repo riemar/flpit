@@ -79,6 +79,11 @@ All notable changes to FlpIt are documented here. The format follows
   `_get_running_loop`, which returns None) instead of raising and catching an exception through
   `asyncio.get_running_loop()`, and no longer runs an `import` statement each time
   (`benchmarks/scripts/asyncio_interop_bench.py`).
+- Socket waits (`IO.wait_readable`, `IO.wait_writable`) on Linux cost the IO thread about 2–3 µs per wait
+  instead of 12–14 µs, and a single core serves about 50% more Redis round trips. The waiting worker arms
+  the socket in the IO thread's epoll itself, one-shot, so no command is queued and the IO thread is not
+  woken to register it. Other platforms keep the `selectors` reactor, which no longer looks a socket up
+  with `selector.get_key` (an exception per first wait) to learn whether it is registered.
 
 ### Deprecated
 
