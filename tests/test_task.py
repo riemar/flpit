@@ -8,6 +8,7 @@ import flpit.task as task_module
 import threading
 import time
 
+from flpit.core.linq import ArgumentError
 from flpit.task import (
     BackgroundQueueFull,
     CancellationTokenSource,
@@ -318,7 +319,7 @@ def test_when_any_returns_first_completed_task_without_cancelling_losers():
     assert winner.result() == 2
     assert slow.result() == 1
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ArgumentError):
         Task.when_any()
 
 

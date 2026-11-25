@@ -20,10 +20,17 @@ All notable changes to FlpIt are documented here. The format follows
 - `Task.run(None)` raises `ArgumentNullError` (was `TypeError`), and `TaskCompletionSource.set_exception()` /
   `try_set_exception()` raise `ArgumentNullError` for `None` and `ArgumentError` for an empty collection (was
   `ValueError`) or one with a `None` element, as .NET does. Both are `TypeError` subclasses.
+- `Task.when_all()`, `when_any()` and `when_each()` raise `ArgumentNullError` for `None` and `ArgumentError` for a
+  `None` task (was a plain `TypeError`), and `when_any()` with no tasks raises `ArgumentError` (was `ValueError`),
+  as .NET does. `when_each()` checks its arguments when called, not when the stream is first iterated.
+  `AggregateError(None)` raises `ArgumentNullError` and a `None` element `ArgumentError`.
 - The ported .NET task tests (`tests/nettests/task`) were re-checked against the originals method by method:
   `WaitAny` waits on a gate instead of delays (it was flaky on macOS), and parts that had been rewritten or
-  dropped are back. Tests for API FlpIt does not have are skips naming the missing API; `Task.Delay`'s
-  `TimeSpan` / `-1` / bounds contract is ported as strict xfails.
+  dropped are back. `MethodCoverage`, `TaskCompletionSource<TResult>`, `AggregateException`,
+  `OperationCanceledException` and `TaskCanceledException` tests are ported too. Tests for API FlpIt does not
+  have are skips naming the missing API; contracts FlpIt does not follow yet are strict xfails: `Task.Delay`'s
+  `TimeSpan` / `-1` / bounds, `WhenEach` enumerable only once, an empty `AggregateException`, and
+  `OperationCanceledException(message, innerException, token)`.
 
 - `task.wait()` and `Task.wait_all()` turned a `KeyboardInterrupt` or `SystemExit` from a task into a plain
   `Exception` inside their `AggregateError`, so `except Exception` swallowed a Ctrl-C. They raise it as it is

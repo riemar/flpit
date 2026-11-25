@@ -9,11 +9,10 @@ Upstream source (current .NET runtime; no Mono sources):
 https://github.com/dotnet/runtime/blob/main/src/libraries/System.Runtime/tests/System.Threading.Tasks.Tests/Task/TaskCompletionSourceTests.cs
 
 Original PascalCase test names are retained with the ``test_`` prefix.
-FlpIt exposes Pythonic snake_case members and does not implement .NET
-TaskCreationOptions; the constructor validation test therefore verifies that
-unknown .NET-only options are rejected instead of silently ignored.
-
-
+FlpIt exposes Pythonic snake_case members. Its TaskCompletionSource takes no
+TaskCreationOptions, so the constructor validation test is a skip. The
+TaskCompletionSource<TResult> tests that differ from these are in
+test_task_completion_source_tresult.py.
 """
 from __future__ import annotations
 
@@ -88,7 +87,7 @@ def test_Ctor_InvalidArguments_Throws() -> None:
 
 
 @pytest.mark.parametrize("try_method", [False, True])
-def test_SetResult_CompletesSuccessfully(try_method: bool) -> None:  # type: ignore[no-redef]
+def test_SetResult_CompletesSuccessfully(try_method: bool) -> None:
     tcs: TaskCompletionSource[None] = TaskCompletionSource()
     assert tcs.task.status == Task.PENDING
 
