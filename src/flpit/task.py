@@ -4540,16 +4540,19 @@ def asyncio_task[**P, T](
     A ``CancellationToken`` passed as an argument also cancels the call, as in .NET: the asyncio
     task is cancelled and the returned Task ends cancelled.
 
-    Loop-bound objects that should be reused across calls (clients, connection pools) belong in
-    a ``LoopLocal`` (``flpit.asyncio_bridge.LoopLocal``): one per loop.
+    Loop-bound objects that should be reused across calls (clients, connection pools) are kept
+    one per loop: a parameter annotated ``Loop[T]`` (``flpit.asyncio_bridge``) receives the
+    ``provide()``-d ``T`` of the loop the call runs on, and an object that outlives the call can
+    hold a ``PerLoop[T]`` and read ``.current``.
     """
+    cache: list[Any] = []
 
     @functools.wraps(async_function)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> Task[T]:
-        from .asyncio_bridge import run_asyncio  # imports asyncio on first use only
+        from .asyncio_bridge import _call_asyncio_task  # imports asyncio on first use only
 
         token = next((value for value in (*args, *kwargs.values()) if isinstance(value, CancellationToken)), None)
-        return run_asyncio(async_function(*args, **kwargs), token=token)
+        return _call_asyncio_task(async_function, args, kwargs, token, cache)
 
     return wrapper
 
