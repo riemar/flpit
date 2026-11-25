@@ -24,11 +24,12 @@ from flpit import AsyncFlpIt, SelectorNoneError, SourceNoneError, flp
 from flpit.task import CancellationTokenSource, OperationCanceledError, Task
 from nettests.async_linq.async_helpers import (
     TRUE_FALSE_BOOLS, assert_equal, async_test, consume, create_source, create_sources, fill_random_strings, track,
+    unsupported,
 )
 
-_SKIP_ELEMENT = pytest.mark.skip("element selector not implemented yet")
-_SKIP_RESULT = pytest.mark.skip("result selector not implemented yet")
-_SKIP_COMPARER = pytest.mark.skip("comparer not implemented yet")
+_SKIP_ELEMENT = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, element_selector)")
+_SKIP_RESULT = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
+_SKIP_COMPARER = pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 
 
 async def _identity(i, ct):
@@ -40,6 +41,11 @@ def test_InvalidInputs_Throws():
         flp.ait(None)
     with pytest.raises(SelectorNoneError):
         AsyncFlpIt.empty().group_by(None)
+
+
+def test_InvalidInputs_Throws_ElementAndResultSelectors():
+    # The elementSelector / resultSelector / comparer half of upstream InvalidInputs_Throws.
+    unsupported("group_by(key_selector, element_selector / result_selector / comparer)")
 
 
 def test_Empty_ProducesEmpty():
@@ -128,3 +134,40 @@ async def test_InterfaceCalls_ExpectedCounts():
 @_SKIP_ELEMENT
 def test_InterfaceCalls_ExpectedCounts_ElementAndResultSelectors():
     pass
+
+
+@async_test
+async def test_IGrouping_ImplementsIList():
+    # Grouping is a FlpList-backed sequence, not a .NET IList: Count, the indexer and Contains are ported
+    # here; IndexOf, CopyTo, IsReadOnly and the NotSupported mutators are test_IGrouping_ImplementsIList_IListMembers.
+    result = await AsyncFlpIt.range(0, 100).group_by(lambda i: i % 2).to_list()
+    for group in result:
+        lst = group
+
+        assert 50 == len(lst)
+
+        if group.key == 0:
+            assert 0 == lst[0]
+
+            assert 0 in lst
+            assert 98 in lst
+            assert 1 not in lst
+            assert 99 not in lst
+        else:
+            assert 1 == lst[0]
+            assert 1 in lst
+            assert 99 in lst
+            assert 2 not in lst
+            assert 98 not in lst
+
+        for i in range(len(lst) - 1):
+            assert lst[i] == lst[i + 1] - 2
+
+        # .NET: ArgumentOutOfRangeException("index"); Grouping uses Python indexing, as in
+        # linq/test_group_by.py::test_Grouping_IList_IndexGetterOutOfRange.
+        with pytest.raises(IndexError):
+            _ = lst[50]
+
+
+def test_IGrouping_ImplementsIList_IListMembers():
+    unsupported("Grouping as IList: index_of, copy_to, is_read_only and NotSupported mutators")

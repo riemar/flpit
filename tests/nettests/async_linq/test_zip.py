@@ -48,6 +48,11 @@ def test_InvalidInputs_Throws():
         AsyncFlpIt.empty().zip(AsyncFlpIt.empty(), None)
 
 
+def test_InvalidInputs_Throws_ThreeWay():
+    # The Zip(first, second, third) half of upstream InvalidInputs_Throws ("first", "second", "third").
+    unsupported("zip(second, third)")
+
+
 def test_Empty_ProducesEmpty():
     empty = AsyncFlpIt.empty()
     non_empty = create_source(1, 2, 3)
