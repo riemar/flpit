@@ -54,6 +54,7 @@ import inspect
 import logging
 import os
 import queue
+import select
 import selectors
 import socket
 import threading
@@ -65,7 +66,7 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from itertools import count
 from types import AsyncGeneratorType, CoroutineType, FunctionType, MethodType
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast, Iterable, Final, overload
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast, Iterable, Final, overload, override
 import functools
 from functools import wraps
 from collections.abc import Awaitable, Callable, Coroutine
@@ -756,7 +757,7 @@ class _YieldNow(_Operation):
 
 
 class _WaitIO(_Operation):
-    __slots__ = ("sock", "mode")
+    __slots__ = ("sock", "mode", "fd")
 
     def __init__(
             self, runtime: "_Runtime", sock: socket.socket, mode: str,
@@ -765,6 +766,7 @@ class _WaitIO(_Operation):
         super().__init__(runtime, token)
         self.sock = sock
         self.mode = mode
+        self.fd = -1  # the descriptor it was armed with; the socket may be closed by then
 
     def _on_cancel(self) -> None:
         self.runtime._cancel_wait(self)
@@ -2965,6 +2967,10 @@ class _IOReactor:
             queue.SimpleQueue()
         )
         self._waiters: dict[socket.socket, dict[str, set[_WaitIO]]] = {}
+        # Sockets registered with the selector. Tracked here, because asking the selector
+        # (get_key) raises a KeyError formatted with the socket's repr for unregistered ones,
+        # which costs several microseconds a wait.
+        self._registered: set[socket.socket] = set()
         self._closing = False
         self._failure: BaseException | None = None
 
@@ -3068,19 +3074,17 @@ class _IOReactor:
                 mask |= selectors.EVENT_READ
             if sides["write"]:
                 mask |= selectors.EVENT_WRITE
-        try:
-            selector.get_key(sock)
-            registered = True
-        except (KeyError, ValueError, OSError):
-            registered = False
+        registered = sock in self._registered
         try:
             if mask:
                 if registered:
                     selector.modify(sock, mask, data=None)
                 else:
                     selector.register(sock, mask, data=None)
+                    self._registered.add(sock)
             else:
                 if registered:
+                    self._registered.discard(sock)
                     try:
                         selector.unregister(sock)
                     except (KeyError, ValueError, OSError):
@@ -3092,6 +3096,7 @@ class _IOReactor:
             sides = self._waiters.pop(sock, None) or {"read": set(), "write": set()}
             for operation in sides["read"] | sides["write"]:
                 self._wake(operation, error)
+            self._registered.discard(sock)
             try:
                 selector.unregister(sock)
             except (KeyError, ValueError, OSError):
@@ -3175,6 +3180,224 @@ class _IOReactor:
         self._notify()
         thread.join(1.0)
         return not thread.is_alive()
+
+
+class _FdWaiters:
+    """The waits armed on one file descriptor of the epoll reactor."""
+
+    __slots__ = ("sock", "read", "write", "registered")
+
+    def __init__(self, sock: socket.socket) -> None:
+        # Weak: a socket the program dropped must still be closed by the garbage collector.
+        self.sock: weakref.ReferenceType[socket.socket] = weakref.ref(sock)
+        self.read: set[_WaitIO] = set()
+        self.write: set[_WaitIO] = set()
+        self.registered = False
+
+    def events(self) -> int:
+        mask = select.EPOLLONESHOT
+        if self.read:
+            mask |= select.EPOLLIN
+        if self.write:
+            mask |= select.EPOLLOUT
+        return mask
+
+
+class _EpollIOReactor(_IOReactor):
+    """Linux: waiting workers arm sockets in the reactor's epoll themselves.
+
+    A wait registers its socket one-shot (EPOLLONESHOT): the kernel disarms it when it
+    reports readiness, and the next wait on that socket re-arms it with one epoll_ctl
+    call. No command queue, no wake-up byte, no unregistering. The reactor thread only
+    waits in epoll and hands woken tasks to the pool. The epoll instance is thread-safe;
+    _fd_lock keeps the waiters and the armed event mask of each descriptor consistent.
+    A cancelled wait leaves its descriptor armed: the readiness it may report later
+    finds no waiters and is dropped.
+    """
+
+    def __init__(self, runtime: "_Runtime") -> None:
+        super().__init__(runtime)
+        self._epoll: select.epoll | None = None
+        self._fd_lock = threading.Lock()
+        self._fds: dict[int, _FdWaiters] = {}
+        self._swept = False  # set by the reactor thread as it exits; under _fd_lock
+
+    @override
+    def arm(self, operation: _WaitIO) -> None:
+        error = self._started()
+        if error is None:
+            error = self._arm_fd(operation)
+        if error is not None:
+            self._wake(operation, error)
+
+    @override
+    def disarm(self, operation: _WaitIO) -> None:
+        with self._fd_lock:
+            waiters = self._fds.get(operation.fd)
+            if waiters is not None:
+                (waiters.read if operation.mode == "read" else waiters.write).discard(operation)
+
+    def _started(self) -> BaseException | None:
+        if self._thread is None:
+            with self._lock:
+                if self._thread is None and not self._closing and self._failure is None:
+                    try:
+                        self._start()
+                    except BaseException as error:
+                        # For example out of file descriptors. Not latched:
+                        # a later wait may well succeed.
+                        self._discard_resources()
+                        return error
+        if self._closing or self._failure is not None or self._thread is None:
+            return self._failure or RuntimeShutdownError("Task runtime is shutting down")
+        return None
+
+    def _arm_fd(self, operation: _WaitIO) -> BaseException | None:
+        task = operation.waiter
+        if task is None or task._waiting_on is not operation:
+            return None  # already cancelled
+        sock = operation.sock
+        try:
+            fd = sock.fileno()
+        except OSError as error:
+            return error
+        if fd < 0:
+            return ValueError("cannot wait on a closed socket")
+        operation.fd = fd
+        epoll = cast(select.epoll, self._epoll)
+        stranded: list[_WaitIO] = []
+        with self._fd_lock:
+            if self._swept:
+                return self._failure or RuntimeShutdownError("Task runtime is shutting down")
+            waiters = self._fds.get(fd)
+            if waiters is None or waiters.sock() is not sock:
+                if waiters is not None:
+                    # The descriptor now belongs to another socket: the old one was closed,
+                    # and the kernel dropped its registration. Its waits can never complete.
+                    stranded = [*waiters.read, *waiters.write]
+                waiters = self._fds[fd] = _FdWaiters(sock)
+            (waiters.read if operation.mode == "read" else waiters.write).add(operation)
+            error = self._arm_events(epoll, fd, waiters)
+            if error is not None:
+                (waiters.read if operation.mode == "read" else waiters.write).discard(operation)
+        for old in stranded:
+            self._wake(old, OSError(f"socket closed while waiting (descriptor {fd} reused)"))
+        return error
+
+    @staticmethod
+    def _arm_events(epoll: select.epoll, fd: int, waiters: _FdWaiters) -> BaseException | None:
+        """(Re-)arm ``fd`` for the waits it has; under _fd_lock."""
+        events = waiters.events()
+        try:
+            if waiters.registered:
+                try:
+                    epoll.modify(fd, events)
+                except FileNotFoundError:  # closed and reopened as the same socket object? register anew
+                    epoll.register(fd, events)
+            else:
+                try:
+                    epoll.register(fd, events)
+                except FileExistsError:  # still registered from an earlier socket on this descriptor
+                    epoll.modify(fd, events)
+                waiters.registered = True
+        except OSError as error:
+            return error
+        return None
+
+    @override
+    def _start(self) -> None:
+        epoll = select.epoll()
+        try:
+            reader, writer = socket.socketpair()
+        except BaseException:
+            epoll.close()
+            raise
+        self._epoll = epoll
+        self._wake_reader, self._wake_writer = reader, writer
+        reader.setblocking(False)
+        writer.setblocking(False)
+        epoll.register(reader.fileno(), select.EPOLLIN)  # used only to stop the thread
+        thread = threading.Thread(
+            target=self._loop, name="Task-io", daemon=True, **_fresh_context()
+        )
+        thread.start()
+        self._thread = thread
+
+    @override
+    def _discard_resources(self) -> None:
+        epoll, self._epoll = self._epoll, None
+        if epoll is not None:
+            try:
+                epoll.close()
+            except OSError:
+                pass
+        super()._discard_resources()
+
+    def _take(self, epoll: select.epoll, fd: int, events: int) -> list[_WaitIO]:
+        """The waits ``events`` on ``fd`` complete; re-arms for the ones still waiting."""
+        with self._fd_lock:
+            waiters = self._fds.get(fd)
+            if waiters is None:
+                return []
+            woken: list[_WaitIO] = []
+            if events & (select.EPOLLIN | select.EPOLLERR | select.EPOLLHUP):
+                woken.extend(waiters.read)
+                waiters.read.clear()
+            if events & (select.EPOLLOUT | select.EPOLLERR | select.EPOLLHUP):
+                woken.extend(waiters.write)
+                waiters.write.clear()
+            if waiters.read or waiters.write:
+                # One-shot disarmed the descriptor; the other direction still waits.
+                if self._arm_events(epoll, fd, waiters) is not None:
+                    woken.extend(waiters.read)
+                    woken.extend(waiters.write)
+                    waiters.read.clear()
+                    waiters.write.clear()
+            return woken
+
+    @override
+    def _loop(self) -> None:
+        _thread_state.internal = True
+        epoll = cast(select.epoll, self._epoll)
+        reader = cast(socket.socket, self._wake_reader)
+        wake_fd = reader.fileno()
+        failure: BaseException | None = None
+        try:
+            park = _park_interval(None)
+            timeout = -1.0 if park is None else park
+            while not self._closing:
+                try:
+                    ready = epoll.poll(timeout)
+                except InterruptedError:
+                    continue
+                for fd, events in ready:
+                    if fd == wake_fd:
+                        try:
+                            while reader.recv(4096):
+                                pass
+                        except OSError:  # includes BlockingIOError
+                            pass
+                        continue
+                    for operation in self._take(epoll, fd, events):
+                        self._wake(operation)
+        except BaseException as error:
+            failure = error
+            if not self._closing:
+                self._runtime._report_exception(
+                    {"message": "Fatal error in Task IO thread; socket waits are unavailable"},
+                    error,
+                )
+        finally:
+            with self._lock:
+                self._failure = failure or RuntimeShutdownError("Task runtime is shutting down")
+            # Nothing will ever signal the remaining waits: fail them.
+            with self._fd_lock:
+                self._swept = True
+                stranded = [op for waiters in self._fds.values() for op in (*waiters.read, *waiters.write)]
+                self._fds.clear()
+            for operation in stranded:
+                self._wake(operation, self._failure)
+            self._discard_resources()
 
 
 def _park_interval(longest: float | None) -> float | None:
@@ -3688,7 +3911,8 @@ class _Runtime:
             burst_workers: int = 256,
     ) -> None:
         self._pool = _WorkerPool(self, min_workers, max_workers, burst_workers=burst_workers)
-        self._io = _IOReactor(self)
+        # Linux: workers arm sockets in epoll themselves; elsewhere, a selector thread.
+        self._io: _IOReactor = _EpollIOReactor(self) if hasattr(select, "epoll") else _IOReactor(self)
         # Pending tasks, so shutdown can cancel them. The registry is weak on
         # purpose: a pending task that nothing references can never make
         # progress (anything that can resume it -- the pool queue, a running
