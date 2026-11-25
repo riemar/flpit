@@ -16,8 +16,27 @@ from __future__ import annotations
 
 import pytest
 
-from flpit.task import CancellationTokenSource, OperationCanceledError, Task, TaskContinuationOptions
+from datetime import timedelta
+
+from flpit.core.linq import ArgumentNullError, ArgumentOutOfRangeError
+from flpit.task import (
+    AggregateError,
+    CancellationToken,
+    CancellationTokenSource,
+    OperationCanceledError,
+    Task,
+    TaskContinuationOptions,
+)
 from flpit.threading import ThreadLocal
+
+
+# Task.Delay's contract that FlpIt's Task.delay does not follow yet: TimeSpan (timedelta) overloads, -1 for an
+# infinite delay, and ArgumentOutOfRangeException below -1 ms or above uint.MaxValue - 2 ms (FlpIt raises
+# ValueError for a negative delay). Strict: the marker fails as soon as Task.delay is aligned.
+_DELAY_CONTRACT = pytest.mark.xfail(
+    strict=True, reason="Task.delay: no timedelta overloads, no -1 = infinite, ValueError instead of .NET's bounds")
+_UINT_MAX = 4_294_967_295
+_INT_MIN = -2_147_483_648
 
 
 def _unsupported(feature: str) -> None:
@@ -25,50 +44,129 @@ def _unsupported(feature: str) -> None:
 
 
 def test_RunRunTests() -> None:
-    """Adapted: Task.run executes synchronous callables and async functions."""
-    assert Task.run(lambda: 7).result() == 7
+    # Not ported: "AttachedToParent is ignored in Task.Run delegate", which creates cold tasks with
+    # new Task(..., AttachedToParent) inside Task.Run and starts them afterwards. FlpIt has neither cold tasks
+    # nor attached children (every task is like a .NET Task.Run task).
 
-    async def async_value() -> int:
-        await Task.delay(0.005)
-        return 42
+    # Test basic functionality w/o cancellation token
+    count = 0
 
-    assert Task.run(async_value).result() == 42
+    def set_count(value: int) -> None:
+        nonlocal count
+        count = value
+
+    task1 = Task.run(set_count, 1)
+    task1.wait()
+    assert count == 1, "    > FAILED.  Task completed but did not run."
+    assert task1.status == Task.SUCCEEDED, "    > FAILED.  Task did not end in RanToCompletion state."
+
+    task_with_result1 = Task.run(lambda: 7)
+    task_with_result1.wait()
+    assert task_with_result1.result() == 7, "    > FAILED.  Task<int> completed but did not run."
+    assert task_with_result1.status == Task.SUCCEEDED, "    > FAILED.  Task<int> did not end in RanToCompletion state."
+
+    # Task.Run(Func<Task>) unwraps: the returned task completes with the inner one.
+    task1 = Task.run(lambda: Task.run(set_count, 11))
+    task1.wait()
+    assert count == 11, "    > FAILED.  Task(unwrapped) completed but did not run."
+    assert task1.status == Task.SUCCEEDED, "    > FAILED.  Task(unwrapped) did not end in RanToCompletion state."
+
+    task_with_result1 = Task.run(lambda: Task.run(lambda: 17))
+    task_with_result1.wait()
+    assert task_with_result1.result() == 17, "    > FAILED.  Task<int>(unwrapped) completed but did not run."
+    assert task_with_result1.status == Task.SUCCEEDED, (
+        "    > FAILED.  Task<int>(unwrapped) did not end in RanToCompletion state.")
+
+    # Test basic functionality w/ uncancelled cancellation token
+    cts = CancellationTokenSource()
+    token = cts.token
+    task2 = Task.run(set_count, 21, token=token)
+    task2.wait()
+    assert count == 21, "    > FAILED.  Task w/ uncanceled token completed but did not run."
+    assert task2.status == Task.SUCCEEDED, "    > FAILED.  Task w/ uncanceled token did not end in RanToCompletion state."
+
+    task_with_result2 = Task.run(lambda: 27, token=token)
+    task_with_result2.wait()
+    assert task_with_result2.result() == 27, "    > FAILED.  Task<int> w/ uncanceled token completed but did not run."
+    assert task_with_result2.status == Task.SUCCEEDED, (
+        "    > FAILED.  Task<int> w/ uncanceled token did not end in RanToCompletion state.")
+
+    task2 = Task.run(lambda: Task.run(set_count, 31), token=token)
+    task2.wait()
+    assert count == 31, "    > FAILED.  Task(unwrapped) w/ uncanceled token completed but did not run."
+    assert task2.status == Task.SUCCEEDED, (
+        "    > FAILED.  Task(unwrapped) w/ uncanceled token did not end in RanToCompletion state.")
+
+    task_with_result2 = Task.run(lambda: Task.run(lambda: 37), token=token)
+    task_with_result2.wait()
+    assert task_with_result2.result() == 37, (
+        "    > FAILED.  Task<int>(unwrapped) w/ uncanceled token completed but did not run.")
+    assert task_with_result2.status == Task.SUCCEEDED, (
+        "    > FAILED.  Task<int>(unwrapped) w/ uncanceled token did not end in RanToCompletion state.")
 
 
 def test_RunRunTests_Cancellation_Negative() -> None:
-    source = CancellationTokenSource()
-    source.cancel()
-    invoked = []
+    cts = CancellationTokenSource()
+    token = cts.token
+    count = 0
 
-    try:
-        task = Task.run(lambda: invoked.append("ran"), token=source.token)
-        with pytest.raises(OperationCanceledError):
-            task.result()
-        assert task.cancelled()
-        assert invoked == []
-    finally:
-        source.dispose()
+    def set_count(value: int) -> int:
+        nonlocal count
+        count = value
+        return count
+
+    cts.cancel()
+    variants = {
+        41: ("Task", lambda: Task.run(set_count, 41, token=token)),
+        47: ("Task<int>", lambda: Task.run(set_count, 47, token=token)),
+        51: ("Task(unwrapped)", lambda: Task.run(lambda: Task.run(set_count, 51), token=token)),
+        57: ("Task<int>(unwrapped)", lambda: Task.run(lambda: Task.run(set_count, 57), token=token)),
+    }
+    for value, (label, start) in variants.items():
+        task3 = start()
+        with pytest.raises(AggregateError):
+            task3.wait()
+        assert count != value, f"    > FAILED.  {label} w/ canceled token ran when it should not have."
+        assert task3.cancelled(), f"    > FAILED.  {label} w/ canceled token should have ended in Canceled state"
 
 
 def test_RunRunTests_FastPathTests() -> None:
-    """Adapted: Task.run can await an existing Task handle and relay its outcome."""
-    completed = Task.run(lambda: 42)
-    assert completed.result() == 42
-    wrapper = Task.run(completed)
-    assert wrapper.result() == 42
+    # Task.Run(() => existingTask) returns a proxy for an already completed, faulted or canceled task.
+    cts = CancellationTokenSource()
+    cts.cancel()
 
-    error = ValueError("faulted source")
+    def faulted() -> int:
+        raise Exception("FAULTED!")
 
-    def fail() -> int:
-        raise error
+    for kind, value in (("Task", None), ("Task<TResult>", 42)):
+        already_completed_task = Task.run(lambda: value)
+        already_completed_task.wait()
+        already_faulted_task = Task.run(faulted)
+        try:
+            already_faulted_task.wait()
+        except Exception:  # noqa: BLE001, S110
+            pass
+        already_canceled_task = Task.run(lambda: value, token=cts.token)  # should result in cancellation
+        try:
+            already_canceled_task.wait()
+        except Exception:  # noqa: BLE001, S110
+            pass
 
-    failed = Task.run(fail)
-    with pytest.raises(ValueError, match="faulted source"):
-        failed.result()
-    relay = Task.run(failed)
-    with pytest.raises(ValueError, match="faulted source") as caught:
-        relay.result()
-    assert caught.value is error
+        fast_path1 = Task.run(lambda: already_completed_task)
+        fast_path1.wait()
+        assert fast_path1.status == Task.SUCCEEDED, (
+            f"Expected proxy for already-ran-to-completion {kind} to be in RanToCompletion status")
+        assert fast_path1.result() == value
+
+        fast_path1 = Task.run(lambda: already_faulted_task)
+        with pytest.raises(Exception):  # noqa: B017 - Expected proxy for already-faulted task to throw on Wait()
+            fast_path1.wait()
+        assert fast_path1.status == Task.FAILED, f"Expected proxy for already-faulted {kind} to be in Faulted status"
+
+        fast_path1 = Task.run(lambda: already_canceled_task)
+        with pytest.raises(Exception):  # noqa: B017 - Expected proxy for already-canceled task to throw on Wait()
+            fast_path1.wait()
+        assert fast_path1.status == Task.CANCELLED, f"Expected proxy for already-canceled {kind} to be in Canceled status"
 
 
 def test_RunRunTests_Unwrap_NegativeCases() -> None:
@@ -84,64 +182,98 @@ def test_FromResult_KnownResults_Cached() -> None:
 
 
 def test_RunFromResult_FaultedTask() -> None:
-    """Adapted: a failed task retains its exception and result() observes it."""
-    error = RuntimeError("uh oh")
-
-    def fail() -> object:
-        raise error
-
-    task = Task.run(fail)
-    with pytest.raises(RuntimeError, match="uh oh") as caught:
-        task.result()
-    assert caught.value is error
+    _unsupported("Task.FromException, and .NET's internal TaskExceptionHolder 'observed' flag read via reflection")
 
 
-@pytest.mark.parametrize("seconds", [-2.0, -2147483648.0, -0.001])
-def test_TaskDelay_OutOfBounds_ThrowsException(seconds: float) -> None:
-    """Adapted: negative durations are invalid; .NET's numeric max bounds don't apply to seconds."""
-    with pytest.raises(ValueError):
-        Task.delay(seconds)
+@_DELAY_CONTRACT
+@pytest.mark.parametrize("delay", [-2, _INT_MIN, _UINT_MAX])
+def test_TaskDelay_OutOfBounds_ThrowsException(delay: int) -> None:
+    with pytest.raises(ArgumentOutOfRangeError, match="delay"):
+        Task.delay(timedelta(milliseconds=delay))  # type: ignore[arg-type]
+    if _INT_MIN <= delay <= 2_147_483_647:
+        with pytest.raises(ArgumentOutOfRangeError):
+            Task.delay(delay / 1000)  # Task.Delay((int)delay): FlpIt takes seconds
 
 
+@_DELAY_CONTRACT
 def test_TaskDelay_MaxSupported_Success() -> None:
-    """Adapted: a very long timer can be cancelled; Python has no .NET uint-ms cap."""
-    source = CancellationTokenSource()
-    try:
-        task = Task.delay(1_000_000_000.0, token=source.token)
-        assert not task.done()
-        source.cancel()
-        with pytest.raises(OperationCanceledError):
-            task.result()
-        assert task.cancelled()
-    finally:
-        source.dispose()
+    cts = CancellationTokenSource()
+    t = Task.delay(timedelta(milliseconds=_UINT_MAX - 2), token=cts.token)  # type: ignore[arg-type]
+    assert not t.done()
+    cts.cancel()
+    assert t.cancelled()
 
 
+@_DELAY_CONTRACT
 def test_RunDelayTests() -> None:
-    zero = Task.delay(0)
-    zero.result()
-    assert zero.done()
+    cts = CancellationTokenSource()
+    token = cts.token
+    task1 = Task.delay(0)
+    task2 = Task.delay(timedelta(0))  # type: ignore[arg-type]
+    task3 = Task.delay(0, token=token)
+    task4 = Task.delay(timedelta(0), token=token)  # type: ignore[arg-type]
+    Task.wait_all(task1, task2, task3, task4)  # an unexpected exception fails the test
+    assert task1.status == Task.SUCCEEDED, "    > FAILED.  Expected Delay(0) to run to completion"
+    assert task2.status == Task.SUCCEEDED, "    > FAILED.  Expected Delay(TimeSpan(0)) to run to completion"
+    assert task3.status == Task.SUCCEEDED, "    > FAILED.  Expected Delay(0,uncanceledToken) to run to completion"
+    assert task4.status == Task.SUCCEEDED, "    > FAILED.  Expected Delay(TimeSpan(0),uncanceledToken) to run to completion"
+    task7 = Task.delay(10)
+    assert not task7.done(), "RunDelayTests:    > FAILED.  Delay(10000) appears to have completed too soon(1)."
+    Task.delay(0.01)
+    assert not task7.done(), "RunDelayTests:    > FAILED.  Delay(10000) appears to have completed too soon(2)."
 
-    delayed = Task.delay(0.01)
-    assert delayed.result() is None
-    assert delayed.done()
+
+def test_FlpIt_RunDelayTests_Seconds() -> None:
+    """RunDelayTests with the overloads FlpIt has (seconds): keeps running while the TimeSpan ones are xfail."""
+    cts = CancellationTokenSource()
+    task1 = Task.delay(0)
+    task3 = Task.delay(0, token=cts.token)
+    Task.wait_all(task1, task3)
+    assert task1.status == Task.SUCCEEDED and task3.status == Task.SUCCEEDED
+    task7 = Task.delay(10)
+    assert not task7.done()
+    Task.delay(0.01)
+    assert not task7.done()
 
 
+@_DELAY_CONTRACT
 def test_RunDelayTests_NegativeCases() -> None:
-    with pytest.raises(ValueError):
-        Task.delay(-2)
-    with pytest.raises(TypeError):
-        Task.delay(1, token=object())
+    disposed_cts = CancellationTokenSource()
+    disposed_cts.dispose()
 
-    source = CancellationTokenSource()
+    with pytest.raises(ArgumentOutOfRangeError):
+        Task.delay(-2 / 1000)  # Task.Delay(-2)
+    with pytest.raises(ArgumentOutOfRangeError):
+        Task.delay(timedelta(days=1000))  # type: ignore[arg-type]
+
+    cts = CancellationTokenSource()
+    token = cts.token
+    cts.cancel()
+    task5 = Task.delay(0, token=token)
+    task6 = Task.delay(timedelta(0), token=token)  # type: ignore[arg-type]
     try:
-        delayed = Task.delay(60, token=source.token)
-        source.cancel()
-        with pytest.raises(OperationCanceledError):
-            delayed.result()
-        assert delayed.cancelled()
-    finally:
-        source.dispose()
+        Task.wait_all(task5, task6)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    assert task5.status == Task.CANCELLED, "RunDelayTests:    > FAILED.  Expected Delay(0,canceledToken) to end up Canceled"
+    assert task6.status == Task.CANCELLED, (
+        "RunDelayTests:    > FAILED.  Expected Delay(TimeSpan(0),canceledToken) to end up Canceled")
+
+    cts2 = CancellationTokenSource()
+    task8 = Task.delay(-1, token=cts2.token)  # infinite
+    task9 = Task.delay(timedelta(days=1), token=cts2.token)  # type: ignore[arg-type]
+    Task.run(cts2.cancel)
+    try:
+        Task.wait_all(task8, task9)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    assert task8.cancelled(), "RunDelayTests:    > FAILED.  Expected Delay(-1, token) to end up Canceled."
+    assert task9.cancelled(), "RunDelayTests:    > FAILED.  Expected Delay(TimeSpan(1,0,0,0), token) to end up Canceled."
+    with pytest.raises(AggregateError) as ae:
+        task8.wait()
+    inner = ae.value.exceptions[0]
+    assert isinstance(inner, OperationCanceledError) and inner.token is cts2.token, (
+        "RunDelayTests:    > FAILED.  Expected resulting OCE to contain canceled token.")
 
 
 def test_TaskDelay_Cancellation_ContinuationsInvokedAsynchronously() -> None:
@@ -164,22 +296,9 @@ def test_TaskDelay_Cancellation_ContinuationsInvokedAsynchronously() -> None:
 
 
 def test_RunExceptionWrappingTest() -> None:
-    """Adapted: no unnecessary wrapper is added across Task.run/await boundaries."""
-    error = ValueError("inner failure")
-
-    async def fail() -> int:
-        await Task.delay(0)
-        raise error
-
-    task = Task.run(fail)
-    with pytest.raises(ValueError, match="inner failure") as caught:
-        task.result()
-    assert caught.value is error
-
-    aggregate = Task.when_all([Task.run(fail)])
-    with pytest.raises(ValueError, match="inner failure") as caught_aggregate:
-        aggregate.result()
-    assert caught_aggregate.value is error
+    # The original counts AggregateException nesting levels after Wait() for monadic ContinueWith(...).Unwrap()
+    # and for Task.Factory.FromAsync: FlpIt has neither Unwrap() nor FromAsync.
+    _unsupported("ContinueWith(...).Unwrap() and Task.Factory.FromAsync")
 
 
 def test_RunHideSchedulerTests() -> None:
@@ -195,8 +314,15 @@ def test_RunDenyChildAttachTests() -> None:
 
 
 def test_RunBasicTaskWithResultTest_Negative() -> None:
-    """Adapted: Task.run validates the callable/awaitable at the API boundary."""
-    with pytest.raises(TypeError):
-        Task.run(None)
-    with pytest.raises(TypeError):
-        Task.run(object())
+    # new Task<int>(() => 1) is a cold task in .NET; any task serves for argument validation here.
+    task_with_result = Task.run(lambda: 1)
+    # ContinueWith(null, state, ...) in the CancellationToken / TaskContinuationOptions / both overloads:
+    # FlpIt has one continue_with(continuation, state, *, token, options).
+    with pytest.raises(ArgumentNullError):
+        task_with_result.continue_with(None, None, token=CancellationToken.none())  # type: ignore[arg-type]
+    with pytest.raises(ArgumentNullError):
+        task_with_result.continue_with(None, None, options=TaskContinuationOptions.NONE)  # type: ignore[arg-type]
+    with pytest.raises(ArgumentNullError):
+        task_with_result.continue_with(  # type: ignore[arg-type]
+            None, None, token=CancellationToken.none(), options=TaskContinuationOptions.NONE)
+    # ContinueWith(..., (TaskScheduler)null): FlpIt has no task schedulers.
