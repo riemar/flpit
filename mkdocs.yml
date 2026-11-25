@@ -58,6 +58,7 @@ nav:
       - Ways to start work: task/starting-work.md
       - Mixing sync and async: task/sync-and-async.md
       - Cancellation: task/cancellation.md
+      - Exceptions: task/exceptions.md
       - asyncio libraries: task/asyncio.md
       - Channels: concurrency/channels.md
       - Concurrent collections: concurrency/collections.md

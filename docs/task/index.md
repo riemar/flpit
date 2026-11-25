@@ -172,6 +172,7 @@ on the flpit runtime (provisional); for HTTP and databases, prefer their sync cl
 ## Related
 
 - [Cancellation](cancellation.md)
+- [Exceptions](exceptions.md): what `result()`, `await`, `wait()` and `exception()` raise when tasks fail
 - [asyncio libraries](asyncio.md)
 - [Async queries](../async/index.md)
 - [Channels](../concurrency/channels.md), [concurrent collections](../concurrency/collections.md) and
