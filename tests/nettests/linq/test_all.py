@@ -11,6 +11,8 @@ This file is an independent Python port adapted to FlpIt's API and semantics.
 """
 import pytest
 
+from flpit import PredicateNoneError, SourceNoneError
+
 
 def is_even(x):
     return x % 2 == 0
@@ -65,11 +67,11 @@ def test_AllRunOnce(flp_type, source_data, predicate, expected):
 
 def test_NullSource_ThrowsArgumentNullException(flp_type):
     # Assumption: Equivalent of ArgumentNullException is TypeError, ValueError or AttributeError in the python lib
-    with pytest.raises((TypeError, AttributeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).all(lambda i: i != 0)
 
 
 def test_NullPredicate_ThrowsArgumentNullException(flp_type):
     # Assumption: Supplying None as a predicate triggers an Exception instead of processing
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(PredicateNoneError):
         flp_type(range(3)).all(None)

@@ -323,7 +323,7 @@ def test_Where_Array_ReturnsExpectedValues_False():
     assert result.count() == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_Array_ReturnsExpectedValues_Complex():
     # where() has no index overload: complex_predicate is (value, index).
     source = [2, 1, 3, 5, 4]
@@ -356,7 +356,7 @@ def test_Where_List_ReturnsExpectedValues_False():
     assert result.count() == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_List_ReturnsExpectedValues_Complex():
     # where() has no index overload: complex_predicate is (value, index).
     source = flp.lst([2, 1, 3, 5, 4])
@@ -389,7 +389,7 @@ def test_Where_IReadOnlyCollection_ReturnsExpectedValues_False():
     assert result.count() == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_IReadOnlyCollection_ReturnsExpectedValues_Complex():
     # where() has no index overload: complex_predicate is (value, index).
     source = (2, 1, 3, 5, 4,)
@@ -422,7 +422,7 @@ def test_Where_ICollection_ReturnsExpectedValues_False():
     assert result.count() == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_ICollection_ReturnsExpectedValues_Complex():
     # where() has no index overload: complex_predicate is (value, index).
     source = deque([2, 1, 3, 5, 4])
@@ -455,7 +455,7 @@ def test_Where_IEnumerable_ReturnsExpectedValues_False():
     assert result.count() == 0
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_IEnumerable_ReturnsExpectedValues_Complex():
     # where() has no index overload: complex_predicate is (value, index).
     source = deque([2, 1, 3, 5, 4])
@@ -483,7 +483,7 @@ def test_Where_EmptyEnumerable_ReturnsNoElements():
     assert was_selector_called is False
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_Where_EmptyEnumerable_ReturnsNoElementsWithIndex():
     # where() has no index overload.
     assert flp.it([]).where(lambda e, i: True).count() == 0
@@ -895,48 +895,48 @@ def test_SourceAllNullsPredicateTrue(flp_type):
     assert source == list(flp_type(source).where(lambda num: True))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_SourceEmptyIndexedPredicate(tlog):
     # where() has no index overload.
     assert list(flp.it([]).where(lambda e, i: i % 2 == 0)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_SingleElementIndexedPredicateTrue():
     # where() has no index overload.
     source = [2]
     assert source == list(flp.it(source).where(lambda e,i:  logNEval(i)))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_SingleElementIndexedPredicateFalse():
     # where() has no index overload.
     source = [3]
     assert list(flp.it(source).where(lambda e, i: e % 2 == 0)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_IndexedPredicateFalseForAll():
     # where() has no index overload.
     source = [9, 7, 15, 3, 27]
     assert list(flp.it(source).where(lambda e, i: e % 2 == 0)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_IndexedPredicateTrueFirstOnly():
     # where() has no index overload.
     source = flp.it([10, 9, 7, 15, 3, 27])
     assert list(source.take(1)) == list(source.where(lambda e, i: e % 2 == 0))
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_IndexedPredicateTrueLastOnly():
     # where() has no index overload.
     source = flp.it([9, 7, 15, 3, 27, 20])
     assert list(source.skip(5)) == list(source.where(lambda e, i: e % 2 == 0))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_IndexedPredicateTrueFirstThirdSixth():
     # where() has no index overload.
     source = [20, 7, 18, 9, 7, 10, 21]
@@ -944,21 +944,21 @@ def test_IndexedPredicateTrueFirstThirdSixth():
     assert expected == list(flp.it(source).where(lambda e, i: e % 2 == 0))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_SourceAllNullsIndexedPredicateTrue():
     # where() has no index overload.
     source = [None, None, None, None]
     assert source == list(flp.it(source).where(lambda num, index: True))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_PredicateSelectsFirst():
     # where() has no index overload.
     source = flp.it([-40, 20, 100, 5, 4, 9])
     assert list(source.take(1)) == list(source.where(lambda e, i: i == 0))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_PredicateSelectsLast():
     # where() has no index overload.
     source = flp.it([-40, 20, 100, 5, 4, 9])
@@ -994,7 +994,7 @@ def test_ForcedToEnumeratorDoesntEnumerateList():
     assert not _is_enumerator_that_enumerates(iterator)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: where((item, index) predicate)")
 def test_ForcedToEnumeratorDoesntEnumerateIndexed():
     # where() has no index overload.
     iterator = flp.it(range(0, 3)).where(lambda e, i: True)

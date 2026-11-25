@@ -188,28 +188,28 @@ def test_NullSource_ThrowsArgumentNullException(flp_type):
         flp_type(None).contains(42, _ORDINAL)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ExplicitNullComparerDoesNotDeferToCollection(flp_type):
     source = flp_type({"ABC"})  # HashSet<string>(new AnagramEqualityComparer())
 
     assert not source.contains("BAC", None)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ExplicitComparerDoesNotDeferToCollection(flp_type):
     source = flp_type({"ABC"})
 
     assert source.contains("abc", _ORDINAL_IGNORE_CASE)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ExplicitComparerDoestNotDeferToCollectionWithComparer(flp_type):
     source = flp_type({"ABC"})  # HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
     assert source.contains("BAC", _ANAGRAM_COMPARER)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_NoComparerDoesDeferToCollection(flp_type):
     source = flp_type({"ABC"})  # HashSet<string>(StringComparer.OrdinalIgnoreCase)
 

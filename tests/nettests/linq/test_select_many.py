@@ -101,17 +101,17 @@ def test_EmptySource():
     assert list(flp.it([]).select_many(lambda e: e.total)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_EmptySourceIndexedSelector():
     assert list(flp.it([]).select_many(lambda e, i: e.total)) == []
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_EmptySourceResultSelector():
     assert list(flp.it([]).select_many(lambda e: e.total, lambda e, f: str(f))) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_EmptySourceResultSelectorIndexedSelector():
     assert list(flp.it([]).select_many(lambda e, i: e.total, lambda e, f: str(f))) == []
 
@@ -129,21 +129,21 @@ def test_NonEmptySelectingEmpty():
     assert list(flp.it(source).select_many(lambda e: e.total)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NonEmptySelectingEmptyIndexedSelector():
     source = _all_empty_source()
 
     assert list(flp.it(source).select_many(lambda e, i: e.total)) == []
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_NonEmptySelectingEmptyWithResultSelector():
     source = _all_empty_source()
 
     assert list(flp.it(source).select_many(lambda e: e.total, lambda e, f: str(f))) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NonEmptySelectingEmptyIndexedSelectorWithResultSelector():
     source = _all_empty_source()
 
@@ -164,12 +164,12 @@ def test_RunOnce():
     assert expected == list(flp.it(_run_once(source)).select_many(lambda e: _run_once(e.total)))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_SourceEmptyIndexUsed():
     assert list(flp.it([]).select_many(lambda e, index: e.total)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_SingleElementIndexUsed():
     expected = [90, 55, None, 43, 89]
     source = [_s("Prakash", expected)]
@@ -177,14 +177,14 @@ def test_SingleElementIndexUsed():
     assert expected == list(flp.it(source).select_many(lambda e, index: e.total))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NonEmptySelectingEmptyIndexUsed():
     source = _all_empty_source()
 
     assert list(flp.it(source).select_many(lambda e, index: e.total)) == []
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_ResultsSelectedIndexUsed():
     source = _source()
     expected = [1, 2, 3, 4, 5, 6, 8, 9, -10, 100]
@@ -192,14 +192,14 @@ def test_ResultsSelectedIndexUsed():
     assert expected == list(flp.it(source).select_many(lambda e, index: e.total))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_IndexCausingFirstToBeSelected():
     source = _source()
 
     assert source[0].total == list(flp.it(source).select_many(lambda e, i: e.total if i == 0 else []))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_IndexCausingLastToBeSelected():
     source = _source()
     source[4] = _s("Robert", [-10, 100])
@@ -213,7 +213,7 @@ def test_IndexOverflow():
     pass
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_ResultSelector():
     source = _source()
     expected = ["1", "2", "3", "4", "5", "6", "8", "9", "-10", "100"]
@@ -221,32 +221,32 @@ def test_ResultSelector():
     assert expected == list(flp.it(source).select_many(lambda e: e.total, lambda e, f: str(f)))
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_NullResultSelector():
     # A dedicated ResultSelectorNoneError may be preferable to SelectorNoneError.
     with pytest.raises(SelectorNoneError):
         flp.it([]).select_many(lambda e: e.total, None)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NullResultSelectorIndexedSelector():
     with pytest.raises(SelectorNoneError):
         flp.it([]).select_many(lambda e, i: e.total, None)
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_NullSourceWithResultSelector(flp_type):
     with pytest.raises(SourceNoneError):
         flp_type(None).select_many(lambda e: e.total, lambda e, f: str(f))
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_NullCollectionSelector():
     with pytest.raises(SelectorNoneError):
         flp.it([]).select_many(None, lambda e, f: str(f))
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NullIndexedCollectionSelector():
     with pytest.raises(SelectorNoneError):
         flp.it([]).select_many(None, lambda e, f: str(f))
@@ -260,13 +260,13 @@ def test_NullSource(flp_type):
         flp_type(None).select_many(lambda e: e.total)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NullSourceIndexedSelector(flp_type):
     with pytest.raises(SourceNoneError):
         flp_type(None).select_many(lambda e, i: e.total)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NullSourceIndexedSelectorWithResultSelector(flp_type):
     with pytest.raises(SourceNoneError):
         flp_type(None).select_many(lambda e, i: e.total, lambda e, f: str(f))
@@ -280,7 +280,7 @@ def test_NullSelector(flp_type):
         flp_type([]).select_many(None)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_NullIndexedSelector(flp_type):
     # Selector is the (value, index) overload; without it this would be
     # indistinguishable from the non-indexed test.
@@ -288,7 +288,7 @@ def test_NullIndexedSelector(flp_type):
         flp_type([]).select_many(None)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_IndexCausingFirstToBeSelectedWithResultSelector():
     source = _source()
     expected = ["1", "2", "3", "4"]
@@ -298,7 +298,7 @@ def test_IndexCausingFirstToBeSelectedWithResultSelector():
     )
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_IndexCausingLastToBeSelectedWithResultSelector():
     source = _source()
     source[4] = _s("Robert", [-10, 100])
@@ -320,21 +320,21 @@ def test_ForcedToEnumeratorDoesntEnumerate():
     assert not _is_enumerator_that_enumerates(iterator)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_ForcedToEnumeratorDoesntEnumerateIndexed():
     iterator = flp.it(range(0, 3)).select_many(lambda e, i: [])
 
     assert not _is_enumerator_that_enumerates(iterator)
 
 
-@pytest.mark.skip("result selector not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: group_by(key_selector, result_selector)")
 def test_ForcedToEnumeratorDoesntEnumerateResultSel():
     iterator = flp.it(range(0, 3)).select_many(lambda i: [], lambda e, i: e)
 
     assert not _is_enumerator_that_enumerates(iterator)
 
 
-@pytest.mark.skip("index not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: select_many((item, index) selector)")
 def test_ForcedToEnumeratorDoesntEnumerateIndexedResultSel():
     iterator = flp.it(range(0, 3)).select_many(lambda e, i: [], lambda e, i: e)
 

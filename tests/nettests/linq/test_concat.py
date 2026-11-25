@@ -411,7 +411,7 @@ def test_CollectionInterleavedWithLazyEnumerables_ToArray(flp_type):
             assert i == item
 
 
-@pytest.mark.skip("not implemented yet")
+@pytest.mark.skip("Not portable to Python: ToArray (Python has no array type; to_list is ported as ToList)")
 def test_ToArray(flp_type):
     for expected, actual in GetAllVerifyEqualsData(flp_type):
         assert list(actual) == list(expected)

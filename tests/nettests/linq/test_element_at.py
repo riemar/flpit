@@ -51,8 +51,8 @@ _OOR = ArgumentOutOfRangeError  # ArgumentOutOfRangeException("index")
 
 _OVERLOADS = [
     "int",
-    pytest.param("Index", marks=pytest.mark.skip("Index not implemented yet")),
-    pytest.param("from_end", marks=pytest.mark.skip("from-end index not implemented yet")),
+    pytest.param("Index", marks=pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: Index from end (C# ^1)")),
+    pytest.param("from_end", marks=pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: Index from end (C# ^1)")),
 ]
 
 _OVERLOAD_POSITION = {"int": 0, "Index": 1, "from_end": 2}

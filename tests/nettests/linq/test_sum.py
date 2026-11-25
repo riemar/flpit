@@ -15,6 +15,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 import pytest
 
+from flpit import SelectorNoneError, SourceNoneError
+
 
 INT_MAX = 2_147_483_647
 INT_MIN = -2_147_483_648
@@ -34,94 +36,84 @@ def SumOverflowsVerticalVectorLanes():
             yield element, verticalOffset
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfInt_SourceIsNull_ArgumentNullExceptionThrown():
-    source_int = None
-    with pytest.raises((TypeError, ValueError)):
-        source_int.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_int.sum(lambda x: x)
+def test_SumOfInt_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfNullableOfInt_SourceIsNull_ArgumentNullExceptionThrown():
-    source_nullable_int = None
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_int.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_int.sum(lambda x: x)
+def test_SumOfNullableOfInt_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfLong_SourceIsNull_ArgumentNullExceptionThrown():
-    source_long = None
-    with pytest.raises((TypeError, ValueError)):
-        source_long.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_long.sum(lambda x: x)
+def test_SumOfLong_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfNullableOfLong_SourceIsNull_ArgumentNullExceptionThrown():
-    source_nullable_long = None
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_long.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_long.sum(lambda x: x)
+def test_SumOfNullableOfLong_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfFloat_SourceIsNull_ArgumentNullExceptionThrown():
-    source_float = None
-    with pytest.raises((TypeError, ValueError)):
-        source_float.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_float.sum(lambda x: x)
+def test_SumOfFloat_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfNullableOfFloat_SourceIsNull_ArgumentNullExceptionThrown():
-    source_nullable_float = None
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_float.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_float.sum(lambda x: x)
+def test_SumOfNullableOfFloat_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfDouble_SourceIsNull_ArgumentNullExceptionThrown():
-    source_double = None
-    with pytest.raises((TypeError, ValueError)):
-        source_double.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_double.sum(lambda x: x)
+def test_SumOfDouble_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfNullableOfDouble_SourceIsNull_ArgumentNullExceptionThrown():
-    source_nullable_double = None
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_double.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_double.sum(lambda x: x)
+def test_SumOfNullableOfDouble_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfDecimal_SourceIsNull_ArgumentNullExceptionThrown():
-    source_decimal = None
-    with pytest.raises((TypeError, ValueError)):
-        source_decimal.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_decimal.sum(lambda x: x)
+def test_SumOfDecimal_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 
-@pytest.mark.skip("Python can't invoke extension methods on None")
-def test_SumOfNullableOfDecimal_SourceIsNull_ArgumentNullExceptionThrown():
-    source_nullable_decimal = None
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_decimal.sum()
-    with pytest.raises((TypeError, ValueError)):
-        source_nullable_decimal.sum(lambda x: x)
+def test_SumOfNullableOfDecimal_SourceIsNull_ArgumentNullExceptionThrown(flp_type):
+    # A None source is caught where it is wrapped, as in test_average.py.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum()
+    with pytest.raises(SourceNoneError):
+        flp_type(None).sum(lambda x: x)
 
 # in the following group one would be sufficient as in Python they all test the sem
 # I keep them for completeness's sake
@@ -129,49 +121,49 @@ def test_SumOfNullableOfDecimal_SourceIsNull_ArgumentNullExceptionThrown():
 def test_SumOfInt_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_int = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_int.sum(selector)
 
 
 def test_SumOfNullableOfInt_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_nullable_int = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_nullable_int.sum(selector)
 
 
 def test_SumOfLong_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_long = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_long.sum(selector)
 
 
 def test_SumOfNullableOfLong_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_nullable_long = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_nullable_long.sum(selector)
 
 
 def test_SumOfFloat_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_float = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_float.sum(selector)
 
 
 def test_SumOfNullableOfFloat_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_nullable_float = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_nullable_float.sum(selector)
 
 
 def test_SumOfDouble_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_double = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_double.sum(selector)
 
 
@@ -180,14 +172,14 @@ def test_SumOfNullableOfDouble_SelectorIsNull_ArgumentNullExceptionThrown(
 ):
     source_nullable_double = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_nullable_double.sum(selector)
 
 
 def test_SumOfDecimal_SelectorIsNull_ArgumentNullExceptionThrown(flp_type):
     source_decimal = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_decimal.sum(selector)
 
 
@@ -196,7 +188,7 @@ def test_SumOfNullableOfDecimal_SelectorIsNull_ArgumentNullExceptionThrown(
 ):
     source_nullable_decimal = flp_type([])
     selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         source_nullable_decimal.sum(selector)
 
 

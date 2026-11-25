@@ -193,7 +193,7 @@ def test_First_Last_ElementAt(flp_type):
         empty.default_if_empty(42).element_at(1)
 
 
-@pytest.mark.skip("element_at_or_default() not implemented yet")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: element_at_or_default")
 def test_ElementAtOrDefault_OutOfBounds_ReturnsTypeDefault(flp_type):
     # Regression test for https://github.com/dotnet/runtime/issues/119834
     # ElementAtOrDefault should return default(T) for out-of-bounds indices,

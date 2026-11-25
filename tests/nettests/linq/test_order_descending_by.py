@@ -3,8 +3,8 @@ Copyright (c) .NET Foundation and Contributors.
 Copyright (c) FlpIt
 SPDX-License-Identifier: MIT
 
-Ported to pytest/Python from the .NET Runtime System.Linq OrderDescendingTests.cs:
-https://github.com/dotnet/runtime/blob/main/src/libraries/System.Linq/tests/OrderDescendingTests.cs
+Ported to pytest/Python from the .NET Runtime System.Linq OrderByDescendingTests.cs:
+https://github.com/dotnet/runtime/blob/main/src/libraries/System.Linq/tests/OrderByDescendingTests.cs
 
 Original source attribution: .NET Foundation / dotnet/runtime, MIT License.
 This file is an independent Python port adapted to FlpIt's API and semantics.
@@ -12,6 +12,8 @@ This file is an independent Python port adapted to FlpIt's API and semantics.
 import random
 from types import SimpleNamespace
 import pytest
+
+from flpit import SelectorNoneError, SourceNoneError
 
 
 def case_insensitive_cmp(x, y):
@@ -107,7 +109,7 @@ def test_KeySelectorCalled(flp_type):
 
 
 def test_FirstAndLastAreDuplicatesCustomComparer(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     source = flp_type(["Prakash", "Alpha", "DAN", "dan", "Prakash"])
     expected = ["Prakash", "Prakash", "DAN", "dan", "Alpha"]
 
@@ -115,7 +117,7 @@ def test_FirstAndLastAreDuplicatesCustomComparer(flp_type):
 
 
 def test_RunOnce(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     source = flp_type(["Prakash", "Alpha", "DAN", "dan", "Prakash"])
     expected = ["Prakash", "Prakash", "DAN", "dan", "Alpha"]
 
@@ -164,7 +166,7 @@ def test_SameKeysVerifySortStable(flp_type):
 
 
 def test_OrderByExtremeComparer(flp_type):
-    pytest.skip("Comparer not supported yet")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     out_of_order = flp_type([7, 1, 0, 9, 3, 5, 4, 2, 8, 6])
 
     ordered = list(out_of_order.order_by_descending(lambda i: i, extreme_cmp))
@@ -173,15 +175,14 @@ def test_OrderByExtremeComparer(flp_type):
     assert ordered == expected
 
 
-def test_NullSource():
-    source = None
-    with pytest.raises((TypeError, AttributeError)):
-        source.order_by_descending(lambda i: i)
+def test_NullSource(flp_type):
+    with pytest.raises(SourceNoneError):
+        flp_type(None).order_by_descending(lambda i: i)
 
 
 def test_NullKeySelector(flp_type):
     key_selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError):
         flp_type([]).order_by_descending(key_selector)
 
 

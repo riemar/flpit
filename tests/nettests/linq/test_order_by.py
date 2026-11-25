@@ -97,7 +97,7 @@ def test_OrderedCount(flp_type):
     assert flp_type(source).order_by(lambda i: i).count() == 20
 
 def test_SurviveBadComparerAlwaysReturnsNegative(flp_type):
-    pytest.skip("comparer not yet supported")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     source = [1]
     expected = [1]
     assert list(flp_type(source).order_by(lambda e: e, comparer=cmp_to_key(bad_comparer_2))) == expected
@@ -180,13 +180,13 @@ def test_EmptyOrderedToList(flp_type):
     assert list(flp_type([]).order_by(lambda e: e).to_list()) == []
 
 def test_SurviveBadComparerAlwaysReturnsPositive(flp_type):
-    pytest.skip("comparer not yet supported")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     source = [1]
     expected = [1]
     assert list(flp_type(source).order_by(lambda e: e, comparer=cmp_to_key(bad_comparer_1))) == expected
 
 def test_OrderByExtremeComparer(flp_type):
-    pytest.skip("comparer not yet supported")
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
     out_of_order = [7, 1, 0, 9, 3, 5, 4, 2, 8, 6]
     expected = list(range(10))
     assert list(flp_type(out_of_order).order_by(lambda i: i, comparer=cmp_to_key(extreme_comparer))) == expected
@@ -294,24 +294,26 @@ def test_LastOnOrdered(flp_type):
     assert flp_type(random.sample(range(100), 100)).order_by(lambda i: len(str(i))).then_by_descending(lambda i: i).last() == 10
 
 def test_LastOnOrderedMatchingCases(flp_type):
-    pytest.skip("last_or_default needs to be implemented")
-    boxed_ints = [0, 1, 2, 9, 1, 2, 3, 9, 4, 5, 7, 8, 9, 0, 1]
+    # object[] boxedInts: Assert.Same needs distinct objects for equal values; ints above 256 are not cached
+    # by CPython, so each element is its own object (boxedInts[12] is the third 9 -> the third 1009).
+    boxed_ints = [int(str(1000 + i)) for i in [0, 1, 2, 9, 1, 2, 3, 9, 4, 5, 7, 8, 9, 0, 1]]
 
+    # LastOrDefault() is last_or_default(default(object)) = last_or_default(None).
     assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last()
-    assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last_or_default()
+    assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last_or_default(None)
     assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last(lambda o: o % 2 == 1)
-    assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last_or_default(lambda o: o % 2 == 1)
+    assert boxed_ints[12] is flp_type(boxed_ints).order_by(lambda o: o).last_or_default(None, lambda o: o % 2 == 1)
 
 def test_LastOnEmptyOrderedThrows(flp_type):
     with pytest.raises(Exception):
         flp_type([]).order_by(lambda i: i).last()
 
 def test_LastOrDefaultOnOrdered(flp_type):
-    pytest.skip("last_or_default needs to be implemented")
-    assert flp_type(random.sample(range(10), 10)).order_by(lambda i: i).last_or_default() == 9
-    assert flp_type(random.sample(range(10), 10)).order_by_descending(lambda i: i).last_or_default() == 0
-    assert flp_type(random.sample(range(100), 100)).order_by(lambda i: len(str(i))).then_by_descending(lambda i: i).last_or_default() == 10
-    assert flp_type([]).order_by(lambda i: i).last_or_default() is None
+    # LastOrDefault() on ints is last_or_default(default(int)) = last_or_default(0).
+    assert flp_type(random.sample(range(10), 10)).order_by(lambda i: i).last_or_default(0) == 9
+    assert flp_type(random.sample(range(10), 10)).order_by_descending(lambda i: i).last_or_default(0) == 0
+    assert flp_type(random.sample(range(100), 100)).order_by(lambda i: len(str(i))).then_by_descending(lambda i: i).last_or_default(0) == 10
+    assert flp_type([]).order_by(lambda i: i).last_or_default(0) == 0
 
 def test_EnumeratorDoesntContinue(flp_type):
     seq = random.sample(list(number_range_guaranteed_not_collection_type(0, 3)), 3)

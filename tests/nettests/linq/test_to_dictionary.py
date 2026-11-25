@@ -45,6 +45,7 @@ from flpit import (
     flp,
     ArgumentError,
     ArgumentNullError,
+    ElementSelectorNoneError,
     InvalidOperationError,
     SelectorNoneError,
     SourceNoneError,
@@ -250,7 +251,7 @@ def test_RunOnce(run_once):
     ).to_dictionary()
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ToDictionary_PassCustomComparer():
     comparer = _Comparer(lambda x, y: x == y, lambda x: x)
     collection = _TestCollection([1, 2, 3, 4, 5, 6])
@@ -267,7 +268,7 @@ def test_ToDictionary_PassCustomComparer():
     assert comparer is result4.comparer
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ToDictionary_UseDefaultComparerOnNull():
     collection = _TestCollection([1, 2, 3, 4, 5, 6])
 
@@ -279,7 +280,7 @@ def test_ToDictionary_UseDefaultComparerOnNull():
     assert _DEFAULT_COMPARER is result2.comparer
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ToDictionary_UseDefaultComparer():
     collection = _TestCollection([1, 2, 3, 4, 5, 6])
 
@@ -326,7 +327,7 @@ def test_ToDictionary_ThrowArgumentNullExceptionWhenValueSelectorIsNull(flp_type
     key_selector = lambda key: key
     value_selector = None
 
-    with pytest.raises(SelectorNoneError):
+    with pytest.raises(ElementSelectorNoneError):
         flp_type(source).to_dictionary(key_selector, value_selector)
 
 
@@ -403,7 +404,7 @@ def test_ThrowsOnNullKey(flp_type):
     # with pytest.raises(ArgumentNullError):
     #     flp_type(source3).to_dictionary()
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ThrowsOnNullKeyCustomComparer(flp_type):
     source = [_Item("Chris", 50), _Item("Bob", 95), _Item("null", 55)]
     # EXPECTED FAIL: no comparer overload; the comparer is bound to element_selector and called
@@ -424,7 +425,7 @@ def test_ThrowsOnNullKeyValueSelector(flp_type):
         flp_type(source).to_dictionary(lambda e: e.name, lambda e: e)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ThrowsOnNullKeyCustomComparerValueSelector(flp_type):
     source = [_Item("Chris", 50), _Item("Bob", 95), _Item("null", 55)]
     # EXPECTED FAIL: no comparer overload: a 3rd positional argument raises TypeError.
@@ -435,7 +436,7 @@ def test_ThrowsOnNullKeyCustomComparerValueSelector(flp_type):
         flp_type(source).to_dictionary(lambda e: e.name, lambda e: e, _ANAGRAM_COMPARER)
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_ThrowsOnDuplicateKeys(flp_type):
     source = [_Item("Chris", 50), _Item("Bob", 95), _Item("Bob", 55)]
     # EXPECTED FAIL: no comparer overload: the 3rd positional argument raises TypeError, not ArgumentError.
@@ -472,7 +473,7 @@ def test_OneElementNullComparer(flp_type):
     _assert_matches(keys, elements, source.to_dictionary(lambda e: e.name, lambda e: e.score))
 
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_SeveralElementsCustomComparerer(flp_type):
     keys = ["Bob", "Zen", "Prakash", "Chris", "Sachin"]
     source = [
@@ -488,7 +489,7 @@ def test_SeveralElementsCustomComparerer(flp_type):
     _assert_matches(keys, source, flp_type(source).to_dictionary(lambda e: e.name, _ANAGRAM_COMPARER))
 
 
-# @pytest.mark.skip("comparer not supported")
+# @pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 def test_NullCoalescedKeySelector(flp_type):
     elements = [None]
     keys = [""]

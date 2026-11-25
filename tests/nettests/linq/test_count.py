@@ -10,7 +10,7 @@ Original source attribution: .NET Foundation / dotnet/runtime, MIT License.
 This file is an independent Python port adapted to FlpIt's API and semantics.
 """
 import pytest
-from flpit import flp
+from flpit import PredicateNoneError, SourceNoneError, flp
 
 # ==============================================================================
 # Helper Methods (Ported from C# EnumerableTests Base Class)
@@ -116,31 +116,35 @@ def test_SameResultsRepeatCallsStringQuery(flp_type):
     assert q.count() == q.count()
 
 
-@pytest.mark.parametrize("source, predicate, expected", list(Int_TestData_Raw()))
-def test_it_Int(source, predicate, expected):
-    it = flp.it(source)
-    if predicate is None:
-        assert expected == it.count()
-    else:
-        assert (expected == it.count(predicate))
-
-@pytest.mark.parametrize("source, predicate, expected", list(Int_TestData_Raw()))
-def test_it_Int(source, predicate, expected):
-    it = flp.lst(source)
-    if predicate is None:
-        assert expected == it.count()
-    else:
-        assert (expected == it.count(predicate))
+# The rows hold one-shot generators (RepeatedNumberGuaranteedNotCollectionType), so each test case
+# builds its own row: a shared generator would be exhausted by the first flp_type.
+_INT_ROWS = range(len(list(Int_TestData_Raw())))
 
 
+def _int_row(index):
+    return list(Int_TestData_Raw())[index]
 
-# @pytest.mark.parametrize("source, predicate, expected", list(Int_TestData_Raw()))
-# def test_IntRunOnce(flp_type, source, predicate, expected):
-#     for src in CreateSources(flp_type, source):
-#         if predicate is None:
-#             assert expected == src.run_once().count()
-#         else:
-#             assert expected == src.run_once().count(predicate)
+
+@pytest.mark.parametrize("row", _INT_ROWS)
+def test_Int(flp_type, row):
+    source, predicate, expected = _int_row(row)
+    for src in CreateSources(flp_type, source):
+        if predicate is None:
+            assert expected == src.count()
+        else:
+            assert expected == src.count(predicate)
+
+
+@pytest.mark.parametrize("row", _INT_ROWS)
+def test_IntRunOnce(flp_type, run_once, row):
+    source, predicate, expected = _int_row(row)
+    for src in CreateSources(flp_type, source):
+        # source.RunOnce(): enumerating it a second time fails the test.
+        once = flp_type(run_once(src))
+        if predicate is None:
+            assert expected == once.count()
+        else:
+            assert expected == once.count(predicate)
 
 
 def test_NullableIntArray_IncludesNullObjects(flp_type):
@@ -162,20 +166,20 @@ def test_RunOnce(flp_type, count, enumerable):
 
 def test_NullSource_ThrowsArgumentNullException(flp_type):
     # Pass None straight into the test target instance construction
-    with pytest.raises((AttributeError, TypeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).count()
 
-    with pytest.raises((AttributeError, TypeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).count(lambda i: i != 0)
 
 
 def test_NullPredicate_ThrowsArgumentNullException(flp_type):
-    with pytest.raises((AttributeError, TypeError, ValueError)):
+    with pytest.raises(PredicateNoneError):
         flp_type(range(0, 3)).count(None)
 
 
 def test_NonEnumeratedCount_NullSource_ThrowsArgumentNullException(flp_type):
-    with pytest.raises((AttributeError, TypeError, ValueError)):
+    with pytest.raises(SourceNoneError):
         flp_type(None).try_get_non_enumerated_count()
 
 

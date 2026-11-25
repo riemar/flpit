@@ -158,6 +158,17 @@ All notable changes to FlpIt are documented here. The format follows
   the reference for the inline-start tests, and `lab/task/async_start_order.py`, which runs the same cases with
   flpit.
 
+## [Unreleased]
+
+### Fixed
+
+- `any(None)` and `all(None)` on `FlpIt` and `FlpList`, and `FlpList.exists(None)`, raise
+  `PredicateNoneError` (.NET `ArgumentNullException`). Before, they raised a plain `TypeError` once there was an
+  element, and returned `False` / `True` for an empty sequence.
+- `FlpIt.to_dictionary(key_selector, None)` and `FlpList.to_dictionary(key_selector, None)` raise
+  `ElementSelectorNoneError`, like `to_lookup` and `AsyncFlpIt.to_dictionary`. Before, they raised
+  `SelectorNoneError`.
+
 ## [0.4.1] - 2026-11-22
 
 ### Added

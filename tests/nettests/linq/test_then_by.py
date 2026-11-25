@@ -14,6 +14,8 @@ import re
 from types import SimpleNamespace
 import pytest
 
+from flpit import SelectorNoneError, SourceNoneError
+
 
 def test_SameResultsRepeatCallsIntQuery(flp_type):
     x1_seq = [1, 6, 0, -1, 3]
@@ -143,28 +145,24 @@ def test_RunOnce(flp_type):
     assert list(source.order_by(lambda word: word[0].isupper()).then_by(lambda word: len(word))) == expected
 
 
-def test_NullSource():
-    source = None
-    with pytest.raises((TypeError, AttributeError)):
-        source.then_by(lambda i: i)
+def test_NullSource(flp_type):
+    # A None receiver: the source is the ordered sequence, so it is None before then_by is reached.
+    with pytest.raises(SourceNoneError):
+        flp_type(None).order_by(lambda e: e).then_by(lambda i: i)
 
 
 def test_NullKeySelector(flp_type):
     key_selector = None
-    with pytest.raises((TypeError, ValueError)):
+    with pytest.raises(SelectorNoneError, match="\'keySelector\'"):
         flp_type([]).order_by(lambda e: e).then_by(key_selector)
 
 
 def test_NullSourceComparer():
-    source = None
-    with pytest.raises((TypeError, AttributeError)):
-        source.then_by(lambda i: i, None)
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: then_by(key_selector, comparer)")
 
 
 def test_NullKeySelectorComparer(flp_type):
-    key_selector = None
-    with pytest.raises((TypeError, ValueError)):
-        flp_type([]).order_by(lambda e: e).then_by(key_selector, None)
+    pytest.skip("Upstream .NET test requires unsupported FlpIt API: then_by(key_selector, comparer)")
 
 
 @pytest.mark.parametrize("then_bys", [1, 2, 3])

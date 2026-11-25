@@ -5,7 +5,7 @@ Tests for FlpIt.to_dictionary() and FlpList.to_dictionary().
 from flpit import ArgumentError
 import pytest
 
-from flpit import flp, SelectorNoneError
+from flpit import ElementSelectorNoneError, flp, SelectorNoneError
 
 
 def test_ToDictionary_UsesSourceElementAsValue(flp_type):
@@ -49,5 +49,5 @@ def test_ToDictionary_NullKeySelectorRaises(flp_type):
 
 
 def test_ToDictionary_NullElementSelectorRaises(flp_type):
-    with pytest.raises(SelectorNoneError):
+    with pytest.raises(ElementSelectorNoneError):
         flp_type([1, 2]).to_dictionary(lambda item: item, None)

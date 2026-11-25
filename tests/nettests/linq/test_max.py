@@ -984,13 +984,13 @@ _MAX_GENERIC_DATA = [
     (["Aardvark", "Zyzzyva", "Zebra", "Antelope"], _Comparer(lambda x, y: -_default_compare(x, y)), "Aardvark"),
 ]
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, comparer, expected", _MAX_GENERIC_DATA)
 def test_Max_Generic_HasExpectedOutput(flp_type, source, comparer, expected):
     # where .NET returns null for nullable element types.
     assert expected == flp_type(source).max(comparer=comparer)
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, comparer, expected", _MAX_GENERIC_DATA)
 def test_Max_Generic_RunOnce_HasExpectedOutput(flp_type, run_once, source, comparer, expected):
     assert expected == flp.it(run_once(source)).max(comparer=comparer)
@@ -1009,19 +1009,16 @@ def test_MaxBy_Generic_NullSource_ThrowsArgumentNullException(flp_type):
         flp_type(None).max_by(lambda x: x, _Comparer(lambda _a, _b: 0))
 
 
+@pytest.mark.xfail(strict=True, reason="Undecided deviation: flpit validates a None key selector only once there is an element (an empty "
+           "source returns None); .NET throws ArgumentNullException('keySelector') at the call")
 def test_MaxBy_Generic_NullKeySelector_ThrowsArgumentNullException(flp_type):
     source = []
     key_selector = None
 
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).max_by(key_selector)
-    assert flp_type(source).max_by(key_selector) is None
-
-    # no comparer
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).max_by(key_selector, comparer=None)
-    # with pytest.raises(SelectorNoneError):
-    #     flp_type(source).max_by(key_selector, _Comparer(lambda _a, _b: 0))
+    with pytest.raises(SelectorNoneError):
+        flp_type(source).max_by(key_selector)
+    # MaxBy(keySelector, comparer: null) and MaxBy(keySelector, comparer): max_by has no comparer
+    # parameter, so the three upstream calls collapse into the one above.
 
 
 def test_MaxBy_Generic_EmptyStructSource_ThrowsInvalidOperationException(flp_type):
@@ -1094,13 +1091,13 @@ _MAX_BY_DATA = [
      _Comparer(lambda x, y: -_default_compare(x, y)), _Person("Harry", 20)),
 ]
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, key_selector, comparer, expected", _MAX_BY_DATA)
 def test_MaxBy_Generic_HasExpectedOutput(flp_type, source, key_selector, comparer, expected):
     # positionally), and empty sources raise EmptySequenceError where .NET returns null.
     assert expected == flp_type(source).max_by(key_selector, comparer)
 
-@pytest.mark.skip("comparer not supported")
+@pytest.mark.skip("Upstream .NET test requires unsupported FlpIt API: comparer overload (IEqualityComparer / IComparer)")
 @pytest.mark.parametrize("source, key_selector, comparer, expected", _MAX_BY_DATA)
 def test_MaxBy_Generic_RunOnce_HasExpectedOutput(flp_type, run_once, source, key_selector, comparer, expected):
     # EXPECTED FAIL: same reasons as test_MaxBy_Generic_HasExpectedOutput.
