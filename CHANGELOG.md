@@ -5,6 +5,12 @@ All notable changes to FlpIt are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Task.from_result()`, `Task.from_exception()` and `Task.from_canceled()`: tasks that are already complete
+  (.NET `Task.FromResult` / `FromException` / `FromCanceled`). `from_exception()` fails the task even for an
+  `OperationCanceledError`, and `from_canceled()` requires a cancelled token, as in .NET.
+
 ### Fixed
 
 - `flpit.json` (msgspec backend) could crash a free-threaded interpreter (a segmentation fault in
@@ -24,6 +30,8 @@ All notable changes to FlpIt are documented here. The format follows
   `None` task (was a plain `TypeError`), and `when_any()` with no tasks raises `ArgumentError` (was `ValueError`),
   as .NET does. `when_each()` checks its arguments when called, not when the stream is first iterated.
   `AggregateError(None)` raises `ArgumentNullError` and a `None` element `ArgumentError`.
+  `TaskCompletionSource.set_from_task()` / `try_set_from_task()` raise `ArgumentNullError` for `None` (was
+  `TypeError`) and `ArgumentError` for a task that has not completed (was `ValueError`).
 - The ported .NET task tests (`tests/nettests/task`) were re-checked against the originals method by method:
   `WaitAny` waits on a gate instead of delays (it was flaky on macOS), and parts that had been rewritten or
   dropped are back. `MethodCoverage`, `TaskCompletionSource<TResult>`, `AggregateException`,

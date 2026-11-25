@@ -1341,6 +1341,46 @@ class Task(Generic[T], metaclass=_TaskMeta):
     """Alias of :meth:`when_each`."""
 
     @classmethod
+    def from_result[R](cls, result: R) -> "Task[R]":
+        """A task that has already completed successfully with ``result`` (.NET ``Task.FromResult``).
+
+        Every call returns a new task.
+        """
+        source: TaskCompletionSource[R] = TaskCompletionSource()
+        source.set_result(result)
+        return source.task
+
+    @classmethod
+    def from_exception(cls, exception: Exception) -> "Task[Any]":
+        """A task that has already failed with ``exception`` (.NET ``Task.FromException``).
+
+        The task is failed, not cancelled, even for an ``OperationCanceledError``, as in .NET.
+        """
+        if exception is None:
+            raise ArgumentNullError("exception")
+        if not isinstance(exception, Exception):
+            raise TypeError(f"exception must be an Exception, not {type(exception).__name__}")
+        source: TaskCompletionSource[Any] = TaskCompletionSource()
+        source.set_exception(exception)
+        return source.task
+
+    @classmethod
+    def from_canceled(cls, token: CancellationToken) -> "Task[Any]":
+        """A task that has already been cancelled with ``token`` (.NET ``Task.FromCanceled``).
+
+        ``token`` must have had cancellation requested; otherwise ``ArgumentOutOfRangeError``.
+        """
+        if not isinstance(token, CancellationToken):
+            raise TypeError("token must be a CancellationToken")
+        if not token.is_cancellation_requested:
+            raise ArgumentOutOfRangeError(
+                "cancellationToken", "The cancellation token must have had cancellation requested.")
+        # .NET: the task carries the token as its CancellationToken, and the TaskCanceledException's.
+        task: Task[Any] = cls._promise(_get_runtime(), token=token)
+        task._finish(_CANCELLED, exception=_task_canceled(task, "A task was canceled.", token))
+        return task
+
+    @classmethod
     def delay(
             cls,
             seconds: float,
@@ -2773,11 +2813,11 @@ class TaskCompletionSource(Generic[T]):
 
     def _validate_completed_task(self, source: "flpit.task.Task[Any] | None") -> None:
         if source is None:
-            raise TypeError("completed_task must not be None")
+            raise ArgumentNullError("completedTask")
         if not isinstance(source, Task):
             raise TypeError("completed_task must be a Task instance")
         if not source.done():
-            raise ValueError("completed_task must already be completed")
+            raise ArgumentError("The provided task must have already completed. (Parameter 'completedTask')")
 
     def _try_copy_task(self, source: "flpit.task.Task[Any]") -> bool:
         if source._state == Task.SUCCEEDED:

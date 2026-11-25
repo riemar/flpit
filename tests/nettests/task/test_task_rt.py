@@ -17,8 +17,9 @@ from __future__ import annotations
 import pytest
 
 from datetime import timedelta
+from typing import Any
 
-from flpit.core.linq import ArgumentNullError, ArgumentOutOfRangeError
+from flpit.core.linq import ArgumentNullError, ArgumentOutOfRangeError, InvalidOperationError
 from flpit.task import (
     AggregateError,
     CancellationToken,
@@ -174,15 +175,93 @@ def test_RunRunTests_Unwrap_NegativeCases() -> None:
 
 
 def test_RunFromResult() -> None:
-    _unsupported("Task.FromResult immediate-completion factory and object-identity semantics")
+    # Test FromResult with value type
+    results: list[Any] = [-1, 0, 1, 42, 2_147_483_647, -2_147_483_648, 42, -42]  # includes duplicate values to ensure that tasks from these aren't the same object
+    tasks = [Task.from_result(r) for r in results]
+
+    # Make sure they've all completed
+    for i, task in enumerate(tasks):
+        assert task.done(), f"TaskRtTests.RunFromResult:    > FAILED: Task {i} should have already completed (value)"
+
+    # Make sure they all completed successfully
+    for i, task in enumerate(tasks):
+        assert task.status == Task.SUCCEEDED, (
+            f"TaskRtTests.RunFromResult:    > FAILED: Task {i} should have already completed successfully (value)")
+
+    # Make sure no two are the same instance
+    for i in range(len(tasks)):
+        for j in range(i + 1, len(tasks)):
+            assert tasks[i] is not tasks[j], (
+                f"TaskRtTests.RunFromResult:    > FAILED: {i} and {j} created tasks should not be equal (value)")
+
+    # Make sure they all have the correct results
+    for i, task in enumerate(tasks):
+        assert task.result() == results[i], (
+            f"TaskRtTests.RunFromResult:    > FAILED: Task {i} had the result {task.result()} but should have had "
+            f"{results[i]} (value)")
+
+    # Test FromResult with reference type
+    ref_results: list[object | None] = [object(), object(), None, object()]
+    ref_tasks = [Task.from_result(r) for r in ref_results]
+
+    for i, task in enumerate(ref_tasks):
+        assert task.done(), f"TaskRtTests.RunFromResult:    > FAILED: Task {i} should have already completed  (ref)"
+    for i, task in enumerate(ref_tasks):
+        assert task.status == Task.SUCCEEDED, (
+            f"TaskRtTests.RunFromResult:    > FAILED: Task {i} should have already completed successfully (ref)")
+    for i in range(len(ref_tasks)):
+        for j in range(i + 1, len(ref_tasks)):
+            assert ref_tasks[i] is not ref_tasks[j], (
+                f"TaskRtTests.RunFromResult:    > FAILED: {i} and {j} created tasks should not be equal (ref)")
+    for i, task in enumerate(ref_tasks):
+        assert task.result() is ref_results[i], f"TaskRtTests.RunFromResult:    > FAILED: Task {i} had the wrong result (ref)"
+
+    # Test FromException
+    exceptions: list[Exception] = [InvalidOperationError(), OperationCanceledError(), Exception(), Exception()]  # includes duplicate values to ensure that tasks from these aren't the same object
+    ex_tasks = [Task.from_exception(e) for e in exceptions]
+
+    # Make sure they've all completed
+    for i, task in enumerate(ex_tasks):
+        assert task.done(), f"Task {i} should have already completed"
+
+    # Make sure they all completed with an error
+    for i, task in enumerate(ex_tasks):
+        assert task.status == Task.FAILED, f"    > FAILED: Task {i} should have already faulted"
+
+    # Make sure no two are the same instance
+    for i in range(len(ex_tasks)):
+        for j in range(i + 1, len(ex_tasks)):
+            assert ex_tasks[i] is not ex_tasks[j], f"    > FAILED: {i} and {j} created tasks should not be equal"
+
+    # Make sure they all have the correct exceptions
+    for i, task in enumerate(ex_tasks):
+        exception = task.exception()
+        assert exception is not None
+        assert isinstance(exception, AggregateError)
+        assert len(exception.exceptions) == 1
+        assert exception.exceptions[0] is exceptions[i]
+
+    # Make sure we handle invalid exceptions correctly
+    with pytest.raises(ArgumentNullError):
+        Task.from_exception(None)  # type: ignore[arg-type]
+
+    # Make sure we throw from waiting on a faulted task.
+    # .NET's .Result raises AggregateException; FlpIt's result() is GetAwaiter().GetResult() and raises the
+    # failure itself (docs/task/exceptions.md). wait() is the AggregateError form.
+    with pytest.raises(InvalidOperationError):
+        Task.from_exception(InvalidOperationError()).result()
+    with pytest.raises(AggregateError):
+        Task.from_exception(InvalidOperationError()).wait()
 
 
 def test_FromResult_KnownResults_Cached() -> None:
-    _unsupported("Task.FromResult implementation-specific result caching; not part of FlpIt's API")
+    # Task.FromResult caches some known values (bool, -1..8, default(T)) "as an implementation detail", the
+    # original says. FlpIt's from_result returns a new task every time.
+    _unsupported("Task.FromResult result caching, an implementation detail of .NET")
 
 
 def test_RunFromResult_FaultedTask() -> None:
-    _unsupported("Task.FromException, and .NET's internal TaskExceptionHolder 'observed' flag read via reflection")
+    _unsupported("the internal TaskExceptionHolder 'observed' flag, read via reflection")
 
 
 @_DELAY_CONTRACT

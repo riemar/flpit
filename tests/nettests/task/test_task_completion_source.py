@@ -21,9 +21,10 @@ from typing import Any
 
 import pytest
 
-from flpit.core.linq import ArgumentError
+from flpit.core.linq import ArgumentError, ArgumentNullError
 from flpit.task import (
     AggregateError,
+    CancellationToken,
     CancellationTokenSource,
     InvalidStateError,
     OperationCanceledError,
@@ -52,10 +53,11 @@ def _assert_completed_tcs_fails_to_complete_again(tcs: TaskCompletionSource[Any]
         tcs.set_canceled()
 
 
-def _completed_task(value: Any = None) -> Task[Any]:
-    task = Task.run(lambda: value)
-    task.result()
-    return task
+def _canceled_token() -> CancellationToken:
+    """``new CancellationToken(canceled: true)``"""
+    cts = CancellationTokenSource()
+    cts.cancel()
+    return cts.token
 
 
 def test_Ctor_ArgumentsRoundtrip() -> None:
@@ -196,47 +198,43 @@ def test_SetException_Enumerable_CompletesSuccessfully(try_method: bool) -> None
 
 def test_SetFromTask_InvalidArgument_Throws() -> None:
     tcs = TaskCompletionSource()
-    incomplete_source = TaskCompletionSource()
-
-    with pytest.raises(TypeError, match="must not be None"):
-        tcs.set_from_task(None)
-    with pytest.raises(ValueError, match="already be completed"):
-        tcs.set_from_task(incomplete_source.task)
+    with pytest.raises(ArgumentNullError, match="completedTask"):
+        tcs.set_from_task(None)  # type: ignore[arg-type]
+    with pytest.raises(ArgumentError, match="completedTask"):
+        tcs.set_from_task(TaskCompletionSource().task)
     assert not tcs.task.done()
 
     tcs.set_result()
     assert tcs.task.status == Task.SUCCEEDED
 
-    # Input validation still takes precedence after the destination is complete.
-    with pytest.raises(TypeError):
-        tcs.set_from_task(None)
-    with pytest.raises(ValueError):
-        tcs.set_from_task(incomplete_source.task)
+    with pytest.raises(ArgumentNullError, match="completedTask"):
+        tcs.set_from_task(None)  # type: ignore[arg-type]
+    with pytest.raises(ArgumentError, match="completedTask"):
+        tcs.set_from_task(TaskCompletionSource().task)
     assert tcs.task.status == Task.SUCCEEDED
-    assert incomplete_source.try_set_canceled()
 
 
 def test_SetFromTask_AlreadyCompleted_ReturnsFalseOrThrows() -> None:
-    destination = TaskCompletionSource()
-    destination.set_result()
+    tcs = TaskCompletionSource()
+    tcs.set_result()
 
-    success = _completed_task()
-    failure_source = TaskCompletionSource()
-    failure_source.set_exception(ValueError("source failed"))
-    cancellation_source = TaskCompletionSource()
-    cancellation_source.set_canceled()
+    assert not tcs.try_set_from_task(Task.completed_task)
+    assert not tcs.try_set_from_task(Task.from_exception(Exception()))
+    assert not tcs.try_set_from_task(Task.from_canceled(_canceled_token()))
 
-    for source in (success, failure_source.task, cancellation_source.task):
-        assert not destination.try_set_from_task(source)
-        with pytest.raises(InvalidStateError):
-            destination.set_from_task(source)
+    with pytest.raises(InvalidStateError):
+        tcs.set_from_task(Task.completed_task)
+    with pytest.raises(InvalidStateError):
+        tcs.set_from_task(Task.from_exception(Exception()))
+    with pytest.raises(InvalidStateError):
+        tcs.set_from_task(Task.from_canceled(_canceled_token()))
 
-    assert destination.task.status == Task.SUCCEEDED
+    assert tcs.task.status == Task.SUCCEEDED
 
 
 @pytest.mark.parametrize("try_method", [False, True])
 def test_SetFromTask_CompletedSuccessfully(try_method: bool) -> None:
-    source = _completed_task()
+    source = Task.completed_task
     tcs = TaskCompletionSource()
 
     if try_method:

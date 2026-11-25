@@ -10,7 +10,7 @@ Upstream source (current .NET runtime only; no Mono test sources):
 https://github.com/dotnet/runtime/blob/main/src/libraries/System.Runtime/tests/System.Threading.Tasks.Tests/MethodCoverage.cs
 
 The original PascalCase names are kept with a ``test_`` prefix. Mapping:
-- ``Task.Factory.StartNew`` is ``Task.run``; ``Task.FromResult(v)`` is a completed ``TaskCompletionSource``.
+- ``Task.Factory.StartNew`` is ``Task.run``.
 - Timeouts are seconds in FlpIt: ``30_000`` ms is ``30``, ``-2`` ms is ``-0.002``.
 - The array, ``ReadOnlySpan`` and ``IEnumerable`` overloads are a list, a tuple and a generator; FlpIt has one
   variadic form per method, so the generic ``Task<int>`` overloads run the same call.
@@ -46,12 +46,6 @@ def _current_id() -> int | None:
     """``Task.CurrentId``: FlpIt has no public one, so the running task's identity stands in."""
     task = _current_task.value
     return None if task is None else id(task)
-
-
-def _from_result(value: int) -> Task[int]:
-    source: TaskCompletionSource[int] = TaskCompletionSource()
-    source.set_result(value)
-    return source.task
 
 
 def _null_element_iterator() -> Iterator[Any]:
@@ -198,9 +192,9 @@ def test_Task_WhenAny_TwoTasks_InvalidArgs_Throws() -> None:
         Task.when_any(Task.completed_task, None)
 
     with pytest.raises(ArgumentError, match="tasks"):
-        Task.when_any(None, _from_result(1))
+        Task.when_any(None, Task.from_result(1))
     with pytest.raises(ArgumentError, match="tasks"):
-        Task.when_any(_from_result(2), None)
+        Task.when_any(Task.from_result(2), None)
 
 
 def test_Task_WhenAny_NullTaskElement_Throws() -> None:
@@ -226,7 +220,7 @@ def test_Task_WhenAny_NoTasks_Throws(tasks: Any) -> None:
 
 
 def test_Task_WhenAny_TwoTasks_OnePreCompleted() -> None:
-    t1 = _from_result(1)
+    t1 = Task.from_result(1)
     t2: Task[int] = TaskCompletionSource[int]().task
 
     assert Task.when_any(t1, t2).result() is t1
@@ -234,8 +228,8 @@ def test_Task_WhenAny_TwoTasks_OnePreCompleted() -> None:
 
 
 def test_Task_WhenAny_TwoTasks_BothPreCompleted() -> None:
-    t1 = _from_result(1)
-    t2 = _from_result(2)
+    t1 = Task.from_result(1)
+    t2 = Task.from_result(2)
 
     assert Task.when_any(t1, t2).result() is t1
     assert Task.when_any(t1, t1).result() is t1
@@ -347,8 +341,8 @@ def test_Task_WhenAll_NoTasks_IsCompletedSuccessfully() -> None:
 
 
 def test_Task_WhenAll_TwoTasks_BothPreCompleted() -> None:
-    t1 = _from_result(1)
-    t2 = _from_result(2)
+    t1 = Task.from_result(1)
+    t2 = Task.from_result(2)
 
     def assert_is_completed_successfully_with_result(expected: list[int], task: Task[list[Any]]) -> None:
         assert task.status == Task.SUCCEEDED
@@ -361,7 +355,7 @@ def test_Task_WhenAll_TwoTasks_BothPreCompleted() -> None:
 
 def test_Task_WhenAll_TwoTasks_OnePreCompleted() -> None:
     t1: Task[int] = TaskCompletionSource[int]().task
-    t2 = _from_result(2)
+    t2 = Task.from_result(2)
 
     assert Task.when_all(t1, t2).status != Task.SUCCEEDED
     assert Task.when_all(t1, t1).status != Task.SUCCEEDED
@@ -431,7 +425,7 @@ def test_Task_WhenEach_TasksOnlyEnumerableOnce() -> None:
         Task.when_each([Task.completed_task, Task.completed_task]),
         Task.when_each((Task.completed_task, Task.completed_task)),
         Task.when_each(iter([Task.completed_task, Task.completed_task])),
-        Task.when_each([_from_result(0), _from_result(0)]),
+        Task.when_each([Task.from_result(0), Task.from_result(0)]),
     ]
 
     async def check(e: Any) -> None:
@@ -459,7 +453,7 @@ def test_Task_WhenEach_IteratesThroughCompleteAndIncompleteTasks(mode: str) -> N
     tcs1: TaskCompletionSource[int] = TaskCompletionSource()
     tcs2: TaskCompletionSource[int] = TaskCompletionSource()
     tcs3: TaskCompletionSource[int] = TaskCompletionSource()
-    array = [_from_result(1), tcs1.task, _from_result(2), tcs2.task, _from_result(3), tcs3.task]
+    array = [Task.from_result(1), tcs1.task, Task.from_result(2), tcs2.task, Task.from_result(3), tcs3.task]
 
     if mode == "positional":
         tasks = Task.when_each(*array)
