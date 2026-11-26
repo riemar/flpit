@@ -189,3 +189,60 @@ def test_named_factory_primary_handler_survives_client_disposal(http_server: str
         first.close()
         second.close()
         factory.close()
+
+
+def test_sync_get_and_post_json(http_server: str) -> None:
+    with HttpClient(base_address=http_server) as client:
+        with client.get("/items") as response:
+            assert response.status_code == 200
+            assert response.content.read_from_json() == {
+                "path": "/items",
+                "accept": None,
+            }
+
+        with client.post_as_json("/items", {"name": "flpit"}) as response:
+            assert response.status_code == 201
+            assert response.content.read_from_json() == {
+                "body": {"name": "flpit"},
+            }
+
+
+def test_sync_convenience_readers_and_stream(http_server: str) -> None:
+    with HttpClient(base_address=http_server) as client:
+        assert client.get_from_json("/items")["path"] == "/items"
+        assert client.get_string("/items").startswith("{")
+        assert client.get_byte_array("/items").startswith(b"{")
+
+        stream = client.get_stream("/items")
+        try:
+            assert stream.read(1) == b"{"
+        finally:
+            stream.close()
+
+
+def test_sync_cancellation_interrupts_response_read(http_server: str) -> None:
+    with HttpClient(base_address=http_server, timeout=5.0) as client:
+        cts = CancellationTokenSource()
+        threading.Timer(0.2, cts.cancel).start()
+        started = time.monotonic()
+        with pytest.raises(OperationCanceledError):
+            client.get_string("/slow", token=cts.token)
+        assert time.monotonic() - started < 2.5
+
+
+def test_sync_stream_read_accepts_per_read_token(http_server: str) -> None:
+    with HttpClient(base_address=http_server, timeout=5.0) as client:
+        response = client.get(
+            "/stream-slow",
+            completion_option=HttpCompletionOption.RESPONSE_HEADERS_READ,
+        )
+        stream = response.content.read_as_stream()
+        cts = CancellationTokenSource()
+        try:
+            assert stream.read(1) == b"x"
+            threading.Timer(0.2, cts.cancel).start()
+            with pytest.raises(OperationCanceledError):
+                stream.read(1, token=cts.token)
+        finally:
+            stream.close()
+            response.close()
