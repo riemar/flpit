@@ -21,6 +21,20 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        if self.path == "/stream-slow":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"x")
+            self.wfile.flush()
+            time.sleep(1.5)
+            try:
+                self.wfile.write(b"y")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         if self.path == "/slow":
             body_size = 100_000
             self.send_response(200)
@@ -140,12 +154,13 @@ def test_cancellation_interrupts_inflight_response_body(http_server: str) -> Non
 def test_stream_read_accepts_a_cancellation_token(http_server: str) -> None:
     with HttpClient(base_address=http_server, timeout=5.0) as client:
         response = client.get_async(
-            "/slow",
+            "/stream-slow",
             completion_option=HttpCompletionOption.RESPONSE_HEADERS_READ,
         ).result(timeout=3)
         stream = response.content.read_as_stream_async().result(timeout=3)
         cts = CancellationTokenSource()
-        read = stream.read_async(64, token=cts.token)
+        assert stream.read(1) == b"x"
+        read = stream.read_async(1, token=cts.token)
         threading.Timer(0.2, cts.cancel).start()
         try:
             with pytest.raises(OperationCanceledError):
