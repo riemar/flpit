@@ -237,7 +237,7 @@ class CancellationAwareResponseStream(io.RawIOBase):
 
     def read_async(self, size: int = -1,
                    token: CancellationToken | None = None) -> Task[bytes]:
-        actual = _token(token)
+        actual = token if token is not None else self._token
         def read(token: CancellationToken) -> bytes:
             scope = CancellationScope(token)
             scope.attach(getattr(self._raw, "connection", None))
