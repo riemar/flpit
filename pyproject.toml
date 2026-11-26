@@ -23,6 +23,7 @@ dependencies = [
     # Fast JSON/CSV backend. Optional at runtime: without it flpit.json uses its
     # pure-Python backend (PyPy, Pyodide and platforms without msgspec wheels).
     "msgspec>=0.22.0; platform_python_implementation == 'CPython' and sys_platform != 'emscripten'",
+    "urllib3>=2.2,<3",
 ]
 
 [project.optional-dependencies]
