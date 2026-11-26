@@ -41,6 +41,10 @@ class HttpContent:
             raise NotImplementedError("Response-only content cannot be sent as a request body")
         return self._buffer
 
+    def read_as_bytes(self, token: CancellationToken | None = None) -> bytes:
+        """Read the complete response body synchronously, observing token cancellation."""
+        return self._read_bytes(_token(token))
+
     def read_as_bytes_async(self, token: CancellationToken | None = None) -> Task[bytes]:
         actual = _token(token)
         return Task.run(self._read_bytes, token=actual, pass_token=True)
@@ -84,6 +88,13 @@ class HttpContent:
                 except Exception:
                     pass
 
+    def read_as_string(self, token: CancellationToken | None = None,
+                       *, encoding: str | None = None) -> str:
+        """Read and decode the complete response body synchronously."""
+        data = self._read_bytes(_token(token))
+        codec = encoding or self._charset() or "utf-8"
+        return data.decode(codec, errors="replace")
+
     def read_as_string_async(self, token: CancellationToken | None = None,
                              *, encoding: str | None = None) -> Task[str]:
         actual = _token(token)
@@ -93,48 +104,76 @@ class HttpContent:
             return data.decode(codec, errors="replace")
         return Task.run(read, token=actual, pass_token=True)
 
+    @staticmethod
+    def _deserialize_json(data: bytes, target_type: type[T] | None = None) -> Any:
+        value = json.loads(data)
+        if target_type is None or target_type in (dict, list, str, int, float, bool):
+            return value
+        if hasattr(target_type, "model_validate"):
+            return target_type.model_validate(value)
+        if hasattr(target_type, "from_dict"):
+            return target_type.from_dict(value)
+        return target_type(**value) if isinstance(value, dict) else target_type(value)
+
+    def read_from_json(self, target_type: type[T] | None = None,
+                       token: CancellationToken | None = None) -> Any:
+        """Deserialize JSON content synchronously, observing token cancellation."""
+        return self._deserialize_json(self._read_bytes(_token(token)), target_type)
+
     def read_from_json_async(self, target_type: type[T] | None = None,
                              token: CancellationToken | None = None) -> Task[Any]:
         actual = _token(token)
         async def read(token: CancellationToken) -> Any:
-            value = json.loads(await self.read_as_bytes_async(token))
-            if target_type is None or target_type in (dict, list, str, int, float, bool):
-                return value
-            if hasattr(target_type, "model_validate"):
-                return target_type.model_validate(value)
-            if hasattr(target_type, "from_dict"):
-                return target_type.from_dict(value)
-            return target_type(**value) if isinstance(value, dict) else target_type(value)
+            data = await self.read_as_bytes_async(token)
+            return self._deserialize_json(data, target_type)
         return Task.run(read, token=actual, pass_token=True)
+
+    def read_as_json(self, target_type: type[T] | None = None,
+                     token: CancellationToken | None = None) -> Any:
+        return self.read_from_json(target_type, token)
 
     def read_as_json_async(self, target_type: type[T] | None = None,
                            token: CancellationToken | None = None) -> Task[Any]:
         return self.read_from_json_async(target_type, token)
 
+    def read_as_stream(self, token: CancellationToken | None = None) -> BinaryIO:
+        """Transfer the response body to a blocking stream."""
+        actual = _token(token)
+        actual.throw_if_cancellation_requested()
+        if self._closed:
+            raise ValueError("HTTP content is closed")
+        if self._stream is not None:
+            return self._stream
+        if self._buffer is not None:
+            self._stream = io.BytesIO(self._buffer)
+        elif self._raw is not None:
+            raw, self._raw = self._raw, None
+            self._stream_taken = True
+            self._stream = CancellationAwareResponseStream(raw, actual)
+        else:
+            self._stream = io.BytesIO(b"")
+        return self._stream
+
     def read_as_stream_async(self, token: CancellationToken | None = None) -> Task[BinaryIO]:
         actual = _token(token)
-        def open_stream(token: CancellationToken) -> BinaryIO:
-            token.throw_if_cancellation_requested()
-            if self._closed:
-                raise ValueError("HTTP content is closed")
-            if self._stream is not None:
-                return self._stream
-            if self._buffer is not None:
-                self._stream = io.BytesIO(self._buffer)
-            elif self._raw is not None:
-                raw, self._raw = self._raw, None
-                self._stream_taken = True
-                self._stream = CancellationAwareResponseStream(raw, token)
-            else:
-                self._stream = io.BytesIO(b"")
-            return self._stream
-        return Task.run(open_stream, token=actual, pass_token=True)
+        return Task.run(self.read_as_stream, token=actual, pass_token=True)
+
+    def load_into_buffer(self, token: CancellationToken | None = None) -> None:
+        """Buffer the full response body synchronously."""
+        self._read_bytes(_token(token))
 
     def load_into_buffer_async(self, token: CancellationToken | None = None) -> Task[None]:
         actual = _token(token)
         async def load(token: CancellationToken) -> None:
             await self.read_as_bytes_async(token)
         return Task.run(load, token=actual, pass_token=True)
+
+    def copy_to(self, destination: BinaryIO,
+                token: CancellationToken | None = None) -> None:
+        """Copy the complete response body to destination synchronously."""
+        actual = _token(token)
+        destination.write(self._read_bytes(actual))
+        actual.throw_if_cancellation_requested()
 
     def copy_to_async(self, destination: BinaryIO,
                       token: CancellationToken | None = None) -> Task[None]:
@@ -173,24 +212,28 @@ class CancellationAwareResponseStream(io.RawIOBase):
         super().__init__()
         self._raw = raw
         self._token = token
-        self._scope = CancellationScope(token)
-        self._scope.attach(getattr(raw, "connection", None))
         self._lock = threading.Lock()
 
     def readable(self) -> bool:
         return True
 
-    def read(self, size: int = -1) -> bytes:
-        self._token.throw_if_cancellation_requested()
+    def read(self, size: int = -1, *, token: CancellationToken | None = None) -> bytes:
+        """Read a chunk synchronously; a supplied token interrupts a blocked socket read."""
+        actual = _token(token) if token is not None else self._token
+        scope = CancellationScope(actual)
+        scope.attach(getattr(self._raw, "connection", None))
         try:
+            actual.throw_if_cancellation_requested()
             with self._lock:
                 result = self._raw.read(size, decode_content=True)
-            self._token.throw_if_cancellation_requested()
+            actual.throw_if_cancellation_requested()
             return result
         except BaseException as error:
-            if self._token.is_cancellation_requested:
-                raise OperationCanceledError("Response stream read cancelled", token=self._token) from error
+            if actual.is_cancellation_requested:
+                raise OperationCanceledError("Response stream read cancelled", token=actual) from error
             raise
+        finally:
+            scope.dispose()
 
     def read_async(self, size: int = -1,
                    token: CancellationToken | None = None) -> Task[bytes]:
@@ -214,7 +257,6 @@ class CancellationAwareResponseStream(io.RawIOBase):
 
     def close(self) -> None:
         if not self.closed:
-            self._scope.dispose()
             try:
                 self._raw.close()
             finally:
