@@ -270,6 +270,7 @@ version = "0.4.2.dev12"
 source = { editable = "." }
 dependencies = [
     { name = "msgspec", marker = "platform_python_implementation == 'CPython' and sys_platform != 'emscripten'" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -300,6 +301,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "msgspec", marker = "platform_python_implementation == 'CPython' and sys_platform != 'emscripten'", specifier = ">=0.22.0" },
+    { name = "urllib3", specifier = ">=2.2,<3" },
     { name = "msgspec", marker = "extra == 'msgspec'", specifier = ">=0.22.0" },
     { name = "whenever", marker = "extra == 'whenever'", specifier = ">=0.11" },
 ]
