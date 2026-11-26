@@ -65,6 +65,13 @@ All notable changes to FlpIt are documented here. The format follows
   exception and the objects in its frames were only freed by the cyclic garbage collector: the interop
   await kept the task in its frame and its callbacks. They are now freed as soon as the last reference goes.
 
+- `any(None)` and `all(None)` on `FlpIt` and `FlpList`, and `FlpList.exists(None)`, raise
+  `PredicateNoneError` (.NET `ArgumentNullException`). Before, they raised a plain `TypeError` once there was an
+  element, and returned `False` / `True` for an empty sequence.
+- `FlpIt.to_dictionary(key_selector, None)` and `FlpList.to_dictionary(key_selector, None)` raise
+  `ElementSelectorNoneError`, like `to_lookup` and `AsyncFlpIt.to_dictionary`. Before, they raised
+  `SelectorNoneError`.
+
 ### Added
 
 - `Task.from_result()`, `Task.from_exception()` and `Task.from_canceled()`: tasks that are already complete
@@ -158,17 +165,6 @@ All notable changes to FlpIt are documented here. The format follows
 - `lab/dotnet/AsyncStartOrder`: a C# program that checks the start order of async methods on .NET 8, 9 and 10, as
   the reference for the inline-start tests, and `lab/task/async_start_order.py`, which runs the same cases with
   flpit.
-
-## [Unreleased]
-
-### Fixed
-
-- `any(None)` and `all(None)` on `FlpIt` and `FlpList`, and `FlpList.exists(None)`, raise
-  `PredicateNoneError` (.NET `ArgumentNullException`). Before, they raised a plain `TypeError` once there was an
-  element, and returned `False` / `True` for an empty sequence.
-- `FlpIt.to_dictionary(key_selector, None)` and `FlpList.to_dictionary(key_selector, None)` raise
-  `ElementSelectorNoneError`, like `to_lookup` and `AsyncFlpIt.to_dictionary`. Before, they raised
-  `SelectorNoneError`.
 
 ## [0.4.1] - 2026-11-22
 
