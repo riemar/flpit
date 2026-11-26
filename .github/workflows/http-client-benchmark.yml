@@ -1,0 +1,49 @@
+name: HTTP client performance
+
+on:
+  push:
+    branches:
+      - feature/http-client-provisional
+  workflow_dispatch:
+
+concurrency:
+  group: http-client-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: HTTPX vs FlpIt HTTP client
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Run synchronous and asynchronous benchmarks
+        run: >-
+          uv run --frozen python benchmarks/scripts/http_client_bench.py
+          --requests 1000
+          --concurrent-requests 256
+          --workers 16
+          --repeats 5
+          --warmup 50
+          --out benchmark-results/http-client.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-client-benchmark
+          path: benchmark-results/http-client.json
+          if-no-files-found: error
