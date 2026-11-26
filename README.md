@@ -122,7 +122,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_first.py                                          |           8 |
 | │   ├── test_first_or_default.py                               |           8 |
 | │   ├── test_full_join.py                                      |          11 |
-| │   ├── test_group_by.py                                       |           5 |
+| │   ├── test_group_by.py                                       |           6 |
 | │   ├── test_group_join.py                                     |           9 |
 | │   ├── test_index.py                                          |           8 |
 | │   ├── test_intersect.py                                      |          12 |
@@ -131,9 +131,9 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_last_or_default.py                                |           8 |
 | │   ├── test_left_join.py                                      |          10 |
 | │   ├── test_max.py                                            |          11 |
-| │   ├── test_max_by.py                                         |          13 |
+| │   ├── test_max_by.py                                         |          12 |
 | │   ├── test_min.py                                            |          11 |
-| │   ├── test_min_by.py                                         |          13 |
+| │   ├── test_min_by.py                                         |          12 |
 | │   ├── test_of_type.py                                        |           5 |
 | │   ├── test_order_by.py                                       |          18 |
 | │   ├── test_prepend.py                                        |          19 |
@@ -167,7 +167,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_rendezvous_channel.py                             |         104 |
 | │   └── test_unbounded_channel.py                              |         338 |
 | ├── concurrent/                                                |             |
-| │   ├── test_concurrent_bag.py                                 |         130 |
+| │   ├── test_concurrent_bag.py                                 |         131 |
 | │   ├── test_concurrent_dictionary.py                          |          56 |
 | │   ├── test_concurrent_dictionary_generic.py                  |        1236 |
 | │   ├── test_concurrent_queue.py                               |         130 |
@@ -183,7 +183,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_chunk.py                                          |          22 |
 | │   ├── test_concat.py                                         |          64 |
 | │   ├── test_contains.py                                       |         108 |
-| │   ├── test_count.py                                          |          37 |
+| │   ├── test_count.py                                          |          64 |
 | │   ├── test_default_if_empty.py                               |          37 |
 | │   ├── test_distinct.py                                       |          87 |
 | │   ├── test_element_at.py                                     |          43 |
@@ -191,7 +191,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_first.py                                          |          29 |
 | │   ├── test_first_or_default.py                               |          50 |
 | │   ├── test_full_join.py                                      |          37 |
-| │   ├── test_generic_list.py                                   |          95 |
+| │   ├── test_generic_list.py                                   |          87 |
 | │   ├── test_group_by.py                                       |          23 |
 | │   ├── test_group_join.py                                     |          53 |
 | │   ├── test_index.py                                          |           6 |
@@ -200,23 +200,23 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_last.py                                           |          29 |
 | │   ├── test_last_or_default.py                                |          45 |
 | │   ├── test_left_join.py                                      |          47 |
-| │   ├── test_max.py                                            |        1100 |
-| │   ├── test_min.py                                            |         968 |
+| │   ├── test_max.py                                            |        1098 |
+| │   ├── test_min.py                                            |         966 |
 | │   ├── test_of_type.py                                        |          38 |
-| │   ├── test_order_by.py                                       |         100 |
-| │   ├── test_order_descending_by.py                            |          45 |
+| │   ├── test_order_by.py                                       |         104 |
+| │   ├── test_order_descending_by.py                            |          46 |
 | │   ├── test_reverse.py                                        |          35 |
-| │   ├── test_select.py                                         |         140 |
+| │   ├── test_select.py                                         |         143 |
 | │   ├── test_select_many.py                                    |          85 |
 | │   ├── test_single.py                                         |          34 |
 | │   ├── test_single_or_default.py                              |          48 |
-| │   ├── test_skip.py                                           |          75 |
+| │   ├── test_skip.py                                           |          77 |
 | │   ├── test_skip_last.py                                      |        1221 |
-| │   ├── test_sum.py                                            |         134 |
-| │   ├── test_take.py                                           |          39 |
+| │   ├── test_sum.py                                            |         154 |
+| │   ├── test_take.py                                           |          73 |
 | │   ├── test_take_last.py                                      |        1221 |
-| │   ├── test_then_by.py                                        |          40 |
-| │   ├── test_then_descending_by.py                             |          34 |
+| │   ├── test_then_by.py                                        |          38 |
+| │   ├── test_then_descending_by.py                             |          32 |
 | │   ├── test_to_dictionary.py                                  |          32 |
 | │   ├── test_to_list.py                                        |          40 |
 | │   ├── test_to_lookup.py                                      |          26 |
@@ -224,20 +224,26 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | │   ├── test_where.py                                          |          76 |
 | │   └── test_zip.py                                            |         101 |
 | ├── task/                                                      |             |
+| │   ├── test_aggregate_exception.py                            |           1 |
 | │   ├── test_cancellation.py                                   |          69 |
-| │   ├── test_task_completion_source.py                         |          26 |
+| │   ├── test_method_coverage.py                                |          30 |
+| │   ├── test_method_coverage_when_all.py                       |          13 |
+| │   ├── test_operation_canceled_exception.py                   |           0 |
+| │   ├── test_task_canceled_exception.py                        |           1 |
+| │   ├── test_task_completion_source.py                         |          25 |
+| │   ├── test_task_completion_source_tresult.py                 |           5 |
 | │   ├── test_task_continue_with.py                             |          15 |
 | │   ├── test_task_continue_with_func_and_action.py             |          16 |
 | │   ├── test_task_continue_with_func_and_action_args.py        |          20 |
 | │   ├── test_task_factory.py                                   |           3 |
-| │   ├── test_task_rt.py                                        |          13 |
-| │   ├── test_task_rt_core.py                                   |          27 |
+| │   ├── test_task_rt.py                                        |           7 |
+| │   ├── test_task_rt_core.py                                   |          32 |
 | │   └── test_task_wait_all_any.py                              |          62 |
 | └── threading/                                                 |             |
 |     ├── test_semaphore_slim.py                                 |          39 |
 |     ├── test_semaphore_slim_cancellation.py                    |           4 |
 |     └── test_thread_local.py                                   |          15 |
 --------------------------------------------------------------------------------
-| GRAND TOTALS                                                   |       10725 |
+| GRAND TOTALS                                                   |       10848 |
 ================================================================================
 ```
