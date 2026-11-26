@@ -12,6 +12,11 @@ from .headers import HttpHeaders
 from .messages import HttpCompletionOption, HttpRequestMessage, HttpResponseMessage
 from .transport import CancellationScope, Urllib3Transport
 
+
+def _token(token: CancellationToken | None) -> CancellationToken:
+    return token if token is not None else CancellationToken.none()
+
+
 class HttpMessageHandler(ABC):
     @abstractmethod
     def send_async(self, request: HttpRequestMessage,
