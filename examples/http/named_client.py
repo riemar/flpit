@@ -1,5 +1,6 @@
 """Demonstrate a named client and a delegating handler."""
 from flpit.http import DelegatingHandler, HttpClientFactory, HttpRequestMessage
+from flpit.task import CancellationTokenSource
 
 
 class ClientNameHandler(DelegatingHandler):
@@ -20,10 +21,11 @@ factory.add_http_message_handler(
 
 try:
     with factory.create_client("catalog") as client:
-        response = client.get_async("products").result()
+        cancellation = CancellationTokenSource()
+        response = client.get("products", token=cancellation.token)
         try:
             response.ensure_success_status_code()
-            print(response.content.read_as_string_async().result())
+            print(response.content.read_as_string(cancellation.token))
         finally:
             response.close()
 finally:
