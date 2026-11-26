@@ -246,3 +246,22 @@ def test_sync_stream_read_accepts_per_read_token(http_server: str) -> None:
         finally:
             stream.close()
             response.close()
+
+
+def test_sync_client_keeps_async_delegating_middleware(http_server: str) -> None:
+    from flpit.http import DelegatingHandler, HttpClientHandler
+
+    class _ProbeHandler(DelegatingHandler):
+        def __init__(self, inner_handler):
+            super().__init__(inner_handler)
+            self.called = False
+
+        def send_async(self, request, token=None):
+            self.called = True
+            return super().send_async(request, token)
+
+    handler = _ProbeHandler(HttpClientHandler())
+    with HttpClient(handler, base_address=http_server) as client:
+        response = client.get("/items")
+        response.close()
+        assert handler.called
