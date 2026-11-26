@@ -24,9 +24,68 @@ class IHttpClient(Protocol):
     max_response_content_buffer_size: int | None
     default_request_headers: HttpHeaders
 
+    def send(self, request: HttpRequestMessage, token: CancellationToken | None = None,
+             completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> HttpResponseMessage: ...
+    def get(self, uri: str, token: CancellationToken | None = None,
+            completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> HttpResponseMessage: ...
+    def post(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def put(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def delete(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def head(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def options(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def trace(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def connect(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def patch(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def post_as_json(self, uri: str, value: Any, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def put_as_json(self, uri: str, value: Any, token: CancellationToken | None = None) -> HttpResponseMessage: ...
+    def get_string(self, uri: str, token: CancellationToken | None = None) -> str: ...
+    def get_byte_array(self, uri: str, token: CancellationToken | None = None) -> bytes: ...
+    def get_stream(self, uri: str, token: CancellationToken | None = None) -> Any: ...
+    def get_from_json(self, uri: str, target_type: type[Any] | None = None,
+                      token: CancellationToken | None = None) -> Any: ...
+        def send(self, request: HttpRequestMessage,
+             token: CancellationToken | None = None) -> HttpResponseMessage:
+        if self._closed:
+            raise RuntimeError("HttpMessageInvoker is closed")
+        return self._handler.send(request, token)
+
     def send_async(self, request: HttpRequestMessage,
                    token: CancellationToken | None = None,
                    completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> Task[HttpResponseMessage]: ...
+    def get(self, uri: str, token: CancellationToken | None = None,
+            completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.GET, uri), token, completion_option)
+
+    def delete(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.DELETE, uri), token)
+
+    def head(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.HEAD, uri), token)
+
+    def options(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.OPTIONS, uri), token)
+
+    def trace(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.TRACE, uri), token)
+
+    def connect(self, uri: str, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.CONNECT, uri), token)
+
+    def post(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.POST, uri, content), token)
+
+    def put(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.PUT, uri, content), token)
+
+    def patch(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.send(HttpRequestMessage(HttpMethod.PATCH, uri, content), token)
+
+    def post_as_json(self, uri: str, value: Any, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.post(uri, JsonContent(value), token)
+
+    def put_as_json(self, uri: str, value: Any, token: CancellationToken | None = None) -> HttpResponseMessage:
+        return self.put(uri, JsonContent(value), token)
+
     def get_async(self, uri: str, token: CancellationToken | None = None,
                   completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> Task[HttpResponseMessage]: ...
     def post_async(self, uri: str, content: HttpContent,
@@ -41,6 +100,44 @@ class IHttpClient(Protocol):
     def patch_async(self, uri: str, content: HttpContent, token: CancellationToken | None = None) -> Task[HttpResponseMessage]: ...
     def post_as_json_async(self, uri: str, value: Any, token: CancellationToken | None = None) -> Task[HttpResponseMessage]: ...
     def put_as_json_async(self, uri: str, value: Any, token: CancellationToken | None = None) -> Task[HttpResponseMessage]: ...
+    def get_string(self, uri: str, token: CancellationToken | None = None) -> str:
+        actual = _token(token)
+        response = self.get(uri, actual)
+        try:
+            response.ensure_success_status_code()
+            return response.content.read_as_string(actual)
+        finally:
+            response.close()
+
+    def get_byte_array(self, uri: str, token: CancellationToken | None = None) -> bytes:
+        actual = _token(token)
+        response = self.get(uri, actual)
+        try:
+            response.ensure_success_status_code()
+            return response.content.read_as_bytes(actual)
+        finally:
+            response.close()
+
+    def get_stream(self, uri: str, token: CancellationToken | None = None) -> Any:
+        actual = _token(token)
+        response = self.get(uri, actual, HttpCompletionOption.RESPONSE_HEADERS_READ)
+        try:
+            response.ensure_success_status_code()
+            return response.content.read_as_stream(actual)
+        except BaseException:
+            response.close()
+            raise
+
+    def get_from_json(self, uri: str, target_type: type[Any] | None = None,
+                      token: CancellationToken | None = None) -> Any:
+        actual = _token(token)
+        response = self.get(uri, actual)
+        try:
+            response.ensure_success_status_code()
+            return response.content.read_from_json(target_type, actual)
+        finally:
+            response.close()
+
     def get_string_async(self, uri: str, token: CancellationToken | None = None) -> Task[str]: ...
     def get_byte_array_async(self, uri: str, token: CancellationToken | None = None) -> Task[bytes]: ...
     def get_stream_async(self, uri: str, token: CancellationToken | None = None) -> Task[Any]: ...
@@ -96,9 +193,16 @@ class HttpClient(HttpMessageInvoker):
         base = self.base_address if self.base_address.endswith("/") else self.base_address + "/"
         return urljoin(base, uri)
 
-    def send_async(self, request: HttpRequestMessage,
-                   token: CancellationToken | None = None,
-                   completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> Task[HttpResponseMessage]:
+    def send(self, request: HttpRequestMessage,
+             token: CancellationToken | None = None,
+             completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> HttpResponseMessage:
+        """Send an HTTP request synchronously, interruptible via a FLPIT token."""
+        self._prepare_request(request, token, completion_option)
+        return self._handler.send(request, _token(token))
+
+    def _prepare_request(self, request: HttpRequestMessage,
+                         token: CancellationToken | None,
+                         completion_option: HttpCompletionOption) -> None:
         if self._closed:
             raise RuntimeError("HttpClient is closed")
         if self.timeout is not None and self.timeout <= 0:
@@ -118,7 +222,12 @@ class HttpClient(HttpMessageInvoker):
         request._timeout = self.timeout
         request._completion_option = completion_option
         request._max_response_content_buffer_size = self.max_response_content_buffer_size
-        return self._handler.send_async(request, actual)
+
+    def send_async(self, request: HttpRequestMessage,
+                   token: CancellationToken | None = None,
+                   completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> Task[HttpResponseMessage]:
+        self._prepare_request(request, token, completion_option)
+        return self._handler.send_async(request, _token(token))
 
     def get_async(self, uri: str, token: CancellationToken | None = None,
                   completion_option: HttpCompletionOption = HttpCompletionOption.RESPONSE_CONTENT_READ) -> Task[HttpResponseMessage]:
