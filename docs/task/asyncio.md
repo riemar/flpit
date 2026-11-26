@@ -2,7 +2,7 @@
 
 !!! note "Provisional"
     `flpit.asyncio_bridge` (`provide`, `Loop`, `PerLoop`, `run_asyncio`, `configure`, `shutdown`) is provisional: its API may
-    still change in 0.5. The default backend on Linux drives CPython's asyncio internals; the `"threads"`
+    still change in 0.6. The default backend on Linux drives CPython's asyncio internals; the `"threads"`
     backend uses public asyncio API only and is the fallback should a Python release change them.
     `@asyncio_task` keeps its signature.
 

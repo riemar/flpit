@@ -5,11 +5,10 @@ All notable changes to FlpIt are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
+### Removed
 
-- `Task.from_result()`, `Task.from_exception()` and `Task.from_canceled()`: tasks that are already complete
-  (.NET `Task.FromResult` / `FromException` / `FromCanceled`). `from_exception()` fails the task even for an
-  `OperationCanceledError`, and `from_canceled()` requires a cancelled token, as in .NET.
+- `Task.asyncio_interop`: a Task can always be awaited inside asyncio coroutines now, so the switch has nothing
+  left to do (enabled, a flpit await costs within measurement noise of disabled).
 
 ### Fixed
 
@@ -68,6 +67,9 @@ All notable changes to FlpIt are documented here. The format follows
 
 ### Added
 
+- `Task.from_result()`, `Task.from_exception()` and `Task.from_canceled()`: tasks that are already complete
+  (.NET `Task.FromResult` / `FromException` / `FromCanceled`). `from_exception()` fails the task even for an
+  `OperationCanceledError`, and `from_canceled()` requires a cancelled token, as in .NET.
 - `flpit.asyncio_bridge`: values per loop without `LoopLocal` in user code. `provide(T, factory)` makes
   `Loop[T]` parameters of `@asyncio_task` functions receive the `T` of the loop the call runs on (the caller
   leaves them out; `= injected` tells type checkers so). `PerLoop[T]` is for objects that live longer than a
@@ -146,12 +148,6 @@ All notable changes to FlpIt are documented here. The format follows
   the socket in the IO thread's epoll itself, one-shot, so no command is queued and the IO thread is not
   woken to register it. Other platforms keep the `selectors` reactor, which no longer looks a socket up
   with `selector.get_key` (an exception per first wait) to learn whether it is registered.
-
-### Deprecated
-
-- `Task.asyncio_interop`: always `True`, and setting it has no effect; both emit a `DeprecationWarning`. It will
-  be removed in 0.5. The switch had nothing left to save: enabled, a flpit await costs within measurement noise
-  of disabled, and disabling it only made awaiting a Task inside asyncio code fail.
 
 ### Documentation
 
