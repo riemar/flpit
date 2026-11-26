@@ -23,6 +23,11 @@ class HttpMessageHandler(ABC):
                    token: CancellationToken | None = None) -> Task[HttpResponseMessage]:
         raise NotImplementedError
 
+    def send(self, request: HttpRequestMessage,
+             token: CancellationToken | None = None) -> HttpResponseMessage:
+        """Blocking compatibility path for async-only custom handlers."""
+        return self.send_async(request, token).result()
+
     def close(self) -> None:
         pass
 
@@ -36,6 +41,12 @@ class DelegatingHandler(HttpMessageHandler):
         if self.inner_handler is not None:
             raise RuntimeError("DelegatingHandler can only be attached once")
         self.inner_handler = inner_handler
+
+    def send(self, request: HttpRequestMessage,
+             token: CancellationToken | None = None) -> HttpResponseMessage:
+        if self._closed or self.inner_handler is None:
+            raise RuntimeError("DelegatingHandler is closed or has no inner handler")
+        return self.inner_handler.send(request, token)
 
     def send_async(self, request: HttpRequestMessage,
                    token: CancellationToken | None = None) -> Task[HttpResponseMessage]:
@@ -60,6 +71,15 @@ class HttpClientHandler(HttpMessageHandler):
             retries=retries, redirect=allow_auto_redirect,
         )
         self._closed = False
+
+    def send(self, request: HttpRequestMessage,
+             token: CancellationToken | None = None) -> HttpResponseMessage:
+        if self._closed:
+            raise RuntimeError("HttpClientHandler is closed")
+        actual = _token(token)
+        actual.throw_if_cancellation_requested()
+        request.mark_sent()
+        return self._send(request, actual)
 
     def send_async(self, request: HttpRequestMessage,
                    token: CancellationToken | None = None) -> Task[HttpResponseMessage]:
