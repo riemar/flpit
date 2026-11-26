@@ -12,6 +12,11 @@ from .handlers import HttpClientHandler, HttpMessageHandler
 from .headers import HttpHeaders
 from .messages import HttpCompletionOption, HttpMethod, HttpRequestMessage, HttpResponseMessage
 
+
+def _token(token: CancellationToken | None) -> CancellationToken:
+    return token if token is not None else CancellationToken.none()
+
+
 @runtime_checkable
 class IHttpClient(Protocol):
     base_address: str | None
