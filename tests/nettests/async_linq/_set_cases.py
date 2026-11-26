@@ -1,4 +1,14 @@
-"""[InlineData] rows shared by the migrated Except / ExceptBy / Intersect / Union / Concat theories."""
+"""
+Copyright (c) .NET Foundation and Contributors.
+Copyright (c) FlpIt
+SPDX-License-Identifier: MIT
+
+[InlineData] rows shared by the migrated Except / ExceptBy / Intersect / Union / Concat theories.
+
+Taken from the VariousValues_MatchesEnumerable rows, which are the same in ExceptTests.cs, ExceptByTests.cs,
+IntersectTests.cs, UnionTests.cs and ConcatTests.cs:
+https://github.com/dotnet/runtime/tree/main/src/libraries/System.Linq.AsyncEnumerable/tests
+"""
 from nettests.async_linq.async_helpers import INT_MAX, INT_MIN
 
 PAIRS = [

@@ -3,6 +3,14 @@
 All notable changes to FlpIt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `THIRD-PARTY-NOTICES.md`, shipped in the package: `flpit.channels` is ported from .NET's
+  `System.Threading.Channels` and the ported .NET tests come from `dotnet/runtime`, both MIT-licensed by the .NET
+  Foundation and Contributors. The package metadata uses an SPDX license expression (`License-Expression: MIT`).
+
 ## [0.5.0] - 2026-11-26
 
 ### Removed

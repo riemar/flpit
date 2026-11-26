@@ -4,7 +4,8 @@ version = "0.5.0"
 description = "Fluent LINQ for Python — flip your iterables"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 keywords = ["linq", "dotnet", "fluent", "iterable", "pipeline", "lazy-evaluation", "generators", "async", "async-enumerable", "task", "concurrency", "channels", "free-threaded", "json", "csv", "type-safe", "pyrefly"]
 classifiers = [
     "Development Status :: 4 - Beta",
