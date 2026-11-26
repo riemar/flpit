@@ -256,21 +256,6 @@ class _TaskMeta(type):
             _completed_task[0] = task
         return task
 
-    @property
-    def asyncio_interop(cls: "_TaskMeta") -> bool:
-        """Deprecated, always True: a Task can always be awaited inside asyncio coroutines."""
-        warnings.warn(_ASYNCIO_INTEROP_DEPRECATED, DeprecationWarning, stacklevel=2)
-        return True
-
-    @asyncio_interop.setter
-    def asyncio_interop(cls: "_TaskMeta", enabled: bool) -> None:
-        warnings.warn(_ASYNCIO_INTEROP_DEPRECATED + " Setting it has no effect.", DeprecationWarning, stacklevel=2)
-
-
-_ASYNCIO_INTEROP_DEPRECATED: Final = (
-    "Task.asyncio_interop is deprecated and will be removed in 0.5: awaiting a Task inside "
-    "asyncio coroutines always works, at no measurable cost to flpit awaits."
-)
 
 
 @dataclass(frozen=True)

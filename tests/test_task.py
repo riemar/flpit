@@ -788,20 +788,6 @@ def test_task_awaited_by_a_foreign_driver_names_what_it_needs() -> None:
         source.set_result(0)
 
 
-def test_asyncio_interop_is_deprecated_and_always_on() -> None:
-    with pytest.warns(DeprecationWarning, match="asyncio_interop is deprecated"):
-        assert Task.asyncio_interop is True
-    with pytest.warns(DeprecationWarning, match="Setting it has no effect"):
-        Task.asyncio_interop = False  # type: ignore[misc]
-    with pytest.warns(DeprecationWarning):
-        assert Task.asyncio_interop is True
-
-    async def iomain() -> None:
-        await Task.delay(0.01)
-
-    import asyncio
-    asyncio.run(iomain())  # still works after "disabling" it
-
 def test_task_in_asyncio_coroutine() -> None:
     import asyncio
     async def iomain():

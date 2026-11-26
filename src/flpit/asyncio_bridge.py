@@ -1,6 +1,6 @@
 """asyncio libraries on the flpit runtime: a pool of standard asyncio event loops.
 
-Provisional: the API of this module may change in 0.5. Prefer a library's sync client where one
+Provisional: the API of this module may change in 0.6. Prefer a library's sync client where one
 exists (``httpx.Client``, psycopg's ``ConnectionPool``): it is written for threads and can be shared.
 
 asyncio libraries (httpx, asyncpg, redis.asyncio, aiohttp, ...) need two things: a running
