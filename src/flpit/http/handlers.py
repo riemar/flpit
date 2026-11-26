@@ -46,6 +46,10 @@ class DelegatingHandler(HttpMessageHandler):
              token: CancellationToken | None = None) -> HttpResponseMessage:
         if self._closed or self.inner_handler is None:
             raise RuntimeError("DelegatingHandler is closed or has no inner handler")
+        # Preserve async-only middleware subclasses when they are used by the
+        # blocking API. The primary handler still performs native blocking I/O.
+        if type(self).send_async is not DelegatingHandler.send_async:
+            return self.send_async(request, token).result()
         return self.inner_handler.send(request, token)
 
     def send_async(self, request: HttpRequestMessage,
