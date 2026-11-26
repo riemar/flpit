@@ -15,6 +15,7 @@ import json
 import math
 import os
 import platform
+import socket
 import statistics
 import threading
 import time
@@ -33,6 +34,10 @@ BODY = b'{"ok":true,"message":"hello","count":42,"payload":"' + b"x" * 80 + b'"}
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     def do_GET(self) -> None:
         self.send_response(200)
