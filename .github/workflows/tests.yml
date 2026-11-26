@@ -58,3 +58,28 @@ jobs:
       # Benchmark and stress tests are deselected via addopts in pyproject.toml.
       - name: Run tests
         run: uv run --frozen pytest -ra -o log_cli=false
+
+  urllib3-future-bridge:
+    name: urllib3-future / FlpIt asyncio bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install locked project dependencies
+        run: uv sync --frozen
+
+      - name: Replace upstream urllib3 with urllib3-future
+        run: |
+          uv pip uninstall --python .venv/bin/python urllib3
+          uv pip install --python .venv/bin/python "urllib3-future>=2.6.900"
+
+      # Run the complete suite against urllib3-future. This also checks that its
+      # synchronous PoolManager remains compatible with FlpIt's blocking API.
+      - name: Run complete test suite with urllib3-future
+        run: uv run pytest -ra -o log_cli=false
