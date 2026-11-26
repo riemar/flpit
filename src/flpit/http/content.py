@@ -16,6 +16,11 @@ from .transport import CancellationScope
 
 T = TypeVar("T")
 
+
+def _token(token: CancellationToken | None) -> CancellationToken:
+    return token if token is not None else CancellationToken.none()
+
+
 class HttpContent:
     """HTTP request or response content with Task-returning async readers."""
     def __init__(self, data: bytes | None = None, *, raw_response: Any = None,
@@ -264,66 +269,5 @@ class StreamContent(HttpContent):
                 chunk = chunk.encode()
             chunks.append(bytes(chunk))
         return b"".join(chunks)
-
-
-class HttpRequestMessage:
-    def __init__(self, method: HttpMethod | str, request_uri: str,
-                 content: HttpContent | None = None) -> None:
-        if not request_uri:
-            raise ValueError("request_uri must not be empty")
-        self.method = method.value if isinstance(method, HttpMethod) else str(method).upper()
-        self.request_uri = request_uri
-        self.content = content
-        self.headers = HttpHeaders()
-        self.version = "HTTP/1.1"
-        self.version_policy = "exact"
-        self.options: dict[str, Any] = {}
-        self._timeout: float | None = 100.0
-        self._completion_option = HttpCompletionOption.RESPONSE_CONTENT_READ
-        self._max_response_content_buffer_size: int | None = 2**31 - 1
-        self._sent = False
-        self._lock = threading.Lock()
-
-    def mark_sent(self) -> None:
-        with self._lock:
-            if self._sent:
-                raise ValueError("An HttpRequestMessage cannot be sent more than once")
-            self._sent = True
-
-
-class HttpResponseMessage:
-    def __init__(self, status_code: int, content: HttpContent, *,
-                 reason_phrase: str = "", request_message: HttpRequestMessage | None = None,
-                 headers: HttpHeaders | None = None, version: str = "HTTP/1.1") -> None:
-        self.status_code = int(status_code)
-        self.reason_phrase = reason_phrase
-        self.request_message = request_message
-        self.headers = headers.copy() if headers else HttpHeaders()
-        self.content = content
-        self.version = version
-        self._closed = False
-
-    @property
-    def is_success_status_code(self) -> bool:
-        return 200 <= self.status_code <= 299
-
-    def ensure_success_status_code(self) -> HttpResponseMessage:
-        if not self.is_success_status_code:
-            raise HttpRequestException(
-                f"Response status code does not indicate success: {self.status_code} {self.reason_phrase}".rstrip(),
-                status_code=self.status_code,
-            )
-        return self
-
-    def close(self) -> None:
-        if not self._closed:
-            self._closed = True
-            self.content.close()
-
-    def __enter__(self) -> HttpResponseMessage:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
 
