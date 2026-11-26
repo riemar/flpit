@@ -205,7 +205,7 @@ def main() -> None:
                 walls = [wall for _, wall in trials]
                 latencies = [latency for sample, _ in trials for latency in sample]
                 results["sequential"][name] = _summary(
-                    latencies, args.requests * args.repeats, statistics.median(walls)
+                    latencies, args.requests, statistics.median(walls)
                 )
 
             concurrent_runners = {
