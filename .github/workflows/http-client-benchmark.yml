@@ -34,11 +34,11 @@ jobs:
       - name: Run synchronous and asynchronous benchmarks
         run: >-
           uv run --frozen python benchmarks/scripts/http_client_bench.py
-          --requests 250
-          --concurrent-requests 64
-          --workers 8
-          --repeats 3
-          --warmup 20
+          --requests 1000
+          --concurrent-requests 256
+          --workers 16
+          --repeats 5
+          --warmup 50
           --out benchmark-results/http-client.json
 
       - name: Upload benchmark results
