@@ -1,7 +1,7 @@
 """Short Task runtime snippets, included by docs/task/index.md."""
+# --8<-- [start:when_all]
 import time
 
-# --8<-- [start:when_all]
 from flpit.task import Task, task
 
 

@@ -1,21 +1,21 @@
 # FlpIt
 
+*Python that feels like .NET, until you miss the real thing.*
+
 **[📖 Documentation](https://riemar.github.io/flpit/)** | **[🌐 GitHub](https://github.com/riemar/flpit)** | **[📦 PyPI](https://pypi.org/project/flpit/)**
 
-> **Fluent LINQ for Python — LINQ semantics, Python-native execution**
+> **The .NET programming model for Python: LINQ, Tasks, async streams and channels, with .NET's semantics.**
 
-`FlpIt` brings a strongly typed, LINQ-style API to standard Python iterables. It combines the fluent query model and semantics of .NET LINQ with Python's native iterable and generator model.
+`FlpIt` brings .NET's programming model to Python, verified against more than 10,000 unit tests migrated from the .NET runtime. 
+Queries come with LINQ's operators and semantics over standard Python iterables. Around them come async streams (`AsyncFlpIt`), 
+an `asyncio`-free task runtime, channels, concurrent collections, and typed JSON and CSV serialization. 
+It is built for free-threaded Python and tested on 3.12 to 3.15t in CI.
 
-If you know C# LINQ, you already know most of FlpIt. Existing LINQ examples, query patterns and documentation can generally be translated directly, which makes the .NET LINQ ecosystem a valuable reference for developers and AI coding assistants alike.
+If you know C#, you already know most of FlpIt. Existing LINQ and TPL examples, query patterns and documentation can generally be translated directly, 
+which makes the .NET ecosystem a valuable reference for developers and AI coding assistants alike.
 
-Queries are the doorway. Around them FlpIt carries over other parts of the .NET programming model: async streams
-(`AsyncFlpIt`), typed JSON and CSV serialization, an `asyncio`-free task runtime, channels and concurrent collections. It is
-tested on free-threaded Python (>=3.14t) in CI.
-
-> **Semantic goal:** `flp` strives to faithfully reproduce .NET LINQ semantics.
-> Where Python's language or type system requires a different API contract, the contract is adapted accordingly,
-> and [each deviation is documented](https://riemar.github.io/flpit/semantics/differences/).
-> The implementation is actively developed, and further deviations may still exist.
+> **Semantic goal:** FlpIt reproduces .NET's semantics, checked by the migrated .NET tests,
+> and [each known deviation is documented](https://riemar.github.io/flpit/semantics/differences/).
 
 ## 💡 Quick Start
 
@@ -91,7 +91,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Migrated .NET Unit Tests
 
-> Migrated from the official .NET Runtime LINQ Tests.
+More than 10,000 test cases from the official .NET runtime test suites, migrated to Python and run on every commit against 6 interpreters, each on Linux, Windows and macOS.
+
 > Note: The test cases exercise both core types, `FlpIt` and `FlpList`, with transitions between lazy and eager execution occurring as part of the individual test cases.
 > `async_linq/` is migrated from the .NET 10 `System.Linq.AsyncEnumerable` tests and exercises `AsyncFlpIt` on the flpit task runtime.
 > `channels/` is migrated from the `System.Threading.Channels` tests; `concurrent/` from the `System.Collections.Concurrent` tests, including the shared `IEnumerable` / `ICollection` / `IDictionary` suites of `Common/tests` (ported to `common/`).
